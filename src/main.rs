@@ -6,22 +6,12 @@ mod razer;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    let device_pid = match razer::actions::init_device() { 
-        Ok(()) => {
-            let pid = razer::actions::device().info.pid;
-            println!("\n--- Detected Razer Device PID: {:0>4x?} ---", pid);
-            pid
-        },
-        Err(e) => {
-            println!("{:?}", e);
-            return Err(e);
-        }
-    };
+    let device_pid = razer::device_handle::device().get_pid();
 
     win::key_hook::init_keyboard_hooks(device_pid)?;
 
-    let _ = razer::actions::init_keyboard_state(true);
-    
+    let _ = razer::device_handle::device().initialize_keyboard();
+
     win::power::spawn_listener_thread()
 }
 

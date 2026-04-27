@@ -1,6 +1,7 @@
 use super::actions;
 use actions::AudioType;
 use crate::razer;
+use crate::razer::device_handle::{device};
 
 use std::collections::HashMap;
 use rdev::{grab, simulate, EventType, Event, Key};
@@ -8,11 +9,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use once_cell::sync::Lazy;
 use std::time::Duration;
 use std::thread;
-use anyhow::Result;
 use hidapi::{HidApi, HidDevice};
 
 
 pub static FN_PRESSED: AtomicBool = AtomicBool::new(false);
+pub static ALT_PRESSED: AtomicBool = AtomicBool::new(false);
 
 pub struct KeyCombo([Option<Key>; 4]);
 
@@ -46,11 +47,11 @@ impl<'a> IntoIterator for &'a KeyCombo {
 }
 
 pub struct KeyConfig {
-    pub normal_label: &'static str,
-    pub fn_label: &'static str,
-    pub fn_blocks_event: bool,
+    pub normal: &'static str,
+    pub special: &'static str,
+    pub default_original: bool,
     pub special_keys: KeyCombo,
-    pub func: Option<Box<dyn Fn() -> Result<()> + Send + Sync>>,
+    pub func: Option<Box<dyn Fn() -> () + Send + Sync>>,
 }
 
 impl KeyConfig {
@@ -64,47 +65,48 @@ impl KeyConfig {
 
 pub static KEY_MAP: Lazy<HashMap<Key, KeyConfig>> = Lazy::new(|| {
     HashMap::from([
-        (Key::KeyR, KeyConfig { normal_label: "R", fn_label: "FN + R", fn_blocks_event: true, special_keys: KeyCombo::new(&[]), func: None }),
-        (Key::KeyT, KeyConfig { normal_label: "T", fn_label: "FN + T", fn_blocks_event: true, special_keys: KeyCombo::new(&[Key::MetaLeft, Key::ControlLeft, Key::Unknown(135)]), func: None }),
-        (Key::KeyV, KeyConfig { normal_label: "V", fn_label: "FN + V", fn_blocks_event: true, special_keys: KeyCombo::new(&[]), func: Some(Box::new(|| razer::actions::toggle_vc_brightness())) }),
-        (Key::KeyB, KeyConfig { normal_label: "B", fn_label: "FN + B", fn_blocks_event: true, special_keys: KeyCombo::new(&[]), func: None }),
-        (Key::KeyP, KeyConfig { normal_label: "P", fn_label: "FN + P", fn_blocks_event: true, special_keys: KeyCombo::new(&[]), func: None }),
-        (Key::F1, KeyConfig { normal_label: "Mute", fn_label: "F1", fn_blocks_event: false, special_keys: KeyCombo::new(&[Key::Unknown(173)]), func: None }),
-        (Key::F2, KeyConfig { normal_label: "Vol-", fn_label: "F2", fn_blocks_event: false, special_keys: KeyCombo::new(&[Key::Unknown(174)]), func: None }),
-        (Key::F3, KeyConfig { normal_label: "Vol+", fn_label: "F3", fn_blocks_event: false, special_keys: KeyCombo::new(&[Key::Unknown(175)]), func: None }),
-        (Key::F4, KeyConfig { normal_label: "Project", fn_label: "F4", fn_blocks_event: false, special_keys: KeyCombo::new(&[Key::MetaLeft, Key::KeyP]), func: None }),
-        (Key::F5, KeyConfig { normal_label: "|◀◀", fn_label: "F5", fn_blocks_event: false, special_keys: KeyCombo::new(&[Key::Unknown(177)]), func: None }),
-        (Key::F6, KeyConfig { normal_label: "▶||", fn_label: "F6", fn_blocks_event: false, special_keys: KeyCombo::new(&[Key::Unknown(179)]), func: None }),
-        (Key::F7, KeyConfig { normal_label: "▶▶|", fn_label: "F7", fn_blocks_event: false, special_keys: KeyCombo::new(&[Key::Unknown(176)]), func: None }),
-        (Key::F8, KeyConfig { normal_label: "Brightness-", fn_label: "F8", fn_blocks_event: false, special_keys: KeyCombo::new(&[]), func: Some(Box::new(|| actions::adjust_brightness(-10) )) }),
-        (Key::F9, KeyConfig { normal_label: "Brightness+", fn_label: "F9", fn_blocks_event: false, special_keys: KeyCombo::new(&[]), func: Some(Box::new(|| actions::adjust_brightness(10) )) }),
-        (Key::F10, KeyConfig { normal_label: "Keyboard-", fn_label: "F10", fn_blocks_event: false, special_keys: KeyCombo::new(&[]), func: Some(Box::new(|| razer::actions::keyboard_light(false))) }),
-        (Key::F11, KeyConfig { normal_label: "Keyboard+", fn_label: "F11", fn_blocks_event: false, special_keys: KeyCombo::new(&[]), func: Some(Box::new(|| razer::actions::keyboard_light(true))) }),
-        (Key::F12, KeyConfig { normal_label: "prt sc", fn_label: "F12", fn_blocks_event: false, special_keys: KeyCombo::new(&[Key::PrintScreen]), func: None }),
+        (Key::Alt, KeyConfig { normal: "alt", special: "", default_original: true, special_keys: KeyCombo::new(&[]), func: Some(Box::new(|| {ALT_PRESSED.store(true, Ordering::SeqCst) } )) }),
+        (Key::KeyR, KeyConfig { normal: "R", special: "FN + R", default_original: true, special_keys: KeyCombo::new(&[]), func: None }),
+        (Key::KeyT, KeyConfig { normal: "T", special: "FN + T", default_original: true, special_keys: KeyCombo::new(&[Key::MetaLeft, Key::ControlLeft, Key::Unknown(135)]), func: None }),
+        (Key::KeyV, KeyConfig { normal: "V", special: "FN + V", default_original: true, special_keys: KeyCombo::new(&[]), func: Some(Box::new(|| device().toggle_vc())) }),
+        (Key::KeyB, KeyConfig { normal: "B", special: "FN + B", default_original: true, special_keys: KeyCombo::new(&[]), func: None }),
+        (Key::KeyP, KeyConfig { normal: "P", special: "FN + P", default_original: true, special_keys: KeyCombo::new(&[]), func: None }),
+        (Key::F1, KeyConfig { normal: "Mute", special: "F1", default_original: false, special_keys: KeyCombo::new(&[Key::Unknown(173)]), func: None }),
+        (Key::F2, KeyConfig { normal: "Vol-", special: "F2", default_original: false, special_keys: KeyCombo::new(&[Key::Unknown(174)]), func: None }),
+        (Key::F3, KeyConfig { normal: "Vol+", special: "F3", default_original: false, special_keys: KeyCombo::new(&[Key::Unknown(175)]), func: None }),
+        (Key::F4, KeyConfig { normal: "Project", special: "F4", default_original: false, special_keys: KeyCombo::new(&[Key::MetaLeft, Key::KeyP]), func: None }),
+        (Key::F5, KeyConfig { normal: "|◀◀", special: "F5", default_original: false, special_keys: KeyCombo::new(&[Key::Unknown(177)]), func: None }),
+        (Key::F6, KeyConfig { normal: "▶||", special: "F6", default_original: false, special_keys: KeyCombo::new(&[Key::Unknown(179)]), func: None }),
+        (Key::F7, KeyConfig { normal: "▶▶|", special: "F7", default_original: false, special_keys: KeyCombo::new(&[Key::Unknown(176)]), func: None }),
+        (Key::F8, KeyConfig { normal: "Brightness-", special: "F8", default_original: false, special_keys: KeyCombo::new(&[]), func: Some(Box::new(|| actions::adjust_brightness(-10) )) }),
+        (Key::F9, KeyConfig { normal: "Brightness+", special: "F9", default_original: false, special_keys: KeyCombo::new(&[]), func: Some(Box::new(|| actions::adjust_brightness(10) )) }),
+        (Key::F10, KeyConfig { normal: "Keyboard-", special: "F10", default_original: false, special_keys: KeyCombo::new(&[]), func: Some(Box::new(|| device().keyboard_light_down())) }),
+        (Key::F11, KeyConfig { normal: "Keyboard+", special: "F11", default_original: false, special_keys: KeyCombo::new(&[]), func: Some(Box::new(|| device().keyboard_light_up())) }),
+        (Key::F12, KeyConfig { normal: "prt sc", special: "F12", default_original: false, special_keys: KeyCombo::new(&[Key::PrintScreen]), func: None }),
     ])
 });
 
 pub static RAZER_KEY_MAP: Lazy<HashMap<u8, KeyConfig>> = Lazy::new(|| {
     HashMap::from([
-        (0x0a, KeyConfig { normal_label: "fn", fn_label: "", fn_blocks_event: false, special_keys: KeyCombo::new(&[]), func: Some(Box::new(|| {FN_PRESSED.store(true, Ordering::SeqCst); Ok(()) } )) }),
-        (0x00, KeyConfig { normal_label: "clear", fn_label: "", fn_blocks_event: false, special_keys: KeyCombo::new(&[]), func: Some(Box::new(|| {FN_PRESSED.store(false, Ordering::SeqCst); Ok(()) } )) }),
-        (0xd4, KeyConfig { normal_label: "Mic Mute Toggle", fn_label: "", fn_blocks_event: false, special_keys: KeyCombo::new(&[Key::Unknown(157)]), func: Some(Box::new(|| actions::toggle_audio_mute(AudioType::Mic))) }),
-        (0xdd, KeyConfig { normal_label: "Trackpad Toggle", fn_label: "", fn_blocks_event: false, special_keys: KeyCombo::new(&[Key::MetaLeft, Key::ControlLeft, Key::Unknown(135)]), func: None }),
-        (0xd3, KeyConfig { normal_label: "Performance Mode Cycle", fn_label: "", fn_blocks_event: false, special_keys: KeyCombo::new(&[]), func: None }),
-        (0x24, KeyConfig { normal_label: "M1", fn_label: "", fn_blocks_event: false, special_keys: KeyCombo::new(&[]), func: None }),
-        (0x25, KeyConfig { normal_label: "M2", fn_label: "", fn_blocks_event: false, special_keys: KeyCombo::new(&[]), func: None }),
-        (0x26, KeyConfig { normal_label: "M3", fn_label: "", fn_blocks_event: false, special_keys: KeyCombo::new(&[]), func: None }),
-        (0x27, KeyConfig { normal_label: "M4", fn_label: "", fn_blocks_event: false, special_keys: KeyCombo::new(&[]), func: None }),
-        (0x03, KeyConfig { normal_label: "Game Mode Toggle", fn_label: "", fn_blocks_event: false, special_keys: KeyCombo::new(&[]), func: None }),
-        (0xd2, KeyConfig { normal_label: "CoPilot", fn_label: "", fn_blocks_event: false, special_keys: KeyCombo::new(&[]), func: Some(Box::new(|| razer::actions::cycle_rgb_mode())) }),
-        (0xd5, KeyConfig { normal_label: "home", fn_label: "", fn_blocks_event: false, special_keys: KeyCombo::new(&[Key::Unknown(36)]), func: None }),
-        (0xd6, KeyConfig { normal_label: "up", fn_label: "", fn_blocks_event: false, special_keys: KeyCombo::new(&[Key::Unknown(38)]), func: None }),
-        (0xd7, KeyConfig { normal_label: "pg up", fn_label: "", fn_blocks_event: false, special_keys: KeyCombo::new(&[Key::Unknown(33)]), func: None }),
-        (0xd8, KeyConfig { normal_label: "left", fn_label: "", fn_blocks_event: false, special_keys: KeyCombo::new(&[Key::Unknown(37)]), func: None }),
-        (0xd9, KeyConfig { normal_label: "right", fn_label: "", fn_blocks_event: false, special_keys: KeyCombo::new(&[Key::Unknown(39)]), func: None }),
-        (0xda, KeyConfig { normal_label: "end", fn_label: "", fn_blocks_event: false, special_keys: KeyCombo::new(&[Key::Unknown(35)]), func: None }),
-        (0xdb, KeyConfig { normal_label: "down", fn_label: "", fn_blocks_event: false, special_keys: KeyCombo::new(&[Key::Unknown(40)]), func: None }),
-        (0xdc, KeyConfig { normal_label: "pg dn", fn_label: "", fn_blocks_event: false, special_keys: KeyCombo::new(&[Key::Unknown(34)]), func: None }),
+        (0x0a, KeyConfig { normal: "fn", special: "", default_original: false, special_keys: KeyCombo::new(&[]), func: Some(Box::new(|| {FN_PRESSED.store(true, Ordering::SeqCst) } )) }),
+        (0x00, KeyConfig { normal: "clear", special: "", default_original: false, special_keys: KeyCombo::new(&[]), func: Some(Box::new(|| {FN_PRESSED.store(false, Ordering::SeqCst) } )) }),
+        (0xd4, KeyConfig { normal: "Mic Mute Toggle", special: "", default_original: false, special_keys: KeyCombo::new(&[Key::Unknown(157)]), func: Some(Box::new(|| actions::toggle_audio_mute(AudioType::Mic))) }),
+        (0xdd, KeyConfig { normal: "Trackpad Toggle", special: "", default_original: false, special_keys: KeyCombo::new(&[Key::MetaLeft, Key::ControlLeft, Key::Unknown(135)]), func: None }),
+        (0xd3, KeyConfig { normal: "Performance Mode Cycle", special: "", default_original: false, special_keys: KeyCombo::new(&[]), func: None }),
+        (0x24, KeyConfig { normal: "M1", special: "", default_original: false, special_keys: KeyCombo::new(&[]), func: None }),
+        (0x25, KeyConfig { normal: "M2", special: "", default_original: false, special_keys: KeyCombo::new(&[]), func: None }),
+        (0x26, KeyConfig { normal: "M3", special: "", default_original: false, special_keys: KeyCombo::new(&[]), func: None }),
+        (0x27, KeyConfig { normal: "M4", special: "", default_original: false, special_keys: KeyCombo::new(&[]), func: None }),
+        (0x03, KeyConfig { normal: "Game Mode Toggle", special: "", default_original: false, special_keys: KeyCombo::new(&[]), func: None }),
+        (0xd2, KeyConfig { normal: "CoPilot", special: "", default_original: false, special_keys: KeyCombo::new(&[]), func: Some(Box::new(|| device().cycle_rgb_mode())) }),
+        (0xd5, KeyConfig { normal: "home", special: "", default_original: false, special_keys: KeyCombo::new(&[Key::Unknown(36)]), func: None }),
+        (0xd6, KeyConfig { normal: "up", special: "", default_original: false, special_keys: KeyCombo::new(&[Key::Unknown(38)]), func: None }),
+        (0xd7, KeyConfig { normal: "pg up", special: "", default_original: false, special_keys: KeyCombo::new(&[Key::Unknown(33)]), func: None }),
+        (0xd8, KeyConfig { normal: "left", special: "", default_original: false, special_keys: KeyCombo::new(&[Key::Unknown(37)]), func: None }),
+        (0xd9, KeyConfig { normal: "right", special: "", default_original: false, special_keys: KeyCombo::new(&[Key::Unknown(39)]), func: None }),
+        (0xda, KeyConfig { normal: "end", special: "", default_original: false, special_keys: KeyCombo::new(&[Key::Unknown(35)]), func: None }),
+        (0xdb, KeyConfig { normal: "down", special: "", default_original: false, special_keys: KeyCombo::new(&[Key::Unknown(40)]), func: None }),
+        (0xdc, KeyConfig { normal: "pg dn", special: "", default_original: false, special_keys: KeyCombo::new(&[Key::Unknown(34)]), func: None }),
     ])
 });
 
@@ -123,8 +125,8 @@ pub fn init_keyboard_hooks(device_pid: u16) -> anyhow::Result<()> {
                !device_api.read_timeout(&mut test_buf, 5).unwrap_err().to_string().contains("denied")
             {
                 opened_count += 1;
-                println!("SUCCESS: Opened Interface {} (Path: {:?})", iface_num, path);
-                spawn_special_key_listener_thread(device_api);
+                println!("Opened Interface {} (Path: {:?})", iface_num, path);
+                spawn_special_key_listener_thread(device_api, iface_num, path.to_string_lossy().into_owned());
             }
         } else {
             println!("LOCKED: Interface {}", iface_num);
@@ -141,27 +143,32 @@ pub fn init_keyboard_hooks(device_pid: u16) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn spawn_special_key_listener_thread(device_api: HidDevice) {
+pub fn spawn_special_key_listener_thread(device_api: HidDevice, iface_num: i32, path: String) {
     thread::spawn(move || {
         let mut buf = [0u8; 16];
-        let last_mic_muted = actions::is_audio_muted(AudioType::Mic);
-        let last_speakers_muted = actions::is_audio_muted(AudioType::Speakers);
-        let _ = razer::actions::set_mute_indicator(AudioType::Mic, last_mic_muted);
-        let _ = razer::actions::set_mute_indicator(AudioType::Speakers, last_speakers_muted);
-
         loop {
+            // Close interfaces as soon as we detect they are likely not the target
             if let Ok(len) = device_api.read(&mut buf) {
-                if len > 0 && buf[0] == 0x04 {
-                    if let Some(config) = RAZER_KEY_MAP.get(&buf[1]) {
-                        println!("{} DETECTED!", config.normal_label);
-                        config.trigger();
+                if len > 0 {
+                    if buf[0] == 0x04 {
+                        if let Some(config) = RAZER_KEY_MAP.get(&buf[1]) {
+                            println!("{} DETECTED!", config.normal);
+                            config.trigger();
+                        }
+                    } else if buf[0] == 0x01 {
+                        // pass - standard key codes
+                    } else {
+                        break;
                     }
+                } else {
+                    println!("noise?");
+                    break;
                 }
+            } else {
+                break;
             };
-
-            // Keep the loop fast but not burning 100% CPU
-            thread::sleep(Duration::from_millis(50));
-        }
+        };
+        println!("Closed Interface {} (Path: {:?})", iface_num, path);
     });
 }
 
@@ -180,18 +187,21 @@ fn standard_key_callback(event: Event) -> Option<Event> {
     if let EventType::KeyPress(key) = event.event_type {
         if let Some(config) = KEY_MAP.get(&key) {
             let is_fn = FN_PRESSED.load(Ordering::SeqCst);
-            
-            if is_fn {
-                println!("{} DETECTED!", config.fn_label);
-                if config.fn_blocks_event {
+            let is_alt = ALT_PRESSED.load(Ordering::SeqCst);
+
+            if is_alt { // Alt modifier key should use F keys even if they are set to defualt multimedia (e.g. Alt F4)
+                Some(event)
+            } else if is_fn {
+                println!("{} DETECTED!", config.special);
+                if config.default_original {
                     config.trigger();
                     None
                 } else {
                     Some(event)
                 }
             } else {
-                println!("{} DETECTED!", config.normal_label);
-                if config.fn_blocks_event {
+                println!("{} DETECTED!", config.normal);
+                if config.default_original {
                     Some(event)
                 } else {
                     config.trigger();
@@ -202,6 +212,11 @@ fn standard_key_callback(event: Event) -> Option<Event> {
             Some(event)
         }
     } else {
+        if let EventType::KeyRelease(key) = event.event_type {
+            if key == Key::Alt {
+                ALT_PRESSED.store(false, Ordering::SeqCst);
+            }
+        }       
         Some(event)
     }
 }
@@ -211,19 +226,19 @@ fn spawn_update_key_indicators_thread() {
         println!("\n--- Keyboard indicators update thread started. ---");
         let mut last_mic_muted = actions::is_audio_muted(AudioType::Mic);
         let mut last_speakers_muted = actions::is_audio_muted(AudioType::Speakers);
-        let _ = razer::actions::set_mute_indicator(AudioType::Mic, last_mic_muted);
-        let _ = razer::actions::set_mute_indicator(AudioType::Speakers, last_speakers_muted);
+        let _ = device().set_mic_mute_indicator(last_mic_muted);
+        let _ = device().set_speakers_mute_indicator(last_speakers_muted);
 
         loop {
             let mic_muted = actions::is_audio_muted(AudioType::Mic);
             if mic_muted != last_mic_muted {
-                let _ = razer::actions::set_mute_indicator(AudioType::Mic, mic_muted);
+                let _ = device().set_mic_mute_indicator(mic_muted);
             };
             last_mic_muted = mic_muted;
 
             let speakers_muted = actions::is_audio_muted(AudioType::Speakers);
             if speakers_muted != last_speakers_muted {
-                let _ = razer::actions::set_mute_indicator(AudioType::Speakers, speakers_muted);
+                let _ = device().set_speakers_mute_indicator(speakers_muted);
             };
             last_speakers_muted = speakers_muted;
 

@@ -23,8 +23,8 @@ pub enum AudioType {
     Mic = 2
 }
 
-pub fn adjust_brightness(change: i32) -> Result<()> {
-    if change == 0 { return Ok(()); }
+pub fn adjust_brightness(change: i32) {
+    if change == 0 { return; }
 
     // Logic: Spawn the async task and immediately return Ok
     std::thread::spawn(move || {
@@ -42,8 +42,6 @@ pub fn adjust_brightness(change: i32) -> Result<()> {
             }
         });
     });
-
-    Ok(())
 }
 
 fn get_audio_interface(io: AudioType) -> Option<&'static IAudioEndpointVolume> {
@@ -86,14 +84,20 @@ pub fn is_audio_muted(io: AudioType) -> bool {
     }
 }
 
-pub fn toggle_audio_mute(io: AudioType) -> anyhow::Result<()> {
+pub fn toggle_audio_mute(io: AudioType) {
     if let Some(volume) = get_audio_interface(io) {
         unsafe {
-            let current_mute = volume.GetMute()?.as_bool();
-            volume.SetMute(!current_mute, std::ptr::null())?;
-        }
-        Ok(())
+            if let Ok(current_mute) = volume.GetMute() {
+                current_mute.as_bool();
+                if let Err(err) = volume.SetMute(!current_mute, std::ptr::null()) {
+                    println!("Error setting {:?} endpoint mute", io);
+                    println!("{:?}", err);
+                }
+            } else {
+                println!("Error getting {:?} endpoint mute", io);
+            }
+        };
     } else {
-        Err(anyhow::anyhow!("Audio {:?} interface not available", io))
-    }
+        println!("Audio {:?} interface not available", io);
+    };
 }

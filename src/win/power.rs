@@ -97,11 +97,11 @@ pub fn spawn_listener_thread() -> anyhow::Result<()> {
                 match *lock {
                     PowerState::Sleep => {
                         println!("[!] State updated to SLEEP. Handling hardware shutdown...");
-                        let _ = razer::actions::keyboard_sleep();
+                        let _ = razer::device_handle::device().keyboard_sleep();
                     }
                     PowerState::Wake => {
                         println!("[+] State updated to WAKE. Handling hardware re-init...");
-                        let _ = razer::actions::init_keyboard_state(false);
+                        let _ = razer::device_handle::device().initialize_keyboard();
                         *lock = PowerState::Normal; // Reset state
                     }
                     _ => {}
