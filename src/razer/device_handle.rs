@@ -53,21 +53,21 @@ pub fn initialize_keyboard(device: &Device) {
     let _ = command(device, 0x030a, &[STATE_PWR.lock().unwrap().rgb_code(), 0]); // set effect
     // let _ = command(device, 0x0300, &[1, 38, STATE_PWR.lock().unwrap().last_vc_active as u8]);
     // let _ = command(device, 0x0303, &[1, 38, (STATE_PWR.lock().unwrap().last_vc_active as u8) * 255]);
-    let _ = set_keyboard_brightness(device, STATE_PWR.lock().unwrap().last_key_lvl); // set brightness
+    set_keyboard_brightness(device, STATE_PWR.lock().unwrap().last_key_lvl); // set brightness
 }
 
-fn keyboard_light(device: &Device, up: bool) -> () {
+fn keyboard_light(device: &Device, up: bool) {
     let level = get_keyboard_brightness(device) as f64;
     let level_discrete = (level / 51.0).round() as i32;
     let change = if up { 1 } else { -1 };
     let level_new = (level_discrete + change).clamp(0, 5) as u8 * 51;
-    let _ = set_keyboard_brightness(device, level_new);
+    set_keyboard_brightness(device, level_new);
     STATE_PWR.lock().unwrap().last_key_lvl = level_new;
 }
 
 pub fn keyboard_sleep(device: &Device) {
     let _ = command(device, 0x0004, &[0, 0]); // turn off keyboard
-    let _ = set_keyboard_brightness(device, 0);
+    set_keyboard_brightness(device, 0);
     let _ = command(device, 0x0303, &[1, 38, 0]); // set VC to 0 brightness
     // let _ = command(device, 0x0300, &[1, 38, 0]); // turn off VC
 }
@@ -190,25 +190,25 @@ fn handle_recv(device: &Device, rx: Receiver<DeviceCmd>) {
     while let Ok(cmd) = rx.recv() {
         match cmd {
             DeviceCmd::KeyboardLight(up) => {
-                let _ = keyboard_light(device, up);
+                keyboard_light(device, up);
             },
             DeviceCmd::GetPID(tx) => {
                 let _ = tx.send(device.info.pid);
             },
             DeviceCmd::InitializeKeyboard => {
-                let _ = initialize_keyboard(device);
+                initialize_keyboard(device);
             },
             DeviceCmd::KeyboardSleep => {
-                let _ = keyboard_sleep(device);
+                keyboard_sleep(device);
             }
             DeviceCmd::SetMuteIndicator(io, muted) => {
-                let _ = set_mute_indicator(device, io, muted);
+                set_mute_indicator(device, io, muted);
             },
             DeviceCmd::CycleRGBMode => {
-                let _ = cycle_rgb_mode(device);
+                cycle_rgb_mode(device);
             },
             DeviceCmd::ToggleVC => {
-                let _ = toggle_vc(device);
+                toggle_vc(device);
             }
             DeviceCmd::Shutdown => break,
         }

@@ -4,7 +4,6 @@ use windows::{
     Win32::Media::Audio::Endpoints::*,
     Win32::System::Com::*,
 };
-use anyhow::Result;
 use futures::stream::TryStreamExt;
 use pollster;
 use std::sync::OnceLock;

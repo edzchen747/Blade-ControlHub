@@ -32,11 +32,11 @@ static mut MAIN_HWND: HWND = HWND(null_mut());
 
 // --- WINDOWS CALLBACKS ---
 
-unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT { unsafe {
     DefWindowProcW(hwnd, msg, wparam, lparam)
-}
+}}
 
-unsafe extern "system" fn power_callback(_: *const std::ffi::c_void, event_type: u32, _: *const std::ffi::c_void) -> u32 {
+unsafe extern "system" fn power_callback(_: *const std::ffi::c_void, event_type: u32, _: *const std::ffi::c_void) -> u32 { unsafe {
     let mut lock = STATE_MANAGER.state.lock().unwrap();
     let mut should_notify = false;
 
@@ -57,7 +57,7 @@ unsafe extern "system" fn power_callback(_: *const std::ffi::c_void, event_type:
         let _ = PostMessageW(MAIN_HWND, WM_POWER_CHANGE, WPARAM(0), LPARAM(0));
     }
     0
-}
+}}
 
 pub fn spawn_listener_thread() -> anyhow::Result<()> {
     unsafe {
@@ -97,11 +97,11 @@ pub fn spawn_listener_thread() -> anyhow::Result<()> {
                 match *lock {
                     PowerState::Sleep => {
                         println!("[!] State updated to SLEEP. Handling hardware shutdown...");
-                        let _ = razer::device_handle::device().keyboard_sleep();
+                        razer::device_handle::device().keyboard_sleep();
                     }
                     PowerState::Wake => {
                         println!("[+] State updated to WAKE. Handling hardware re-init...");
-                        let _ = razer::device_handle::device().initialize_keyboard();
+                        razer::device_handle::device().initialize_keyboard();
                         *lock = PowerState::Normal; // Reset state
                     }
                     _ => {}

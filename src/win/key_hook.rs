@@ -51,14 +51,14 @@ pub struct KeyConfig {
     pub special: &'static str,
     pub default_original: bool,
     pub special_keys: KeyCombo,
-    pub func: Option<Box<dyn Fn() -> () + Send + Sync>>,
+    pub func: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
 impl KeyConfig {
     pub fn trigger(&self) {
         self.special_keys.trigger();
         if let Some(logic) = self.func.as_ref() {
-            let _ = logic();
+            logic();
         }
     }
 }
@@ -146,25 +146,21 @@ pub fn init_keyboard_hooks(device_pid: u16) -> anyhow::Result<()> {
 pub fn spawn_special_key_listener_thread(device_api: HidDevice, iface_num: i32, path: String) {
     thread::spawn(move || {
         let mut buf = [0u8; 16];
-        loop {
-            // Close interfaces as soon as we detect they are likely not the target
-            if let Ok(len) = device_api.read(&mut buf) {
-                if len > 0 {
-                    if buf[0] == 0x04 {
-                        if let Some(config) = RAZER_KEY_MAP.get(&buf[1]) {
-                            println!("{} DETECTED!", config.normal);
-                            config.trigger();
-                        }
-                    } else if buf[0] == 0x01 {
-                        // pass - standard key codes
-                    } else {
-                        break;
+        // Close interfaces as soon as we detect they are likely not the target
+        while let Ok(len) = device_api.read(&mut buf) {
+            if len > 0 {
+                if buf[0] == 0x04 {
+                    if let Some(config) = RAZER_KEY_MAP.get(&buf[1]) {
+                        println!("{} DETECTED!", config.normal);
+                        config.trigger();
                     }
+                } else if buf[0] == 0x01 {
+                    // pass - standard key codes
                 } else {
-                    println!("noise?");
                     break;
                 }
             } else {
+                println!("noise?");
                 break;
             };
         };
@@ -212,11 +208,10 @@ fn standard_key_callback(event: Event) -> Option<Event> {
             Some(event)
         }
     } else {
-        if let EventType::KeyRelease(key) = event.event_type {
-            if key == Key::Alt {
+        if let EventType::KeyRelease(key) = event.event_type
+            && key == Key::Alt {
                 ALT_PRESSED.store(false, Ordering::SeqCst);
-            }
-        }       
+            }       
         Some(event)
     }
 }
@@ -226,19 +221,19 @@ fn spawn_update_key_indicators_thread() {
         println!("\n--- Keyboard indicators update thread started. ---");
         let mut last_mic_muted = actions::is_audio_muted(AudioType::Mic);
         let mut last_speakers_muted = actions::is_audio_muted(AudioType::Speakers);
-        let _ = device().set_mic_mute_indicator(last_mic_muted);
-        let _ = device().set_speakers_mute_indicator(last_speakers_muted);
+        device().set_mic_mute_indicator(last_mic_muted);
+        device().set_speakers_mute_indicator(last_speakers_muted);
 
         loop {
             let mic_muted = actions::is_audio_muted(AudioType::Mic);
             if mic_muted != last_mic_muted {
-                let _ = device().set_mic_mute_indicator(mic_muted);
+                device().set_mic_mute_indicator(mic_muted);
             };
             last_mic_muted = mic_muted;
 
             let speakers_muted = actions::is_audio_muted(AudioType::Speakers);
             if speakers_muted != last_speakers_muted {
-                let _ = device().set_speakers_mute_indicator(speakers_muted);
+                device().set_speakers_mute_indicator(speakers_muted);
             };
             last_speakers_muted = speakers_muted;
 

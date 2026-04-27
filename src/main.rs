@@ -10,7 +10,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     win::key_hook::init_keyboard_hooks(device_pid)?;
 
-    let _ = razer::device_handle::device().initialize_keyboard();
+    razer::device_handle::device().initialize_keyboard();
 
     win::power::spawn_listener_thread()
 }
