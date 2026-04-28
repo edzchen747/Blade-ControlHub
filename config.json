@@ -1,0 +1,46 @@
+{
+  "power_state": {
+    "last_key_lvl": 255,
+    "rgb_effect": {
+      "index": 1,
+      "items": [
+        4,
+        1,
+        3
+      ]
+    },
+    "last_vc_lvl": 255,
+    "perf_mode": {
+      "index": 1,
+      "items": [
+        5,
+        6,
+        2,
+        1,
+        4
+      ]
+    }
+  },
+  "battery_state": {
+    "last_key_lvl": 255,
+    "rgb_effect": {
+      "index": 0,
+      "items": [
+        4,
+        1,
+        3
+      ]
+    },
+    "last_vc_lvl": 255,
+    "perf_mode": {
+      "index": 0,
+      "items": [
+        5,
+        6,
+        2,
+        1,
+        4
+      ]
+    }
+  }
+}

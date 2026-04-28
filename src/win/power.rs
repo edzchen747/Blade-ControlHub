@@ -1,113 +1,97 @@
-use crate::razer;
-
-use std::sync::{Arc, Mutex};
-use std::ptr::null_mut;
-use windows::core::PCWSTR;
-use windows::Win32::Foundation::{HWND, HANDLE, WPARAM, LPARAM, LRESULT};
-use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, RegisterClassW,
-    TranslateMessage, MSG, WNDCLASSW, WS_OVERLAPPED, DEVICE_NOTIFY_CALLBACK, 
-    PostMessageW, WM_USER,
-};
-use windows::Win32::System::Power::{
-    RegisterSuspendResumeNotification, DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS,
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows_sys::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    CreateWindowExA, DefWindowProcA, DispatchMessageA, GetMessageA, PBT_APMPOWERSTATUSCHANGE,
+    RegisterClassA, WM_POWERBROADCAST, WNDCLASSA,
 };
 
-// --- GLOBAL STATE MANAGER ---
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum PowerState { Normal, Sleep, Wake }
+pub static IS_PLUGGED_IN: AtomicBool = AtomicBool::new(false);
 
-pub struct StateManager {
-    state: Mutex<PowerState>,
+pub struct PowerMonitor {
+    _thread_handle: thread::JoinHandle<()>,
 }
 
-pub static STATE_MANAGER: once_cell::sync::Lazy<Arc<StateManager>> = once_cell::sync::Lazy::new(|| {
-    Arc::new(StateManager { state: Mutex::new(PowerState::Normal) })
-});
+impl PowerMonitor {
+    pub fn new() -> Self {
+        // Initial sync so the state is correct before the first event
+        Self::sync_power_state();
 
-// Custom Message ID to wake up the main loop
-const WM_POWER_CHANGE: u32 = WM_USER + 1;
-static mut MAIN_HWND: HWND = HWND(null_mut());
+        let handle = thread::spawn(move || {
+            unsafe {
+                let window_class = "PowerEventWindow\0".as_ptr();
+                let wnd_class = WNDCLASSA {
+                    lpfnWndProc: Some(power_wnd_proc),
+                    hInstance: 0,
+                    lpszClassName: window_class,
+                    ..std::mem::zeroed()
+                };
 
-// --- WINDOWS CALLBACKS ---
+                RegisterClassA(&wnd_class);
 
-unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT { unsafe {
-    DefWindowProcW(hwnd, msg, wparam, lparam)
-}}
+                // Create a "Message-Only" window (invisible, no UI)
+                let hwnd = CreateWindowExA(
+                    0,
+                    window_class,
+                    "\0".as_ptr(),
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    -3, // HWND_MESSAGE: Makes it a message-only window
+                    0,
+                    0,
+                    std::ptr::null(),
+                );
 
-unsafe extern "system" fn power_callback(_: *const std::ffi::c_void, event_type: u32, _: *const std::ffi::c_void) -> u32 { unsafe {
-    let mut lock = STATE_MANAGER.state.lock().unwrap();
-    let mut should_notify = false;
-
-    match event_type {
-        4 => { // PBT_APMSUSPEND
-            *lock = PowerState::Sleep;
-            should_notify = true;
-        }
-        18 => { // PBT_APMRESUMEAUTOMATIC
-            *lock = PowerState::Wake;
-            should_notify = true;
-        }
-        _ => {}
-    }
-
-    if should_notify {
-        // Ping the main loop to handle the state change
-        let _ = PostMessageW(MAIN_HWND, WM_POWER_CHANGE, WPARAM(0), LPARAM(0));
-    }
-    0
-}}
-
-pub fn spawn_listener_thread() -> anyhow::Result<()> {
-    unsafe {
-        let instance = GetModuleHandleW(None)?;
-        let class_name: Vec<u16> = "RazerPowerListener\0".encode_utf16().collect();
-        
-        let wnd_class = WNDCLASSW {
-            hInstance: instance.into(),
-            lpszClassName: PCWSTR(class_name.as_ptr()),
-            lpfnWndProc: Some(wnd_proc),
-            ..Default::default()
-        };
-        RegisterClassW(&wnd_class);
-
-        MAIN_HWND = CreateWindowExW(
-            Default::default(), PCWSTR(class_name.as_ptr()), PCWSTR(class_name.as_ptr()),
-            WS_OVERLAPPED, 0, 0, 0, 0, None, None, instance, None,
-        )?;
-
-        let params = Box::leak(Box::new(DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS {
-            Callback: Some(power_callback),
-            Context: null_mut(),
-        }));
-        
-        let _ = RegisterSuspendResumeNotification(HANDLE(params as *const _ as *mut _), DEVICE_NOTIFY_CALLBACK);
-
-        println!("\n--- Windows Power Monitor Started ---");
-
-        let mut msg = MSG::default();
-        while GetMessageW(&mut msg, HWND(null_mut()), 0, 0).as_bool() {
-            let _ = TranslateMessage(&msg);
-            let _ = DispatchMessageW(&msg);
-
-            // React only to our specific power change signal
-            if msg.message == WM_POWER_CHANGE {
-                let mut lock = STATE_MANAGER.state.lock().unwrap();
-                match *lock {
-                    PowerState::Sleep => {
-                        println!("[!] State updated to SLEEP. Handling hardware shutdown...");
-                        razer::device_handle::device().keyboard_sleep();
-                    }
-                    PowerState::Wake => {
-                        println!("[+] State updated to WAKE. Handling hardware re-init...");
-                        razer::device_handle::device().initialize_keyboard();
-                        *lock = PowerState::Normal; // Reset state
-                    }
-                    _ => {}
+                if hwnd == 0 {
+                    return;
                 }
+
+                // The Blocking Loop: GetMessageA blocks the thread until an event occurs
+                let mut msg = std::mem::zeroed();
+                while GetMessageA(&mut msg, hwnd, 0, 0) > 0 {
+                    DispatchMessageA(&msg);
+                }
+            }
+        });
+
+        Self {
+            _thread_handle: handle,
+        }
+    }
+
+    fn sync_power_state() {
+        unsafe {
+            let mut status: SYSTEM_POWER_STATUS = std::mem::zeroed();
+            if GetSystemPowerStatus(&mut status) != 0 {
+                IS_PLUGGED_IN.store(status.ACLineStatus == 1, Ordering::SeqCst);
             }
         }
     }
-    Ok(())
+}
+
+/// The callback Windows triggers when the invisible window receives a message
+unsafe extern "system" fn power_wnd_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    if msg == WM_POWERBROADCAST && wparam as u32 == PBT_APMPOWERSTATUSCHANGE {
+        // The OS is telling us something changed (plugged in, battery low, etc.)
+        let mut status: SYSTEM_POWER_STATUS = std::mem::zeroed();
+        if GetSystemPowerStatus(&mut status) != 0 {
+            let plugged_in = status.ACLineStatus == 1;
+            IS_PLUGGED_IN.store(plugged_in, Ordering::SeqCst);
+            println!(
+                "Event received: Power is now {}",
+                if plugged_in { "AC" } else { "Battery" }
+            );
+        }
+    }
+    // Let Windows handle the rest of the window overhead
+    DefWindowProcA(hwnd, msg, wparam, lparam)
 }
