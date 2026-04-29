@@ -3,10 +3,10 @@ use librazer::{device::Device, packet::Packet};
 use crate::{
     razer::{
         device_handle::DeviceCmd,
-        device_state::{AppConfig, save_config},
+        device_state::{AppConfig, persist_config},
     },
-    win::actions::AudioType,
-    win::persist::PersistBuffer,
+    ui::tray_icon,
+    win::{actions::AudioType, brightness::BrightnessWorker, persist::PersistBuffer},
 };
 use std::{sync::mpsc::Receiver, thread, time::Duration};
 
@@ -15,6 +15,7 @@ pub struct Executer<'a> {
     pub app_config: &'a mut AppConfig,
     pub persist_buffer: PersistBuffer,
     rx: Receiver<DeviceCmd>,
+    brightness_worker: BrightnessWorker,
 }
 
 impl<'a> Executer<'a> {
@@ -29,13 +30,14 @@ impl<'a> Executer<'a> {
             app_config,
             persist_buffer,
             rx,
+            brightness_worker: BrightnessWorker::new(),
         }
     }
     pub fn process_commands(&mut self) {
         while let Ok(cmd) = self.rx.recv() {
             match cmd {
-                DeviceCmd::KeyboardLight(up) => {
-                    self.keyboard_light(up);
+                DeviceCmd::AdjustKeyboardLight(up) => {
+                    self.adjust_keyboard_light(up);
                 }
                 DeviceCmd::GetPID(tx) => {
                     let _ = tx.send(self.device.info.pid);
@@ -44,10 +46,10 @@ impl<'a> Executer<'a> {
                     let _ = tx.send(self.get_perf_mode());
                 }
                 DeviceCmd::InitializeDevice => {
-                    self.initialize_device();
+                    self.initialize();
                 }
                 DeviceCmd::SleepDevice => {
-                    self.sleep_device();
+                    self.sleep();
                 }
                 DeviceCmd::SetMuteIndicator(io, muted) => {
                     self.set_mute_indicator(io, muted);
@@ -61,52 +63,62 @@ impl<'a> Executer<'a> {
                 DeviceCmd::ToggleVC => {
                     self.toggle_vc();
                 }
+                DeviceCmd::AdjustScreenBrightness(change) => {
+                    self.brightness_worker.adjust_screen_brightness(change);
+                }
+                DeviceCmd::SetScreenBrightness(value) => {
+                    self.brightness_worker.set_screen_brightness(value);
+                }
+                DeviceCmd::PersistConfig => {
+                    self.persist_config();
+                }
                 DeviceCmd::Shutdown => break,
+                _ => (),
             }
         }
         println!("All handles dropped. Handle thread exiting.");
     }
 
-    pub fn save_config(&self) {
-        save_config(self.app_config, &self.persist_buffer);
+    pub fn persist_config(&mut self) {
+        persist_config(self.app_config, &self.persist_buffer);
     }
 
     // internal functions
-    fn initialize_device(&mut self) {
+    fn initialize(&mut self) {
+        // Must set screen brightness first so SCREEN_TARGET_LVL is updated before next config persist
+        let screen_lvl = self.app_config.read().screen_lvl;
+        self.brightness_worker.set_screen_brightness(screen_lvl);
         let _ = command(self.device, 0x0004, &[3, 0]); // turn on keyboard
         let _ = command(self.device, 0x0206, &[0, 1]); // set multi media keys if configured
         // let _ = command(self.device, 0x0086, &[0, 0, 0]); // set multi media keys if configured
-        let rgb_effect = self.app_config.power_state.rgb_effect.value();
+        let rgb_effect = self.app_config.read().rgb_effect.value();
         let _ = command(self.device, 0x030a, &[rgb_effect, 0]); // set effect
         let _ = command(self.device, 0x0300, &[1, 38, 1]); // Turn on VC
-        let _ = command(
-            self.device,
-            0x0303,
-            &[1, 38, (self.app_config.power_state.last_vc_lvl)],
-        );
-        self.set_keyboard_brightness(self.app_config.power_state.last_key_lvl); // set brightness
-        let curr_perf_mode = self.app_config.power_state.perf_mode.value();
+        let vc_active = self.app_config.read().vc_lvl;
+        let _ = command(self.device, 0x0303, &[1, 38, vc_active]);
+        self.set_keyboard_brightness(self.app_config.read().key_lvl); // set brightness
+        let curr_perf_mode = self.app_config.read().perf_mode.value();
         self.set_perf_mode(curr_perf_mode);
     }
 
-    fn sleep_device(&self) {
+    fn sleep(&self) {
         // do not save any values
         let _ = command(self.device, 0x0004, &[0, 0]); // turn off keyboard
         let _ = command(self.device, 0x0303, &[1, 5, 0]); // set keyboard to 0 brightness
-        // VC brightness changes must be done in this order
+        // VC brightness changes must be done in this order turn off then set brightness to 0
         let _ = command(self.device, 0x0300, &[1, 38, 0]); // turn off VC
         let _ = command(self.device, 0x0303, &[1, 38, 0]); // set VC to 0 brightness
         let _ = command(self.device, 0x0d02, &[1, 0, 6, 0]); // set perf mode
     }
 
-    fn keyboard_light(&mut self, up: bool) {
+    fn adjust_keyboard_light(&mut self, up: bool) {
         let level = self.get_keyboard_brightness() as f64;
         let level_discrete = (level / 51.0).round() as i32;
         let change = if up { 1 } else { -1 };
         let level_new = (level_discrete + change).clamp(0, 5) as u8 * 51;
         self.set_keyboard_brightness(level_new);
-        self.app_config.power_state.last_key_lvl = level_new;
-        self.save_config();
+        self.app_config.get().key_lvl = level_new;
+        self.persist_config();
     }
 
     fn toggle_vc(&mut self) {
@@ -115,23 +127,23 @@ impl<'a> Executer<'a> {
         let new_brightness = if brightness > 0 { 0 } else { 255 };
         let _ = command(self.device, 0x0303, &[1, 38, new_brightness]);
         let _ = command(self.device, 0x0300, &[1, 38, new_brightness / 255]);
-        self.app_config.power_state.last_vc_lvl = new_brightness;
-        self.save_config();
+        self.app_config.get().vc_lvl = new_brightness;
+        self.persist_config();
     }
 
     fn cycle_rgb_mode(&mut self) {
-        let new_rgb_effect = self.app_config.power_state.rgb_effect.next();
+        let new_rgb_effect = self.app_config.get().rgb_effect.next();
         self.set_rgb_effect(new_rgb_effect);
     }
 
     fn set_rgb_effect(&mut self, rgb_effect: u8) {
         let _ = command(self.device, 0x030a, &[rgb_effect, 0]);
-        self.app_config.power_state.rgb_effect.set(&rgb_effect);
-        self.save_config();
+        self.app_config.get().rgb_effect.set(&rgb_effect);
+        self.persist_config();
     }
 
     fn cycle_perf_mode(&mut self) {
-        let new_perf_mode = self.app_config.power_state.perf_mode.next();
+        let new_perf_mode = self.app_config.get().perf_mode.next();
         self.set_perf_mode(new_perf_mode);
     }
 
@@ -141,13 +153,13 @@ impl<'a> Executer<'a> {
             .power_state
             .perf_mode
             .set(&self.get_perf_mode());
-        self.save_config();
+        self.persist_config();
     }
 
     fn set_keyboard_brightness(&mut self, brightness: u8) {
         let _ = command(self.device, 0x0303, &[1, 5, brightness]);
-        self.app_config.power_state.last_key_lvl = self.get_keyboard_brightness();
-        self.save_config();
+        self.app_config.get().key_lvl = self.get_keyboard_brightness();
+        self.persist_config();
     }
 
     fn get_keyboard_brightness(&self) -> u8 {
@@ -156,7 +168,7 @@ impl<'a> Executer<'a> {
 
     fn get_perf_mode(&self) -> u8 {
         let perf_mode = command(self.device, 0x0d82, &[0, 0, 0, 0]);
-        let proxy = crate::GUI_PROXY
+        let proxy = tray_icon::GUI_PROXY
             .get()
             .expect("Fatal internal error: get gui proxy");
         proxy

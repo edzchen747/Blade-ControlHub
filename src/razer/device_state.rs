@@ -1,9 +1,11 @@
-use crate::razer::executer::Executer;
+use crate::win::brightness::SCREEN_TARGET_LVL;
 use crate::win::persist::PersistBuffer;
+use crate::win::power::IS_PLUGGED_IN;
+use std::sync::atomic::Ordering;
 
 use serde::{Deserialize, Serialize};
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Read;
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct AppConfig {
@@ -12,32 +14,52 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
-    fn from(power_state: DeviceState, battery_state: DeviceState) -> Self {
+    fn new() -> Self {
+        Self::from(DeviceState::new(), DeviceState::new())
+    }
+
+    pub fn from(power_state: DeviceState, battery_state: DeviceState) -> Self {
         Self {
             power_state,
             battery_state,
         }
     }
-    fn new() -> Self {
-        Self::from(DeviceState::new(), DeviceState::new())
+
+    pub fn get(&mut self) -> &mut DeviceState {
+        match IS_PLUGGED_IN.load(Ordering::SeqCst) {
+            true => &mut self.power_state,
+            false => &mut self.battery_state,
+        }
+    }
+
+    pub fn read(&self) -> DeviceState {
+        let state_config = match IS_PLUGGED_IN.load(Ordering::SeqCst) {
+            true => &self.power_state,
+            false => &self.battery_state,
+        };
+        state_config.clone()
     }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct DeviceState {
-    pub last_key_lvl: u8,
+    pub key_lvl: u8,
     pub rgb_effect: CycleState<u8>,
-    pub last_vc_lvl: u8,
+    pub vc_lvl: u8,
     pub perf_mode: CycleState<u8>,
+    pub screen_lvl: u8,
+    pub screen_refresh: u32,
 }
 
 impl DeviceState {
     fn new() -> Self {
         Self {
-            last_key_lvl: 255,
+            key_lvl: 255,
             rgb_effect: CycleState::new(RGB_EFFECTS.to_vec()),
-            last_vc_lvl: 255,
+            vc_lvl: 255,
             perf_mode: CycleState::new(PERF_MODES.to_vec()),
+            screen_lvl: 100,
+            screen_refresh: 0,
         }
     }
 }
@@ -78,7 +100,7 @@ impl<T: Clone + PartialEq> CycleState<T> {
 }
 
 const RGB_EFFECTS: [u8; 3] = [4, 1, 3];
-const PERF_MODES: [u8; 5] = [5, 6, 2, 1, 4];
+const PERF_MODES: [u8; 6] = [5, 6, 0, 2, 1, 4];
 pub const CONFIG_PATH: &str = "config.json";
 
 pub fn load_config() -> AppConfig {
@@ -99,7 +121,8 @@ pub fn load_config() -> AppConfig {
     serde_json::from_str(&contents).unwrap_or_else(|_| AppConfig::new())
 }
 
-pub fn save_config(app_config: &AppConfig, persist_buffer: &PersistBuffer) {
+pub fn persist_config(app_config: &mut AppConfig, persist_buffer: &PersistBuffer) {
+    app_config.get().screen_lvl = SCREEN_TARGET_LVL.load(Ordering::SeqCst);
     if let Ok(json) = serde_json::to_string_pretty(app_config) {
         let _ = persist_buffer.write(json);
     }

@@ -191,7 +191,7 @@ pub static KEY_MAP: Lazy<HashMap<Key, KeyConfig>> = Lazy::new(|| {
                 special: "F8",
                 default_original: false,
                 special_keys: KeyCombo::new(&[]),
-                func: Some(Box::new(|| actions::adjust_brightness(-10))),
+                func: Some(Box::new(|| device().adjust_screen_brightness(-10))),
             },
         ),
         (
@@ -201,7 +201,7 @@ pub static KEY_MAP: Lazy<HashMap<Key, KeyConfig>> = Lazy::new(|| {
                 special: "F9",
                 default_original: false,
                 special_keys: KeyCombo::new(&[]),
-                func: Some(Box::new(|| actions::adjust_brightness(10))),
+                func: Some(Box::new(|| device().adjust_screen_brightness(10))),
             },
         ),
         (
@@ -432,7 +432,7 @@ pub static RAZER_KEY_MAP: Lazy<HashMap<u8, KeyConfig>> = Lazy::new(|| {
     ])
 });
 
-pub fn init_keyboard_hooks(device_pid: u16) -> anyhow::Result<()> {
+pub fn init_keyboard_hooks(device_pid: u16) {
     let api = HidApi::new().expect("Failed to init HID API");
     let mut opened_count = 0;
 
@@ -466,17 +466,13 @@ pub fn init_keyboard_hooks(device_pid: u16) -> anyhow::Result<()> {
         }
     }
 
-    if opened_count == 0 {
-        return Err(anyhow::anyhow!("No Razer interfaces were accessible."));
-    }
+    assert!(opened_count > 0, "No Razer interfaces were accessible.");
 
     println!(
         "\n--- {} HID listeners active. Keyboard (special key) hook thread started. ---",
         opened_count
     );
     spawn_standard_key_listener_thread();
-    spawn_update_key_indicators_thread();
-    Ok(())
 }
 
 pub fn spawn_special_key_listener_thread(device_api: HidDevice, iface_num: i32, path: String) {
@@ -555,30 +551,4 @@ fn standard_key_callback(event: Event) -> Option<Event> {
         }
         Some(event)
     }
-}
-
-fn spawn_update_key_indicators_thread() {
-    thread::spawn(|| {
-        println!("\n--- Keyboard indicators update thread started. ---");
-        let mut last_mic_muted = actions::is_audio_muted(AudioType::Mic);
-        let mut last_speakers_muted = actions::is_audio_muted(AudioType::Speakers);
-        device().set_mic_mute_indicator(last_mic_muted);
-        device().set_speakers_mute_indicator(last_speakers_muted);
-
-        loop {
-            let mic_muted = actions::is_audio_muted(AudioType::Mic);
-            if mic_muted != last_mic_muted {
-                device().set_mic_mute_indicator(mic_muted);
-            };
-            last_mic_muted = mic_muted;
-
-            let speakers_muted = actions::is_audio_muted(AudioType::Speakers);
-            if speakers_muted != last_speakers_muted {
-                device().set_speakers_mute_indicator(speakers_muted);
-            };
-            last_speakers_muted = speakers_muted;
-
-            thread::sleep(Duration::from_millis(100));
-        }
-    });
 }

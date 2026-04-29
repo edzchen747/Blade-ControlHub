@@ -1,7 +1,7 @@
 use brightness::Brightness;
-use futures::stream::TryStreamExt;
+use futures::stream::{StreamExt, TryStreamExt};
 use pollster;
-use std::sync::OnceLock;
+use std::sync::{OnceLock, atomic::AtomicI8};
 use windows::{Win32::Media::Audio::Endpoints::*, Win32::Media::Audio::*, Win32::System::Com::*};
 
 struct ComPtr<T>(pub T);
@@ -18,27 +18,14 @@ pub enum AudioType {
     Mic = 2,
 }
 
-pub fn adjust_brightness(change: i32) {
-    if change == 0 {
-        return;
-    }
-
-    // Logic: Spawn the async task and immediately return Ok
-    std::thread::spawn(move || {
-        pollster::block_on(async {
-            let result = brightness::brightness_devices()
-                .try_for_each(|mut dev| async move {
-                    let current = dev.get().await?;
-                    let new_value = (current as i32 + change).clamp(0, 100) as u32;
-                    dev.set(new_value).await
-                })
-                .await;
-
-            if let Err(e) = result {
-                eprintln!("Brightness error: {}", e);
-            }
-        });
-    });
+pub fn get_screen_brightness() -> u8 {
+    pollster::block_on(async {
+        let mut dev_stream = brightness::brightness_devices();
+        match dev_stream.next().await {
+            Some(Ok(dev)) => dev.get().await.unwrap_or(100) as u8,
+            _ => 0,
+        }
+    })
 }
 
 fn get_audio_interface(io: AudioType) -> Option<&'static IAudioEndpointVolume> {

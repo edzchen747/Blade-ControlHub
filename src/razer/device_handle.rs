@@ -7,21 +7,24 @@ use librazer::device::Device;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Sender};
 use std::thread;
 
-static SENDER: OnceLock<mpsc::Sender<DeviceCmd>> = OnceLock::new();
+static CMDS_TX: OnceLock<mpsc::Sender<DeviceCmd>> = OnceLock::new();
 
 pub enum DeviceCmd {
     InitializeDevice,
     SleepDevice,
-    KeyboardLight(bool),
+    AdjustKeyboardLight(bool),
     GetPID(mpsc::Sender<u16>),
     GetPerfMode(mpsc::Sender<u8>),
     SetMuteIndicator(AudioType, bool),
     CycleRGBMode,
     CyclePerfMode,
     ToggleVC,
+    AdjustScreenBrightness(i8),
+    SetScreenBrightness(u8),
+    PersistConfig,
     Shutdown,
 }
 
@@ -51,10 +54,10 @@ impl DeviceHandle {
         Ok(resp)
     }
     pub fn keyboard_light_up(&self) {
-        let _ = self.sender.send(DeviceCmd::KeyboardLight(true));
+        let _ = self.sender.send(DeviceCmd::AdjustKeyboardLight(true));
     }
     pub fn keyboard_light_down(&self) {
-        let _ = self.sender.send(DeviceCmd::KeyboardLight(false));
+        let _ = self.sender.send(DeviceCmd::AdjustKeyboardLight(false));
     }
     pub fn get_pid(&self) -> u16 {
         self.get(DeviceCmd::GetPID)
@@ -64,10 +67,10 @@ impl DeviceHandle {
         self.get(DeviceCmd::GetPerfMode)
             .expect("Get performance mode error")
     }
-    pub fn initialize_device(&self) {
+    pub fn initialize(&self) {
         let _ = self.sender.send(DeviceCmd::InitializeDevice);
     }
-    pub fn sleep_device(&self) {
+    pub fn sleep(&self) {
         let _ = self.sender.send(DeviceCmd::SleepDevice);
     }
     pub fn set_speakers_mute_indicator(&self, muted: bool) {
@@ -89,10 +92,16 @@ impl DeviceHandle {
     pub fn toggle_vc(&self) {
         let _ = self.sender.send(DeviceCmd::ToggleVC);
     }
+    pub fn adjust_screen_brightness(&self, change: i8) {
+        let _ = self.sender.send(DeviceCmd::AdjustScreenBrightness(change));
+    }
+    pub fn persist_config(&self) {
+        let _ = self.sender.send(DeviceCmd::PersistConfig);
+    }
 }
 
 pub fn device() -> DeviceHandle {
-    let tx = SENDER.get_or_init(|| {
+    let tx = CMDS_TX.get_or_init(|| {
         let (tx, rx) = mpsc::channel::<DeviceCmd>();
 
         thread::spawn(move || {
