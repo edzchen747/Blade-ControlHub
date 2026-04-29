@@ -68,9 +68,14 @@ impl TrayIcon {
                         match data {
                             255 => {
                                 println!("Menu: Quit clicked");
+                                device().persist_config();
                                 event_loop.exit();
                             }
-                            254 => restart_app(),
+                            254 => {
+                                println!("Restarting...");
+                                device().persist_config();
+                                restart_app()
+                            }
                             mode => {
                                 println!("Update: Switching to mode {}", mode);
                                 let hex = match mode {

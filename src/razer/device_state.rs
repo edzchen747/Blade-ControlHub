@@ -8,14 +8,21 @@ use std::fs::File;
 use std::io::Read;
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(default)]
 pub struct AppConfig {
     pub power_state: DeviceState,
     pub battery_state: DeviceState,
 }
 
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AppConfig {
     fn new() -> Self {
-        Self::from(DeviceState::new(), DeviceState::new())
+        Self::from(DeviceState::default(), DeviceState::default())
     }
 
     pub fn from(power_state: DeviceState, battery_state: DeviceState) -> Self {
@@ -42,26 +49,36 @@ impl AppConfig {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(default)]
 pub struct DeviceState {
     pub key_lvl: u8,
+    #[serde(default = "default_rgb_effect")]
     pub rgb_effect: CycleState<u8>,
     pub vc_lvl: u8,
+    #[serde(default = "default_perf_mode")]
     pub perf_mode: CycleState<u8>,
     pub screen_lvl: u8,
     pub screen_refresh: u32,
 }
 
-impl DeviceState {
-    fn new() -> Self {
+impl Default for DeviceState {
+    fn default() -> Self {
         Self {
             key_lvl: 255,
-            rgb_effect: CycleState::new(RGB_EFFECTS.to_vec()),
+            rgb_effect: default_rgb_effect(),
             vc_lvl: 255,
-            perf_mode: CycleState::new(PERF_MODES.to_vec()),
+            perf_mode: default_perf_mode(),
             screen_lvl: 100,
             screen_refresh: 0,
         }
     }
+}
+
+fn default_rgb_effect() -> CycleState<u8> {
+    CycleState::new(RGB_EFFECTS.to_vec())
+}
+fn default_perf_mode() -> CycleState<u8> {
+    CycleState::new(PERF_MODES.to_vec())
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -118,7 +135,7 @@ pub fn load_config() -> AppConfig {
 
     let mut contents = String::new();
     file.read_to_string(&mut contents).unwrap_or_default();
-    serde_json::from_str(&contents).unwrap_or_else(|_| AppConfig::new())
+    serde_json::from_str(&contents).unwrap()
 }
 
 pub fn persist_config(app_config: &mut AppConfig, persist_buffer: &PersistBuffer) {
@@ -126,9 +143,4 @@ pub fn persist_config(app_config: &mut AppConfig, persist_buffer: &PersistBuffer
     if let Ok(json) = serde_json::to_string_pretty(app_config) {
         let _ = persist_buffer.write(json);
     }
-}
-
-pub enum ChargeState {
-    Battery,
-    Power,
 }
