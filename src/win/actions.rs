@@ -1,8 +1,12 @@
 use brightness::Brightness;
-use futures::stream::{StreamExt, TryStreamExt};
+use futures::stream::StreamExt;
 use pollster;
-use std::sync::{OnceLock, atomic::AtomicI8};
+use std::sync::OnceLock;
 use windows::{Win32::Media::Audio::Endpoints::*, Win32::Media::Audio::*, Win32::System::Com::*};
+use winreg::RegKey;
+use winreg::enums::*;
+
+use crate::ui::{app_events::AppEvent, tray_app::tray_app};
 
 struct ComPtr<T>(pub T);
 unsafe impl<T> Send for ComPtr<T> {}
@@ -77,6 +81,12 @@ pub fn toggle_audio_mute(io: AudioType) {
                     println!("Error setting {:?} endpoint mute", io);
                     println!("{:?}", err);
                 }
+                match io {
+                    AudioType::Mic => {
+                        tray_app().send(AppEvent::MicMute(bool::from(!current_mute)));
+                    }
+                    _ => (),
+                };
             } else {
                 println!("Error getting {:?} endpoint mute", io);
             }
@@ -84,4 +94,22 @@ pub fn toggle_audio_mute(io: AudioType) {
     } else {
         println!("Audio {:?} interface not available", io);
     };
+}
+
+pub fn get_trackpad_state() -> bool {
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let path = r"Software\Microsoft\Windows\CurrentVersion\PrecisionTouchPad\Status";
+
+    if let Ok(key) = hkcu.open_subkey(path) {
+        match key.get_value::<u32, _>("Enabled") {
+            Ok(enabled) => enabled != 0,
+            Err(err) => {
+                println!("{}", err);
+                true
+            }
+        }
+    } else {
+        println!("Could not find PrecisionTouchPad registry key.");
+        true
+    }
 }

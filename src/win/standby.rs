@@ -121,6 +121,8 @@ pub fn spawn_listener_thread() {
 
             println!("\n--- Windows Standby Monitor Started ---");
 
+            let mut last_state = StandbyState::Wake;
+
             let mut msg = MSG::default();
             while GetMessageW(&mut msg, HWND(null_mut()), 0, 0).as_bool() {
                 let _ = TranslateMessage(&msg);
@@ -129,17 +131,22 @@ pub fn spawn_listener_thread() {
                 // React only to our specific standby change signal
                 if msg.message == WM_STANDBY_CHANGE {
                     let mut lock = STATE_MANAGER.state.lock().unwrap();
-                    match *lock {
-                        StandbyState::Sleep => {
-                            razer::device_handle::device().sleep();
-                            println!("[!] State updated to SLEEP. Handling hardware shutdown...");
-                        }
-                        StandbyState::Wake => {
-                            razer::device_handle::device().initialize();
-                            *lock = StandbyState::Normal; // Reset state
-                            println!("[+] State updated to WAKE. Handling hardware re-init...");
-                        }
-                        _ => {}
+                    if *lock != last_state {
+                        match *lock {
+                            StandbyState::Sleep => {
+                                razer::device_handle::device().sleep();
+                                println!(
+                                    "[!] State updated to SLEEP. Handling hardware shutdown..."
+                                );
+                            }
+                            StandbyState::Wake => {
+                                razer::device_handle::device().initialize();
+                                *lock = StandbyState::Normal; // Reset state
+                                println!("[+] State updated to WAKE. Handling hardware re-init...");
+                            }
+                            _ => {}
+                        };
+                        last_state = *lock;
                     }
                 }
             }

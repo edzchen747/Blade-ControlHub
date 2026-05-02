@@ -1,6 +1,9 @@
 use super::actions;
 use crate::razer;
 use crate::razer::device_handle::device;
+use crate::ui::app_events::AppEvent;
+use crate::ui::tray_app::tray_app;
+use crate::win::actions::get_trackpad_state;
 use actions::AudioType;
 
 use hidapi::{HidApi, HidDevice};
@@ -81,7 +84,9 @@ pub static KEY_MAP: Lazy<HashMap<Key, KeyConfig>> = Lazy::new(|| {
                 special: "FN + T",
                 default_original: true,
                 special_keys: KeyCombo::new(&[Key::MetaLeft, Key::ControlLeft, Key::Unknown(135)]),
-                func: None,
+                func: Some(Box::new(|| {
+                    tray_app().send(AppEvent::Trackpad(get_trackpad_state()))
+                })),
             },
         ),
         (
@@ -276,7 +281,9 @@ pub static RAZER_KEY_MAP: Lazy<HashMap<u8, KeyConfig>> = Lazy::new(|| {
                 special: "",
                 default_original: false,
                 special_keys: KeyCombo::new(&[Key::MetaLeft, Key::ControlLeft, Key::Unknown(135)]),
-                func: None,
+                func: Some(Box::new(|| {
+                    tray_app().send(AppEvent::Trackpad(get_trackpad_state()))
+                })),
             },
         ),
         (

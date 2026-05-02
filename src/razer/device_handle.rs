@@ -17,11 +17,11 @@ pub enum DeviceCmd {
     SleepDevice,
     AdjustKeyboardLight(bool),
     GetPID(mpsc::Sender<u16>),
-    GetPerfMode(mpsc::Sender<u8>),
+    GetPerfMode(mpsc::Sender<PerfMode>),
     SetMuteIndicator(AudioType, bool),
     CycleRGBMode,
     CyclePerfMode,
-    ToggleVC,
+    ToggleUnderGlow,
     AdjustScreenBrightness(i8),
     SetScreenBrightness(u8),
     PersistConfig,
@@ -63,7 +63,7 @@ impl DeviceHandle {
         self.get(DeviceCmd::GetPID)
             .expect("Device PID config error")
     }
-    pub fn get_perf_mode(&self) -> u8 {
+    pub fn get_perf_mode(&self) -> PerfMode {
         self.get(DeviceCmd::GetPerfMode)
             .expect("Get performance mode error")
     }
@@ -90,13 +90,16 @@ impl DeviceHandle {
         let _ = self.sender.send(DeviceCmd::CyclePerfMode);
     }
     pub fn toggle_vc(&self) {
-        let _ = self.sender.send(DeviceCmd::ToggleVC);
+        let _ = self.sender.send(DeviceCmd::ToggleUnderGlow);
     }
     pub fn adjust_screen_brightness(&self, change: i8) {
         let _ = self.sender.send(DeviceCmd::AdjustScreenBrightness(change));
     }
     pub fn persist_config(&self) {
         let _ = self.sender.send(DeviceCmd::PersistConfig);
+    }
+    pub fn shutdown(&self) {
+        let _ = self.sender.send(DeviceCmd::Shutdown);
     }
 }
 

@@ -3,9 +3,9 @@ use librazer::{device::Device, packet::Packet};
 use crate::{
     razer::{
         device_handle::DeviceCmd,
-        device_state::{AppConfig, persist_config},
+        device_state::{AppConfig, PerfMode, RGBEffect, persist_config},
     },
-    ui::tray_icon,
+    ui::{app_events::AppEvent, tray_app::tray_app},
     win::{actions::AudioType, brightness::BrightnessWorker, persist::PersistBuffer},
 };
 use std::{sync::mpsc::Receiver, thread, time::Duration};
@@ -60,19 +60,27 @@ impl<'a> Executer<'a> {
                 DeviceCmd::CyclePerfMode => {
                     self.cycle_perf_mode();
                 }
-                DeviceCmd::ToggleVC => {
-                    self.toggle_vc();
+                DeviceCmd::ToggleUnderGlow => {
+                    self.toggle_under_glow();
                 }
                 DeviceCmd::AdjustScreenBrightness(change) => {
                     self.brightness_worker.adjust_screen_brightness(change);
                 }
                 DeviceCmd::SetScreenBrightness(value) => {
-                    self.brightness_worker.set_screen_brightness(value);
+                    // for values greater than 100 set to config brightness
+                    let level = if value > 100 {
+                        self.app_config.read().screen_lvl
+                    } else {
+                        value
+                    };
+                    self.brightness_worker.set_screen_brightness(level);
                 }
                 DeviceCmd::PersistConfig => {
                     self.persist_config();
                 }
-                DeviceCmd::Shutdown => break,
+                DeviceCmd::Shutdown => {
+                    self.shutdown();
+                }
                 _ => (),
             }
         }
@@ -88,14 +96,13 @@ impl<'a> Executer<'a> {
         // Must set screen brightness first so SCREEN_TARGET_LVL is updated before next config persist
         let screen_lvl = self.app_config.read().screen_lvl;
         self.brightness_worker.set_screen_brightness(screen_lvl);
-        let _ = command(self.device, 0x0004, &[3, 0]); // turn on keyboard
-        let _ = command(self.device, 0x0206, &[0, 1]); // set multi media keys if configured
-        // let _ = command(self.device, 0x0086, &[0, 0, 0]); // set multi media keys if configured
+        self.multi_media_keys();
+        // let _ = command(self.device, 0x0086, &[0, 0, 0], None); // set multi media keys if configured
         let rgb_effect = self.app_config.read().rgb_effect.value();
-        let _ = command(self.device, 0x030a, &[rgb_effect, 0]); // set effect
-        let _ = command(self.device, 0x0300, &[1, 38, 1]); // Turn on VC
+        let _ = command(self.device, 0x030a, &[rgb_effect as u8, 0], None); // set effect
+        let _ = command(self.device, 0x0300, &[1, 38, 1], None); // Turn on Under Glow
         let vc_active = self.app_config.read().vc_lvl;
-        let _ = command(self.device, 0x0303, &[1, 38, vc_active]);
+        let _ = command(self.device, 0x0303, &[1, 38, vc_active], None);
         self.set_keyboard_brightness(self.app_config.read().key_lvl); // set brightness
         let curr_perf_mode = self.app_config.read().perf_mode.value();
         self.set_perf_mode(curr_perf_mode);
@@ -103,12 +110,12 @@ impl<'a> Executer<'a> {
 
     fn sleep(&self) {
         // do not save any values
-        let _ = command(self.device, 0x0004, &[0, 0]); // turn off keyboard
-        let _ = command(self.device, 0x0303, &[1, 5, 0]); // set keyboard to 0 brightness
-        // VC brightness changes must be done in this order turn off then set brightness to 0
-        let _ = command(self.device, 0x0300, &[1, 38, 0]); // turn off VC
-        let _ = command(self.device, 0x0303, &[1, 38, 0]); // set VC to 0 brightness
-        let _ = command(self.device, 0x0d02, &[1, 0, 6, 0]); // set perf mode
+        let _ = command(self.device, 0x0004, &[0, 0], None); // reset to default state
+        let _ = command(self.device, 0x0303, &[1, 5, 0], None); // set keyboard to 0 brightness
+        // Under Glow brightness changes must be done in this order turn off then set brightness to 0
+        let _ = command(self.device, 0x0300, &[1, 38, 0], None); // turn off Under Glow
+        let _ = command(self.device, 0x0303, &[1, 38, 0], None); // set Under Glow to 0 brightness
+        let _ = command(self.device, 0x0d02, &[1, 0, 6, 0], None); // set perf mode
     }
 
     fn adjust_keyboard_light(&mut self, up: bool) {
@@ -121,12 +128,13 @@ impl<'a> Executer<'a> {
         self.persist_config();
     }
 
-    fn toggle_vc(&mut self) {
+    fn toggle_under_glow(&mut self) {
         // limited to 0 and 100% brightness for now
-        let brightness = self.get_vc_brightness();
+        let brightness = self.get_under_glow_brightness();
         let new_brightness = if brightness > 0 { 0 } else { 255 };
-        let _ = command(self.device, 0x0303, &[1, 38, new_brightness]);
-        let _ = command(self.device, 0x0300, &[1, 38, new_brightness / 255]);
+        let _ = command(self.device, 0x0303, &[1, 38, new_brightness], None);
+        let _ = command(self.device, 0x0300, &[1, 38, new_brightness / 255], None);
+        tray_app().send(AppEvent::UnderGlow(new_brightness));
         self.app_config.get().vc_lvl = new_brightness;
         self.persist_config();
     }
@@ -136,10 +144,16 @@ impl<'a> Executer<'a> {
         self.set_rgb_effect(new_rgb_effect);
     }
 
-    fn set_rgb_effect(&mut self, rgb_effect: u8) {
-        let _ = command(self.device, 0x030a, &[rgb_effect, 0]);
+    fn set_rgb_effect(&mut self, rgb_effect: RGBEffect) {
+        let _ = command(self.device, 0x030a, &[rgb_effect as u8, 0], None);
         self.app_config.get().rgb_effect.set(&rgb_effect);
+        let effect = self.get_rgb_effect();
+        tray_app().send(AppEvent::RGBEffect(effect));
         self.persist_config();
+    }
+
+    fn get_rgb_effect(&self) -> RGBEffect {
+        command(self.device, 0x038a, &[0, 3], Some(0)).into()
     }
 
     fn cycle_perf_mode(&mut self) {
@@ -147,54 +161,71 @@ impl<'a> Executer<'a> {
         self.set_perf_mode(new_perf_mode);
     }
 
-    fn set_perf_mode(&mut self, perf_mode: u8) {
-        let _ = command(self.device, 0x0d02, &[1, 0, perf_mode, 0]);
-        self.app_config
-            .power_state
-            .perf_mode
-            .set(&self.get_perf_mode());
+    fn set_perf_mode(&mut self, perf_mode: PerfMode) {
+        println!("Set Perf Mode: {:?}", perf_mode.to_string());
+        let _ = command(self.device, 0x0d02, &[1, 0, perf_mode as u8, 0], None);
+        let perf_mode = self.get_perf_mode();
+        self.app_config.get().perf_mode.set(&perf_mode);
         self.persist_config();
     }
 
     fn set_keyboard_brightness(&mut self, brightness: u8) {
-        let _ = command(self.device, 0x0303, &[1, 5, brightness]);
-        self.app_config.get().key_lvl = self.get_keyboard_brightness();
+        let _ = command(self.device, 0x0303, &[1, 5, brightness], None);
+        let key_lvl = self.get_keyboard_brightness();
+        self.app_config.get().key_lvl = key_lvl;
         self.persist_config();
     }
 
     fn get_keyboard_brightness(&self) -> u8 {
-        command(self.device, 0x0383, &[1, 5, 0])
+        let brightness = command(self.device, 0x0383, &[1, 5, 0], Some(2));
+        tray_app().send(AppEvent::KeyboardBrightness(brightness));
+        brightness
     }
 
-    fn get_perf_mode(&self) -> u8 {
-        let perf_mode = command(self.device, 0x0d82, &[0, 0, 0, 0]);
-        let proxy = tray_icon::GUI_PROXY
-            .get()
-            .expect("Fatal internal error: get gui proxy");
-        proxy
-            .send_event(perf_mode)
-            .expect("Fatal internal error: gui proxy send");
+    fn get_perf_mode(&self) -> PerfMode {
+        let perf_mode: PerfMode = command(self.device, 0x0d82, &[0, 0, 0, 0], Some(2)).into();
+        tray_app().send(AppEvent::PerfMode(perf_mode));
         perf_mode
     }
 
-    fn get_vc_brightness(&self) -> u8 {
-        let brightness = command(self.device, 0x0383, &[1, 38, 0]);
-        let active = command(self.device, 0x0380, &[1, 38, 0]);
+    fn get_under_glow_brightness(&self) -> u8 {
+        let brightness = command(self.device, 0x0383, &[1, 38, 0], Some(2));
+        let active = command(self.device, 0x0380, &[1, 38, 0], Some(2));
         brightness * active
     }
 
     fn set_mute_indicator(&self, io: AudioType, muted: bool) {
-        let _ = command(self.device, 0x1804, &[0, io as u8, muted as u8]);
+        let _ = command(self.device, 0x1804, &[0, io as u8, muted as u8], None);
+    }
+
+    fn multi_media_keys(&self) {
+        let _ = command(self.device, 0x0004, &[3, 0], None);
+        let _ = command(self.device, 0x0206, &[0, 1], None);
+    }
+
+    fn multi_fn_keys(&self) {
+        let _ = command(self.device, 0x0004, &[0, 0], None);
+        let _ = command(self.device, 0x0206, &[0, 0], None);
+    }
+
+    fn shutdown(&self) {
+        self.multi_fn_keys();
     }
 }
 
-fn command(device: &Device, command: u16, args: &[u8]) -> u8 {
+fn command(device: &Device, command: u16, args: &[u8], result_idx: Option<usize>) -> u8 {
     for attempt in 1..=3 {
         let report = Packet::new(command, args);
         match device.send(report) {
             Ok(response) => {
-                if response.get_args().len() >= args.len() && response_valid(&response, args) {
-                    return response.get_args()[2];
+                if response.get_args().len() >= args.len()
+                    && response_valid(&response, args, result_idx)
+                {
+                    if let Some(idx) = result_idx {
+                        return response.get_args()[idx];
+                    } else {
+                        return 0;
+                    }
                 } else {
                     println!("Error: Response invalid");
                 }
@@ -210,12 +241,15 @@ fn command(device: &Device, command: u16, args: &[u8]) -> u8 {
     0
 }
 
-fn response_valid(response: &Packet, args: &[u8]) -> bool {
+fn response_valid(response: &Packet, args: &[u8], idx: Option<usize>) -> bool {
+    if idx.is_none() {
+        return true;
+    }
     response
         .get_args()
         .iter()
         .enumerate()
         .take(args.len())
-        .filter(|&(i, _)| i != 2) // SKIP index 2
+        .filter(|&(i, _)| i != idx.unwrap()) // SKIP index 2
         .all(|(i, &byte)| byte == args[i])
 }

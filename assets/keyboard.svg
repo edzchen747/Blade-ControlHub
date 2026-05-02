@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 550 550" width="128" height="128">
+  <g fill="#ffffff" transform="translate(0,70) scale(1.35) translate(-70.5,-20)">
+
+    <!-- Bottom row -->
+    <rect x="70"  y="270" width="120" height="22" rx="11"/>
+    <rect x="214" y="270" width="120" height="22" rx="11"/>
+    <rect x="358" y="270" width="120" height="22" rx="11"/>
+
+    <!-- Center vertical -->
+    <rect x="260" y="90" width="28" height="120" rx="14"/>
+
+    <!-- Left angled -->
+    <rect x="180" y="130" width="28" height="120" rx="14"
+          transform="rotate(-45 174 210)"/>
+
+    <!-- Right angled -->
+    <rect x="340" y="130" width="28" height="120" rx="14"
+          transform="rotate(45 374 210)"/>
+
+  </g>
+</svg>

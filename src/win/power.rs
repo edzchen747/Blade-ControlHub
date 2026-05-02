@@ -87,13 +87,16 @@ fn sync_power_state() {
         let mut status: SYSTEM_POWER_STATUS = std::mem::zeroed();
         if GetSystemPowerStatus(&mut status) != 0 {
             let plugged_in = status.ACLineStatus == 1;
-            IS_PLUGGED_IN.store(plugged_in, Ordering::SeqCst);
-            thread::spawn(move || {
-                for _ in 1..=2 {
+            let last_state = { IS_PLUGGED_IN.load(Ordering::SeqCst) };
+            if last_state != plugged_in {
+                IS_PLUGGED_IN.store(plugged_in, Ordering::SeqCst);
+                thread::spawn(move || {
+                    // Strange Windows behaviour - it will re-set brightness on unplug / plug,
+                    // so we delay to ensure our brightness action happens last
                     thread::sleep(Duration::from_millis(500));
                     device().initialize();
-                }
-            });
+                });
+            }
             println!(
                 "Power Event received: {}",
                 if plugged_in { "AC" } else { "Battery" }
