@@ -5,15 +5,14 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use eframe::egui;
-use tray_icon::{TrayIcon, TrayIconEvent};
+use tray_icon::TrayIcon;
 
-use crate::razer::device_handle::device;
 use crate::ui::app_events::*;
 use crate::ui::icon;
 use crate::ui::osd::*;
 
-static TRAY_APP_TX: OnceLock<Sender<AppEvent>> = OnceLock::new();
-static OSD_CONTEXT: OnceLock<egui::Context> = OnceLock::new();
+pub static TRAY_APP_TX: OnceLock<Sender<AppEvent>> = OnceLock::new();
+pub static OSD_CONTEXT: OnceLock<egui::Context> = OnceLock::new();
 
 pub trait OnceLockExt<T> {
     fn get_or_timeout(&self) -> Option<T>
@@ -57,20 +56,21 @@ struct TrayApp {
     rx: Receiver<AppEvent>,
     tray_icon: TrayIcon,
     osd_text: String,
-    osd_icon: Option<egui::Image<'static>>,
+    osd_icon_id: Option<OsdIconId>,
     osd_total_levels: u8,
     osd_curr_level: u8,
+    last_update: Instant,
 }
 
 impl eframe::App for TrayApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // --- 1. Poll signals ---
+        // --- Poll event signals ---
         while let Ok(event) = self.rx.try_recv() {
             let trigger_osd = process_event(
                 event,
                 &mut self.tray_icon,
                 &mut self.osd_text,
-                &mut self.osd_icon,
+                &mut self.osd_icon_id,
                 &mut self.osd_total_levels,
                 &mut self.osd_curr_level,
             );
@@ -79,14 +79,7 @@ impl eframe::App for TrayApp {
             }
         }
 
-        // --- 2. Poll Tray/Menu ---
-        while let Ok(event) = TrayIconEvent::receiver().try_recv() {
-            if matches!(event, TrayIconEvent::Click { .. }) {
-                device().get_perf_mode();
-            }
-        }
-
-        // --- 3. Animation Logic ---
+        // --- Animation Logic ---
         let target_alpha = match self.state {
             OSDState::FadingIn | OSDState::Active => 0.9,
             OSDState::FadingOut | OSDState::Hidden => 0.0,
@@ -101,20 +94,38 @@ impl eframe::App for TrayApp {
                     ctx.send_viewport_cmd(egui::ViewportCommand::MousePassthrough(true));
                     ctx.request_repaint();
                 } else {
-                    ctx.request_repaint_after(timeout.duration_since(now));
+                    ctx.request_repaint_after(
+                        timeout.duration_since(now) + Duration::from_millis(16),
+                    );
                 }
             }
         }
 
-        let diff = target_alpha - self.fade_alpha;
-        if diff.abs() > 0.001 {
-            let speed = if self.state == OSDState::FadingIn {
-                0.2
+        let now = Instant::now();
+        let dt = now.duration_since(self.last_update).as_secs_f32();
+        self.last_update = now;
+
+        let target_diff = target_alpha - self.fade_alpha;
+
+        if target_diff.abs() > 0.001 {
+            // Alpha change per second
+            // 2.0 means it takes 0.5s to go from 0.0 to 1.0
+            let change_per_sec = if self.state == OSDState::FadingIn {
+                255.0
             } else {
-                0.06
+                2.0
             };
-            self.fade_alpha += diff * speed;
-            ctx.request_repaint();
+
+            // Move towards target at a constant rate
+            let step = change_per_sec * dt;
+
+            if target_diff > 0.0 {
+                self.fade_alpha = (self.fade_alpha + step).min(target_alpha);
+            } else {
+                self.fade_alpha = (self.fade_alpha - step).max(target_alpha);
+            }
+
+            ctx.request_repaint(); // Request next frame immediately for smooth motion
         } else {
             self.fade_alpha = target_alpha;
             if self.state == OSDState::FadingIn {
@@ -125,7 +136,7 @@ impl eframe::App for TrayApp {
             }
         }
 
-        // --- 4. Centering ---
+        // --- Centering ---
         if (self.state == OSDState::FadingIn || self.state == OSDState::Active) && !self.is_centered
         {
             if let Some(screen_size) = ctx.input(|i| i.viewport().monitor_size) {
@@ -138,7 +149,7 @@ impl eframe::App for TrayApp {
             }
         }
 
-        // --- 5. Rendering ---
+        // --- Rendering ---
         if self.fade_alpha > 0.001 {
             let a = self.fade_alpha;
             let bg = egui::Color32::from_rgba_premultiplied(
@@ -174,24 +185,16 @@ impl eframe::App for TrayApp {
                             ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
                                 ui.add_space(10.0); // Top padding
 
-                                // Icon
-                                if self.osd_icon.is_some() {
-                                    ui.with_layout(
-                                        egui::Layout::top_down(egui::Align::Center),
-                                        |ui| {
-                                            ui.add_space(20.0);
-
-                                            let transparency_mask = egui::Color32::WHITE
-                                                .linear_multiply(self.fade_alpha);
-
-                                            let icon = self
-                                                .osd_icon
-                                                .clone()
-                                                .unwrap()
-                                                .tint(transparency_mask)
-                                                .fit_to_exact_size(egui::vec2(80.0, 80.0));
-                                            ui.add(icon);
-                                        },
+                                // Icon Rendering
+                                if let Some(id) = &self.osd_icon_id {
+                                    let (name, bytes) = get_icon_data(id);
+                                    let transparency_mask =
+                                        egui::Color32::WHITE.linear_multiply(self.fade_alpha);
+                                    ui.add_space(20.0);
+                                    ui.add(
+                                        egui::Image::from_bytes(name, bytes)
+                                            .max_size(egui::vec2(80.0, 80.0))
+                                            .tint(transparency_mask),
                                     );
                                 } else {
                                     ui.add_space(60.0);
@@ -292,6 +295,7 @@ pub fn run() {
                 .set(cc.egui_ctx.clone())
                 .expect("Fatal internal error: OSD Context initialize error");
             egui_extras::install_image_loaders(&cc.egui_ctx);
+
             Box::new(TrayApp {
                 state: OSDState::Hidden,
                 show_until: None,
@@ -300,9 +304,10 @@ pub fn run() {
                 rx,
                 tray_icon: icon::TrayIcon::new(),
                 osd_text: "Blade ControlHub".to_string(),
-                osd_icon: None,
+                osd_icon_id: None,
                 osd_total_levels: 0,
                 osd_curr_level: 0,
+                last_update: Instant::now(),
             })
         }),
     )

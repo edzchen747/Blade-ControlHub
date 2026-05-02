@@ -1,17 +1,15 @@
 use crate::razer::device_handle::device;
 use crate::razer::device_state::PerfMode;
 use crate::ui::app_events::{AppEvent, restart_app};
-use crate::ui::tray_app::tray_app;
+use crate::ui::tray_app::{TRAY_APP_TX, tray_app};
 
 use resvg::{tiny_skia, usvg};
-use std::sync::OnceLock;
 use std::thread;
-use std::time::{Duration, Instant};
+use tray_icon::TrayIconEvent;
 use tray_icon::{
     Icon, TrayIconBuilder,
     menu::{Menu, MenuEvent, MenuItem},
 };
-use winit::event_loop::EventLoop;
 
 // Use to reload instead of panicking
 pub trait OptionReload<T> {
@@ -70,6 +68,7 @@ impl TrayIcon {
             }
             _ => {}
         }));
+        detect_tray_activity_thread();
         tray_icon
     }
 }
@@ -123,22 +122,14 @@ fn load_tray_icon(hex_color: &str) -> Icon {
     Icon::from_rgba(rgba, width, height).expect("Failed to create tray icon")
 }
 
-pub fn get_or_timeout<T: Clone>(once_lock: &'static OnceLock<T>) -> Option<T> {
-    if let Some(v) = once_lock.get() {
-        return Some(v.clone());
-    }
-
-    let start_time = Instant::now();
-    let timeout = Duration::from_millis(500);
-    let poll_interval = Duration::from_millis(50);
-
-    loop {
-        thread::sleep(poll_interval);
-        if let Some(v) = once_lock.get() {
-            return Some(v.clone());
+fn detect_tray_activity_thread() {
+    thread::spawn(move || {
+        loop {
+            while let Ok(event) = TrayIconEvent::receiver().try_recv() {
+                if matches!(event, TrayIconEvent::Click { .. }) {
+                    device().get_perf_mode();
+                }
+            }
         }
-        if start_time.elapsed() >= timeout {
-            return None;
-        }
-    }
+    });
 }

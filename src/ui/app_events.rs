@@ -8,6 +8,16 @@ use crate::{
     ui::icon,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OsdIconId {
+    Brightness,
+    KeyboardBrightness,
+    MicMute(bool),
+    Trackpad(bool),
+    RGBEffect,
+    UnderGlow(bool),
+}
+
 pub enum AppEvent {
     ScreenBrightness(u8),
     KeyboardBrightness(u8),
@@ -24,82 +34,57 @@ pub fn process_event(
     event: AppEvent,
     tray_icon: &mut tray_icon::TrayIcon,
     osd_text: &mut String,
-    osd_icon: &mut Option<egui::Image<'static>>,
+    osd_icon_id: &mut Option<OsdIconId>,
     osd_total_levels: &mut u8,
     osd_curr_level: &mut u8,
 ) -> bool {
-    let (trigger_osd, text, icon, total_levels, curr_level): (
+    let (trigger_osd, text, icon_id, total_levels, curr_level): (
         bool,
         String,
-        Option<egui::Image<'static>>,
+        Option<OsdIconId>,
         u8,
         u8,
     ) = match event {
-        AppEvent::ScreenBrightness(lvl) => {
-            let icon = egui::Image::from_bytes(
-                "bytes://brightness.svg",
-                include_bytes!("../../assets/brightness.svg"),
-            );
-            (true, "".to_string(), Some(icon), 10, lvl / 10)
-        }
-        AppEvent::KeyboardBrightness(lvl) => {
-            let icon = egui::Image::from_bytes(
-                "bytes://keyboard.svg",
-                include_bytes!("../../assets/keyboard.svg"),
-            );
-            (true, "".to_string(), Some(icon), 5, lvl / 51)
-        }
+        AppEvent::ScreenBrightness(lvl) => (
+            true,
+            "".to_string(),
+            Some(OsdIconId::Brightness),
+            10,
+            lvl / 10,
+        ),
+        AppEvent::KeyboardBrightness(lvl) => (
+            true,
+            "".to_string(),
+            Some(OsdIconId::KeyboardBrightness),
+            5,
+            lvl / 51,
+        ),
         AppEvent::PerfMode(mode) => {
             icon::set_perf_mode_icon(tray_icon, mode);
             (true, mode.to_string(), None, 0, 0)
         }
-        AppEvent::MicMute(muted) => {
-            let mic_icon = match muted {
-                true => egui::Image::from_bytes(
-                    "bytes://mic_off.svg",
-                    include_bytes!("../../assets/mic_off.svg"),
-                ),
-                false => egui::Image::from_bytes(
-                    "bytes://mic.svg",
-                    include_bytes!("../../assets/mic.svg"),
-                ),
-            };
-            (true, "".to_string(), Some(mic_icon), 1, !muted as u8)
-        }
-        AppEvent::Trackpad(state) => {
-            let trackpad_icon = match state {
-                true => egui::Image::from_bytes(
-                    "bytes://trackpad.svg",
-                    include_bytes!("../../assets/trackpad.svg"),
-                ),
-                false => egui::Image::from_bytes(
-                    "bytes://trackpad_off.svg",
-                    include_bytes!("../../assets/trackpad_off.svg"),
-                ),
-            };
-            (true, "".to_string(), Some(trackpad_icon), 1, state as u8)
-        }
-        AppEvent::RGBEffect(effect) => {
-            let icon = egui::Image::from_bytes(
-                "bytes://rgb_effect.svg",
-                include_bytes!("../../assets/rgb_effect.svg"),
-            );
-            (true, effect.to_string(), Some(icon), 0, 0)
-        }
-        AppEvent::UnderGlow(lvl) => {
-            let under_glow_icon = if lvl > 0 {
-                egui::Image::from_bytes(
-                    "bytes://underglow.svg",
-                    include_bytes!("../../assets/underglow.svg"),
-                )
-            } else {
-                egui::Image::from_bytes(
-                    "bytes://underglow_off.svg",
-                    include_bytes!("../../assets/underglow_off.svg"),
-                )
-            };
-            (true, "".to_string(), Some(under_glow_icon), 1, lvl / 255)
-        }
+        AppEvent::MicMute(muted) => (
+            true,
+            "".to_string(),
+            Some(OsdIconId::MicMute(muted)),
+            1,
+            !muted as u8,
+        ),
+        AppEvent::Trackpad(state) => (
+            true,
+            "".to_string(),
+            Some(OsdIconId::Trackpad(state)),
+            1,
+            state as u8,
+        ),
+        AppEvent::RGBEffect(effect) => (true, effect.to_string(), Some(OsdIconId::RGBEffect), 0, 0),
+        AppEvent::UnderGlow(lvl) => (
+            true,
+            "".to_string(),
+            Some(OsdIconId::UnderGlow(lvl > 0)),
+            1,
+            lvl / 255,
+        ),
         AppEvent::Quit => {
             device().shutdown();
             std::process::exit(0);
@@ -109,12 +94,50 @@ pub fn process_event(
     };
     if trigger_osd {
         osd_text.clear();
-        osd_text.push_str(&text.to_string());
-        *osd_icon = icon;
+        osd_text.push_str(&text);
+        *osd_icon_id = icon_id;
         *osd_total_levels = total_levels;
         *osd_curr_level = curr_level;
     }
     trigger_osd
+}
+
+pub fn get_icon_data(id: &OsdIconId) -> (&'static str, &'static [u8]) {
+    match id {
+        OsdIconId::Brightness => (
+            "bytes://brightness.svg",
+            include_bytes!("../../assets/brightness.svg"),
+        ),
+        OsdIconId::KeyboardBrightness => (
+            "bytes://keyboard.svg",
+            include_bytes!("../../assets/keyboard.svg"),
+        ),
+        OsdIconId::MicMute(false) => ("bytes://mic.svg", include_bytes!("../../assets/mic.svg")),
+        OsdIconId::MicMute(true) => (
+            "bytes://mic_off.svg",
+            include_bytes!("../../assets/mic_off.svg"),
+        ),
+        OsdIconId::Trackpad(true) => (
+            "bytes://trackpad.svg",
+            include_bytes!("../../assets/trackpad.svg"),
+        ),
+        OsdIconId::Trackpad(false) => (
+            "bytes://trackpad_off.svg",
+            include_bytes!("../../assets/trackpad_off.svg"),
+        ),
+        OsdIconId::RGBEffect => (
+            "bytes://rgb_effect.svg",
+            include_bytes!("../../assets/rgb_effect.svg"),
+        ),
+        OsdIconId::UnderGlow(true) => (
+            "bytes://underglow.svg",
+            include_bytes!("../../assets/underglow.svg"),
+        ),
+        OsdIconId::UnderGlow(false) => (
+            "bytes://underglow_off.svg",
+            include_bytes!("../../assets/underglow_off.svg"),
+        ),
+    }
 }
 
 pub fn restart_app(code: i32) -> ! {
