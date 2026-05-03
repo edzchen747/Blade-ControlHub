@@ -6,8 +6,12 @@ use crate::{
         device_state::{AppConfig, PerfMode, RGBEffect, persist_config},
     },
     ui::{app_events::AppEvent, tray_app::tray_app},
-    win::{actions::AudioType, brightness::BrightnessWorker, persist::PersistBuffer},
+    win::{
+        actions::AudioType, brightness::BrightnessWorker, display::DisplayManager,
+        persist::PersistBuffer,
+    },
 };
+use std::time::Instant;
 use std::{sync::mpsc::Receiver, thread, time::Duration};
 
 pub struct Executer<'a> {
@@ -16,6 +20,8 @@ pub struct Executer<'a> {
     pub persist_buffer: PersistBuffer,
     rx: Receiver<DeviceCmd>,
     brightness_worker: BrightnessWorker,
+    display_manager: DisplayManager,
+    refresh_cycle_timeout: Instant,
 }
 
 impl<'a> Executer<'a> {
@@ -31,6 +37,8 @@ impl<'a> Executer<'a> {
             persist_buffer,
             rx,
             brightness_worker: BrightnessWorker::new(),
+            display_manager: DisplayManager::new().expect("Error: No displays found"),
+            refresh_cycle_timeout: Instant::now(),
         }
     }
     pub fn process_commands(&mut self) {
@@ -67,13 +75,14 @@ impl<'a> Executer<'a> {
                     self.brightness_worker.adjust_screen_brightness(change);
                 }
                 DeviceCmd::SetScreenBrightness(value) => {
-                    // for values greater than 100 set to config brightness
-                    let level = if value > 100 {
-                        self.app_config.read().screen_lvl
-                    } else {
-                        value
-                    };
-                    self.brightness_worker.set_screen_brightness(level);
+                    self.brightness_worker
+                        .set_screen_brightness(value.clamp(0, 100));
+                }
+                DeviceCmd::GetRefreshRate(tx) => {
+                    let _ = tx.send(self.get_refresh_rate());
+                }
+                DeviceCmd::CycleRefreshRate => {
+                    self.cycle_refresh_rate();
                 }
                 DeviceCmd::PersistConfig => {
                     self.persist_config();
@@ -106,6 +115,10 @@ impl<'a> Executer<'a> {
         self.set_keyboard_brightness(self.app_config.read().key_lvl); // set brightness
         let curr_perf_mode = self.app_config.read().perf_mode.value();
         self.set_perf_mode(curr_perf_mode);
+        let refresh_rate = self.app_config.read().screen_refresh;
+        if refresh_rate != 0 {
+            self.set_refresh_rate(refresh_rate);
+        }
     }
 
     fn sleep(&self) {
@@ -206,6 +219,44 @@ impl<'a> Executer<'a> {
     fn multi_fn_keys(&self) {
         let _ = command(self.device, 0x0004, &[0, 0], None);
         let _ = command(self.device, 0x0206, &[0, 0], None);
+    }
+
+    fn get_refresh_rate(&mut self) -> u32 {
+        let current = self.display_manager.get_current_rate();
+        let supported = self.display_manager.get_supported_rates();
+        let level = 1 + supported
+            .iter()
+            .position(|&rate| rate == current)
+            .unwrap_or(0);
+        tray_app().send(AppEvent::RefreshRate(
+            current,
+            level as u8,
+            supported.len() as u8,
+        ));
+        self.app_config.get().screen_refresh = current;
+        self.persist_config();
+        self.refresh_cycle_timeout = Instant::now() + Duration::from_millis(1500);
+        current
+    }
+
+    fn cycle_refresh_rate(&mut self) {
+        if Instant::now() < self.refresh_cycle_timeout {
+            let _ = self.display_manager.cycle_refresh_rate();
+        }
+        self.get_refresh_rate();
+    }
+
+    fn set_refresh_rate(&mut self, refresh_rate: u32) {
+        if self
+            .display_manager
+            .get_supported_rates()
+            .contains(&refresh_rate)
+        {
+            if self.display_manager.get_current_rate() != refresh_rate {
+                let _ = self.display_manager.set_refresh_rate(refresh_rate);
+                self.get_refresh_rate();
+            }
+        }
     }
 
     fn shutdown(&self) {

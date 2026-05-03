@@ -24,6 +24,8 @@ pub enum DeviceCmd {
     ToggleUnderGlow,
     AdjustScreenBrightness(i8),
     SetScreenBrightness(u8),
+    GetRefreshRate(mpsc::Sender<u32>),
+    CycleRefreshRate,
     PersistConfig,
     Shutdown,
 }
@@ -94,6 +96,15 @@ impl DeviceHandle {
     }
     pub fn adjust_screen_brightness(&self, change: i8) {
         let _ = self.sender.send(DeviceCmd::AdjustScreenBrightness(change));
+    }
+    pub fn get_refresh_rate(&self) -> u32 {
+        self.get(DeviceCmd::GetRefreshRate)
+            .expect("Get refresh rate error")
+    }
+    pub fn cycle_refresh_rate(&self) {
+        self.sender
+            .send(DeviceCmd::CycleRefreshRate)
+            .expect("Cycle refresh rate error")
     }
     pub fn persist_config(&self) {
         let _ = self.sender.send(DeviceCmd::PersistConfig);

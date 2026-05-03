@@ -16,6 +16,7 @@ pub enum OsdIconId {
     Trackpad(bool),
     RGBEffect,
     UnderGlow(bool),
+    RefreshRate,
 }
 
 pub enum AppEvent {
@@ -26,6 +27,7 @@ pub enum AppEvent {
     Trackpad(bool),
     RGBEffect(RGBEffect),
     UnderGlow(u8),
+    RefreshRate(u32, u8, u8),
     Quit,
     Restart,
 }
@@ -85,6 +87,13 @@ pub fn process_event(
             1,
             lvl / 255,
         ),
+        AppEvent::RefreshRate(current, level, total) => (
+            true,
+            current.to_string(),
+            Some(OsdIconId::RefreshRate),
+            total,
+            level,
+        ),
         AppEvent::Quit => {
             device().shutdown();
             std::process::exit(0);
@@ -136,6 +145,10 @@ pub fn get_icon_data(id: &OsdIconId) -> (&'static str, &'static [u8]) {
         OsdIconId::UnderGlow(false) => (
             "bytes://underglow_off.svg",
             include_bytes!("../../assets/underglow_off.svg"),
+        ),
+        OsdIconId::RefreshRate => (
+            "bytes://refresh.svg",
+            include_bytes!("../../assets/refresh.svg"),
         ),
     }
 }

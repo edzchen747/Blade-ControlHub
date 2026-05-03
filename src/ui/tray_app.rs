@@ -76,6 +76,10 @@ impl eframe::App for TrayApp {
             );
             if trigger_osd {
                 self.trigger_osd(ctx);
+            } else {
+                if self.state == OSDState::Hidden {
+                    return;
+                }
             }
         }
 

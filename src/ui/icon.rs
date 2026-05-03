@@ -125,7 +125,7 @@ fn load_tray_icon(hex_color: &str) -> Icon {
 fn detect_tray_activity_thread() {
     thread::spawn(move || {
         loop {
-            while let Ok(event) = TrayIconEvent::receiver().try_recv() {
+            while let Ok(event) = TrayIconEvent::receiver().recv() {
                 if matches!(event, TrayIconEvent::Click { .. }) {
                     device().get_perf_mode();
                 }

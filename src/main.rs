@@ -4,6 +4,7 @@ mod razer;
 mod ui;
 mod win;
 
+use core::time;
 use std::{thread, time::Duration};
 use sysinfo::System;
 

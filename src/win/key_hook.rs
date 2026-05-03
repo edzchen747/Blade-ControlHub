@@ -74,7 +74,9 @@ pub static KEY_MAP: Lazy<HashMap<Key, KeyConfig>> = Lazy::new(|| {
                 special: "FN + R",
                 default_original: true,
                 special_keys: KeyCombo::new(&[]),
-                func: None,
+                func: Some(Box::new(|| {
+                    device().cycle_refresh_rate();
+                })),
             },
         ),
         (
