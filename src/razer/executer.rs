@@ -1,14 +1,14 @@
-use librazer::{device::Device, packet::Packet};
+use librazer::{command::custom_command, device::Device, packet::Packet};
 
 use crate::{
     razer::{
-        device_handle::DeviceCmd,
+        device_handle::{DeviceCmd, device},
         device_state::{AppConfig, PerfMode, RGBEffect, persist_config},
     },
     ui::{app_events::AppEvent, tray_app::tray_app},
     win::{
-        actions::AudioType, brightness::BrightnessWorker, display::DisplayManager,
-        persist::PersistBuffer,
+        actions::AudioType, ambient_effect::AmbientEffect, brightness::BrightnessWorker,
+        display::DisplayManager, persist::PersistBuffer,
     },
 };
 use std::time::Instant;
@@ -84,6 +84,9 @@ impl<'a> Executer<'a> {
                 DeviceCmd::CycleRefreshRate => {
                     self.cycle_refresh_rate();
                 }
+                DeviceCmd::KeyboardColor(r, g, b) => {
+                    self.keyboard_color(r, g, b);
+                }
                 DeviceCmd::PersistConfig => {
                     self.persist_config();
                 }
@@ -108,7 +111,7 @@ impl<'a> Executer<'a> {
         self.multi_media_keys();
         // let _ = command(self.device, 0x0086, &[0, 0, 0], None); // set multi media keys if configured
         let rgb_effect = self.app_config.read().rgb_effect.value();
-        let _ = command(self.device, 0x030a, &[rgb_effect as u8, 0], None); // set effect
+        self.set_rgb_effect(rgb_effect, false);
         let _ = command(self.device, 0x0300, &[1, 38, 1], None); // Turn on Under Glow
         let vc_active = self.app_config.read().vc_lvl;
         let _ = command(self.device, 0x0303, &[1, 38, vc_active], None);
@@ -124,6 +127,7 @@ impl<'a> Executer<'a> {
     fn sleep(&self) {
         // do not save any values
         let _ = command(self.device, 0x0004, &[0, 0], None); // reset to default state
+        let _ = command(self.device, 0x030a, &[5, 0], None); // reset to blank RGB effect
         let _ = command(self.device, 0x0303, &[1, 5, 0], None); // set keyboard to 0 brightness
         // Under Glow brightness changes must be done in this order turn off then set brightness to 0
         let _ = command(self.device, 0x0300, &[1, 38, 0], None); // turn off Under Glow
@@ -154,15 +158,25 @@ impl<'a> Executer<'a> {
 
     fn cycle_rgb_mode(&mut self) {
         let new_rgb_effect = self.app_config.get().rgb_effect.next();
-        self.set_rgb_effect(new_rgb_effect);
+        self.set_rgb_effect(new_rgb_effect, true);
     }
 
-    fn set_rgb_effect(&mut self, rgb_effect: RGBEffect) {
+    fn set_rgb_effect(&mut self, rgb_effect: RGBEffect, save: bool) {
+        if rgb_effect == RGBEffect::Ambient {
+            AmbientEffect::start(device());
+            tray_app().send(AppEvent::RGBEffect(rgb_effect));
+        } else {
+            AmbientEffect::stop();
+        }
         let _ = command(self.device, 0x030a, &[rgb_effect as u8, 0], None);
-        self.app_config.get().rgb_effect.set(&rgb_effect);
-        let effect = self.get_rgb_effect();
-        tray_app().send(AppEvent::RGBEffect(effect));
-        self.persist_config();
+        if save {
+            self.app_config.get().rgb_effect.set(&rgb_effect);
+            if rgb_effect != RGBEffect::Ambient {
+                let effect = self.get_rgb_effect();
+                tray_app().send(AppEvent::RGBEffect(effect));
+            }
+            self.persist_config();
+        }
     }
 
     fn get_rgb_effect(&self) -> RGBEffect {
@@ -256,6 +270,18 @@ impl<'a> Executer<'a> {
                 let _ = self.display_manager.set_refresh_rate(refresh_rate);
                 self.get_refresh_rate();
             }
+        }
+    }
+
+    fn keyboard_color(&self, r: u8, g: u8, b: u8) {
+        let mut args = vec![
+            255, 0, 0, 18, 0, 0, 0, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b,
+            r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g,
+            b, r, g, b,
+        ];
+        for row in 0..=6 {
+            args[1] = row;
+            let _ = custom_command(self.device, 0x030b, &args);
         }
     }
 

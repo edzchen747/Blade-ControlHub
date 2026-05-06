@@ -83,7 +83,7 @@ fn default_perf_mode() -> CycleState<PerfMode> {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct CycleState<T> {
     index: usize,
-    items: Vec<T>,
+    pub items: Vec<T>,
 }
 
 impl<T: Clone + PartialEq> CycleState<T> {
@@ -115,7 +115,12 @@ impl<T: Clone + PartialEq> CycleState<T> {
     }
 }
 
-const RGB_EFFECTS: [RGBEffect; 3] = [RGBEffect::Cycle, RGBEffect::Wave, RGBEffect::Breathe];
+const RGB_EFFECTS: [RGBEffect; 4] = [
+    RGBEffect::Cycle,
+    RGBEffect::Wave,
+    RGBEffect::Breathe,
+    RGBEffect::Ambient,
+];
 const PERF_MODES: [PerfMode; 6] = [
     PerfMode::Silent,
     PerfMode::Quiet,
@@ -136,10 +141,17 @@ pub fn load_config() -> AppConfig {
         return AppConfig::default();
     }
 
-    serde_json::from_str(&contents).unwrap_or_else(|e| {
+    let mut app_config = serde_json::from_str(&contents).unwrap_or_else(|e| {
         println!("Failed to parse config: {}. Using defaults.", e);
         AppConfig::default()
-    })
+    });
+
+    // Overide saved values incase new updates bring more options
+    app_config.power_state.rgb_effect.items = RGB_EFFECTS.to_vec();
+    app_config.power_state.perf_mode.items = PERF_MODES.to_vec();
+    app_config.battery_state.rgb_effect.items = RGB_EFFECTS.to_vec();
+    app_config.battery_state.perf_mode.items = PERF_MODES.to_vec();
+    app_config
 }
 
 pub fn persist_config(app_config: &mut AppConfig, persist_buffer: &PersistBuffer) {
@@ -182,6 +194,7 @@ pub enum RGBEffect {
     Cycle = 4,
     Wave = 1,
     Breathe = 3,
+    Ambient = 5,
     Unknown = 255,
 }
 
@@ -191,6 +204,7 @@ impl From<u8> for RGBEffect {
             4 => Self::Cycle,
             1 => Self::Wave,
             3 => Self::Breathe,
+            5 => Self::Ambient,
             _ => {
                 println!("Unknown RGB Effect: {}", rgb_effect);
                 Self::Unknown

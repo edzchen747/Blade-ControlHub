@@ -1,15 +1,19 @@
 use crate::razer::device_handle::device;
 use crate::razer::device_state::PerfMode;
 use crate::ui::app_events::{AppEvent, restart_app};
-use crate::ui::tray_app::{TRAY_APP_TX, tray_app};
+use crate::ui::tray_app::tray_app;
+use crate::win::startup::Startup;
 
 use resvg::{tiny_skia, usvg};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use tray_icon::TrayIconEvent;
+use tray_icon::menu::CheckMenuItem;
 use tray_icon::{
     Icon, TrayIconBuilder,
     menu::{Menu, MenuEvent, MenuItem},
 };
+use tray_icon::{MouseButton, TrayIconEvent};
 
 // Use to reload instead of panicking
 pub trait OptionReload<T> {
@@ -38,6 +42,8 @@ impl<T, E: std::fmt::Debug> ResultReload<T, E> for Result<T, E> {
     }
 }
 
+static STARTUP_STATE: AtomicBool = AtomicBool::new(false);
+
 pub struct TrayIcon {}
 
 impl TrayIcon {
@@ -45,13 +51,21 @@ impl TrayIcon {
         let icon = load_tray_icon("#95A5A6");
 
         let tray_menu = Menu::new();
-        let quit_item = MenuItem::new("Quit", true, None);
-        let quit_id = quit_item.id().0.clone();
-        let restart_item = MenuItem::new("Restart", true, None);
-        let restart_id = restart_item.id().0.clone();
+        let quit_item = MenuItem::with_id("quit", "Quit", true, None);
+        let restart_item = MenuItem::with_id("restart", "Restart", true, None);
+        let startup_detect = Startup::is_registered();
+        let startup_item = CheckMenuItem::with_id(
+            "startup_toggle",
+            "Start with Windows",
+            true,
+            startup_detect,
+            None,
+        );
+        STARTUP_STATE.store(startup_detect, Ordering::SeqCst);
         tray_menu.append(&quit_item).unwrap();
         tray_menu.append(&restart_item).unwrap();
-
+        tray_menu.append(&startup_item).unwrap();
+        let startup_state = Arc::new(&STARTUP_STATE);
         let tray_icon = TrayIconBuilder::new()
             .with_menu(Box::new(tray_menu))
             .with_tooltip("Blade ControlHub")
@@ -59,12 +73,17 @@ impl TrayIcon {
             .build()
             .unwrap();
 
-        MenuEvent::set_event_handler(Some(move |event: MenuEvent| match event.id {
-            id if id == quit_id => {
+        MenuEvent::set_event_handler(Some(move |event: MenuEvent| match event.id.0.as_str() {
+            "quit" => {
                 tray_app().send(AppEvent::Quit);
             }
-            id if id == restart_id => {
+            "restart" => {
                 tray_app().send(AppEvent::Restart);
+            }
+            "startup_toggle" => {
+                let is_checked = !startup_state.load(Ordering::SeqCst);
+                startup_state.store(is_checked, Ordering::SeqCst);
+                tray_app().send(AppEvent::StartupToggle(is_checked));
             }
             _ => {}
         }));
@@ -126,7 +145,13 @@ fn detect_tray_activity_thread() {
     thread::spawn(move || {
         loop {
             while let Ok(event) = TrayIconEvent::receiver().recv() {
-                if matches!(event, TrayIconEvent::Click { .. }) {
+                if matches!(
+                    event,
+                    TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        ..
+                    }
+                ) {
                     device().get_perf_mode();
                 }
             }

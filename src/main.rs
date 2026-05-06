@@ -4,11 +4,14 @@ mod razer;
 mod ui;
 mod win;
 
-use core::time;
 use std::{thread, time::Duration};
 use sysinfo::System;
 
 fn main() {
+    let exe_path = std::env::current_exe().unwrap();
+    let exe_dir = exe_path.parent().unwrap();
+    std::env::set_current_dir(exe_dir).unwrap();
+
     close_running_instances();
     start_razer_service();
     println!("Razer service started...");

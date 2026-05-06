@@ -1,11 +1,10 @@
-use eframe::egui;
-
 use crate::{
     razer::{
         device_handle::device,
         device_state::{PerfMode, RGBEffect},
     },
     ui::icon,
+    win::startup::Startup,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -30,6 +29,7 @@ pub enum AppEvent {
     RefreshRate(u32, u8, u8),
     Quit,
     Restart,
+    StartupToggle(bool),
 }
 
 pub fn process_event(
@@ -99,6 +99,18 @@ pub fn process_event(
             std::process::exit(0);
         }
         AppEvent::Restart => restart_app(0),
+        AppEvent::StartupToggle(enabled) => {
+            if enabled {
+                if !Startup::is_registered() {
+                    Startup::register();
+                }
+            } else {
+                if Startup::is_registered() {
+                    Startup::unregister();
+                }
+            }
+            (false, "".to_string(), None, 0, 0)
+        }
         _ => (false, "".to_string(), None, 0, 0),
     };
     if trigger_osd {

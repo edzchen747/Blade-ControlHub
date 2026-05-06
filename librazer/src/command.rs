@@ -138,9 +138,9 @@ pub fn set_fan_mode(device: &Device, mode: FanMode) -> Result<()> {
 
 pub fn custom_command(device: &Device, command: u16, args: &[u8]) -> Result<()> {
     let report = Packet::new(command, args);
-    println!("Report   {:?}", report);
+    // println!("Report   {:?}", report);
     let response = device.send(report)?;
-    println!("Response {:?}", response);
+    // println!("Response {:?}", response);
     Ok(())
 }
 

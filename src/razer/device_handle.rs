@@ -26,10 +26,12 @@ pub enum DeviceCmd {
     SetScreenBrightness(u8),
     GetRefreshRate(mpsc::Sender<u32>),
     CycleRefreshRate,
+    KeyboardColor(u8, u8, u8),
     PersistConfig,
     Shutdown,
 }
 
+#[derive(Debug, Clone)]
 pub struct DeviceHandle {
     sender: Sender<DeviceCmd>,
 }
@@ -105,6 +107,9 @@ impl DeviceHandle {
         self.sender
             .send(DeviceCmd::CycleRefreshRate)
             .expect("Cycle refresh rate error")
+    }
+    pub fn keyboard_color(&self, r: u8, g: u8, b: u8) {
+        let _ = self.sender.send(DeviceCmd::KeyboardColor(r, g, b));
     }
     pub fn persist_config(&self) {
         let _ = self.sender.send(DeviceCmd::PersistConfig);
