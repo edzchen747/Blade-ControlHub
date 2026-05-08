@@ -1,8 +1,9 @@
 use librazer::{command::custom_command, device::Device};
 
 use crate::{
+    config::persist_config,
     razer::{
-        config::{AppConfig, persist_config},
+        config::AppConfig,
         device_handle::{DeviceCmd, device},
         enums::{PerfMode, RGBEffect},
         protocol::command,

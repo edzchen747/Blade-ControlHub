@@ -1,4 +1,4 @@
-use crate::razer;
+use crate::config;
 use crate::razer::device_handle::device;
 use crate::ui::app_events::AppEvent;
 use crate::ui::tray_app::tray_app;
@@ -446,7 +446,7 @@ pub fn init_keyboard_hooks(device_pid: u16) {
 
     for device_info in api
         .device_list()
-        .filter(|d| d.vendor_id() == razer::RAZER_VID && d.product_id() == device_pid)
+        .filter(|d| d.vendor_id() == config::RAZER_VID && d.product_id() == device_pid)
     {
         let path = device_info.path().to_owned();
         let iface_num = device_info.interface_number();

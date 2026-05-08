@@ -1,14 +1,8 @@
 use crate::razer::enums::*;
-use crate::utils::persist::PersistBuffer;
-use crate::win::display::brightness::SCREEN_TARGET_LVL;
 use crate::win::system::power::IS_PLUGGED_IN;
 use std::sync::atomic::Ordering;
 
 use serde::{Deserialize, Serialize};
-
-// ── Config Path ─────────────────────────────────────────────────────────────
-
-pub const CONFIG_PATH: &str = "config.json";
 
 // ── CycleState ──────────────────────────────────────────────────────────────
 
@@ -131,38 +125,15 @@ impl AppConfig {
             self.battery_state.clone()
         }
     }
-}
 
-// ── Config Persistence ──────────────────────────────────────────────────────
-
-/// Loads the application config from disk, falling back to defaults on error.
-pub fn load_config() -> AppConfig {
-    let Ok(contents) = std::fs::read_to_string(CONFIG_PATH) else {
-        println!("Config not found, using defaults.");
-        return AppConfig::default();
-    };
-
-    if contents.trim().is_empty() {
-        return AppConfig::default();
-    }
-
-    let mut app_config: AppConfig = serde_json::from_str(&contents).unwrap_or_else(|e| {
-        println!("Failed to parse config: {}. Using defaults.", e);
-        AppConfig::default()
-    });
-
-    // Override saved cycle items in case new updates bring more options
-    app_config.power_state.rgb_effect.items = RGB_EFFECTS.to_vec();
-    app_config.power_state.perf_mode.items = PERF_MODES.to_vec();
-    app_config.battery_state.rgb_effect.items = RGB_EFFECTS.to_vec();
-    app_config.battery_state.perf_mode.items = PERF_MODES.to_vec();
-    app_config
-}
-
-/// Persists the current application config to disk via the provided buffer.
-pub fn persist_config(app_config: &mut AppConfig, persist_buffer: &PersistBuffer) {
-    app_config.get().screen_lvl = SCREEN_TARGET_LVL.load(Ordering::SeqCst);
-    if let Ok(json) = serde_json::to_string_pretty(app_config) {
-        let _ = persist_buffer.write(json);
+    /// Refreshes the cycle item lists for both power states.
+    ///
+    /// This ensures that if new options were added in a newer version of the app,
+    /// they are available even when loading an older config file.
+    pub fn refresh_cycle_items(&mut self) {
+        self.power_state.rgb_effect.items = RGB_EFFECTS.to_vec();
+        self.power_state.perf_mode.items = PERF_MODES.to_vec();
+        self.battery_state.rgb_effect.items = RGB_EFFECTS.to_vec();
+        self.battery_state.perf_mode.items = PERF_MODES.to_vec();
     }
 }

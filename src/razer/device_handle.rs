@@ -1,4 +1,4 @@
-use crate::razer::config::*;
+use crate::config::{self, CONFIG_PATH};
 use crate::razer::enums::PerfMode;
 use crate::razer::executer::Executer;
 use crate::utils::persist::PersistBuffer;
@@ -22,7 +22,7 @@ pub fn device() -> DeviceHandle {
 
         thread::spawn(move || {
             let device = Device::detect().expect("No compatible device found");
-            let mut app_config = load_config();
+            let mut app_config = config::load_config();
             let persist_buffer = PersistBuffer::new(CONFIG_PATH.to_string());
             Executer::new(&device, &mut app_config, persist_buffer, rx).process_commands();
         });
