@@ -111,7 +111,6 @@ pub fn process_event(
             }
             (false, "".to_string(), None, 0, 0)
         }
-        _ => (false, "".to_string(), None, 0, 0),
     };
     if trigger_osd {
         osd_text.clear();

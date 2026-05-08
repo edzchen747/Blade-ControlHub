@@ -93,7 +93,6 @@ impl<'a> Executer<'a> {
                 DeviceCmd::Shutdown => {
                     self.shutdown();
                 }
-                _ => (),
             }
         }
         println!("All handles dropped. Handle thread exiting.");
@@ -128,6 +127,7 @@ impl<'a> Executer<'a> {
         // do not save any values
         let _ = command(self.device, 0x0004, &[0, 0], None); // reset to default state
         let _ = command(self.device, 0x030a, &[5, 0], None); // reset to blank RGB effect
+        AmbientEffect::stop();
         let _ = command(self.device, 0x0303, &[1, 5, 0], None); // set keyboard to 0 brightness
         // Under Glow brightness changes must be done in this order turn off then set brightness to 0
         let _ = command(self.device, 0x0300, &[1, 38, 0], None); // turn off Under Glow
