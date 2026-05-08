@@ -200,13 +200,13 @@ impl TrayApp {
     fn render_icon(&self, ui: &mut egui::Ui) {
         if let Some(id) = &self.osd_icon_id {
             let (name, bytes) = id.icon_data();
+            let image = match bytes {
+                std::borrow::Cow::Borrowed(b) => egui::Image::from_bytes(name, b),
+                std::borrow::Cow::Owned(v) => egui::Image::from_bytes(name, v),
+            };
             let transparency_mask = egui::Color32::WHITE.linear_multiply(self.fade_alpha);
             ui.add_space(20.0);
-            ui.add(
-                egui::Image::from_bytes(name, bytes)
-                    .max_size(ICON_MAX_SIZE)
-                    .tint(transparency_mask),
-            );
+            ui.add(image.max_size(ICON_MAX_SIZE).tint(transparency_mask));
         } else {
             ui.add_space(60.0);
         }
