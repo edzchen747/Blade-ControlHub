@@ -1,12 +1,16 @@
 use crate::{
     razer::{
         device_handle::device,
-        device_state::{PerfMode, RGBEffect},
+        enums::{PerfMode, RGBEffect},
     },
     ui::icon,
-    win::startup::Startup,
+    utils::reload::restart_app,
+    win::system::startup::Startup,
 };
 
+// ── OSD Icon Identifiers ────────────────────────────────────────────────────
+
+/// Identifies which icon to display on the OSD overlay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OsdIconId {
     Brightness,
@@ -18,6 +22,64 @@ pub enum OsdIconId {
     RefreshRate,
 }
 
+impl OsdIconId {
+    /// Returns the `(uri, bytes)` pair for embedding the icon in the OSD.
+    pub fn icon_data(&self) -> (&'static str, &'static [u8]) {
+        match self {
+            Self::Brightness => (
+                "bytes://brightness.svg",
+                include_bytes!("../../assets/brightness.svg"),
+            ),
+            Self::KeyboardBrightness => (
+                "bytes://keyboard.svg",
+                include_bytes!("../../assets/keyboard.svg"),
+            ),
+            Self::MicMute(false) => ("bytes://mic.svg", include_bytes!("../../assets/mic.svg")),
+            Self::MicMute(true) => (
+                "bytes://mic_off.svg",
+                include_bytes!("../../assets/mic_off.svg"),
+            ),
+            Self::Trackpad(true) => (
+                "bytes://trackpad.svg",
+                include_bytes!("../../assets/trackpad.svg"),
+            ),
+            Self::Trackpad(false) => (
+                "bytes://trackpad_off.svg",
+                include_bytes!("../../assets/trackpad_off.svg"),
+            ),
+            Self::RGBEffect => (
+                "bytes://rgb_effect.svg",
+                include_bytes!("../../assets/rgb_effect.svg"),
+            ),
+            Self::UnderGlow(true) => (
+                "bytes://underglow.svg",
+                include_bytes!("../../assets/underglow.svg"),
+            ),
+            Self::UnderGlow(false) => (
+                "bytes://underglow_off.svg",
+                include_bytes!("../../assets/underglow_off.svg"),
+            ),
+            Self::RefreshRate => (
+                "bytes://refresh.svg",
+                include_bytes!("../../assets/refresh.svg"),
+            ),
+        }
+    }
+}
+
+// ── OSD Response ─────────────────────────────────────────────────────────────
+
+/// Describes what the OSD should display after processing an event.
+pub struct OsdResponse {
+    pub text: String,
+    pub icon_id: Option<OsdIconId>,
+    pub total_levels: u8,
+    pub current_level: u8,
+}
+
+// ── Application Events ──────────────────────────────────────────────────────
+
+/// High-level events that drive the application UI and system actions.
 pub enum AppEvent {
     ScreenBrightness(u8),
     KeyboardBrightness(u8),
@@ -32,142 +94,75 @@ pub enum AppEvent {
     StartupToggle(bool),
 }
 
-pub fn process_event(
-    event: AppEvent,
-    tray_icon: &mut tray_icon::TrayIcon,
-    osd_text: &mut String,
-    osd_icon_id: &mut Option<OsdIconId>,
-    osd_total_levels: &mut u8,
-    osd_curr_level: &mut u8,
-) -> bool {
-    let (trigger_osd, text, icon_id, total_levels, curr_level): (
-        bool,
-        String,
-        Option<OsdIconId>,
-        u8,
-        u8,
-    ) = match event {
-        AppEvent::ScreenBrightness(lvl) => (
-            true,
-            "".to_string(),
-            Some(OsdIconId::Brightness),
-            10,
-            lvl / 10,
-        ),
-        AppEvent::KeyboardBrightness(lvl) => (
-            true,
-            "".to_string(),
-            Some(OsdIconId::KeyboardBrightness),
-            5,
-            lvl / 51,
-        ),
+// ── Event Processing ────────────────────────────────────────────────────────
+
+/// Processes an `AppEvent` and returns `Some(OsdResponse)` when the OSD should
+/// be triggered, or `None` for silent actions.
+pub fn process_event(event: AppEvent, tray_icon: &mut tray_icon::TrayIcon) -> Option<OsdResponse> {
+    match event {
+        AppEvent::ScreenBrightness(lvl) => Some(OsdResponse {
+            text: String::new(),
+            icon_id: Some(OsdIconId::Brightness),
+            total_levels: 10,
+            current_level: lvl / 10,
+        }),
+        AppEvent::KeyboardBrightness(lvl) => Some(OsdResponse {
+            text: String::new(),
+            icon_id: Some(OsdIconId::KeyboardBrightness),
+            total_levels: 5,
+            current_level: lvl / 51,
+        }),
         AppEvent::PerfMode(mode) => {
             icon::set_perf_mode_icon(tray_icon, mode);
-            (true, mode.to_string(), None, 0, 0)
+            Some(OsdResponse {
+                text: mode.to_string(),
+                icon_id: None,
+                total_levels: 0,
+                current_level: 0,
+            })
         }
-        AppEvent::MicMute(muted) => (
-            true,
-            "".to_string(),
-            Some(OsdIconId::MicMute(muted)),
-            1,
-            !muted as u8,
-        ),
-        AppEvent::Trackpad(state) => (
-            true,
-            "".to_string(),
-            Some(OsdIconId::Trackpad(state)),
-            1,
-            state as u8,
-        ),
-        AppEvent::RGBEffect(effect) => (true, effect.to_string(), Some(OsdIconId::RGBEffect), 0, 0),
-        AppEvent::UnderGlow(lvl) => (
-            true,
-            "".to_string(),
-            Some(OsdIconId::UnderGlow(lvl > 0)),
-            1,
-            lvl / 255,
-        ),
-        AppEvent::RefreshRate(current, level, total) => (
-            true,
-            current.to_string(),
-            Some(OsdIconId::RefreshRate),
-            total,
-            level,
-        ),
+        AppEvent::MicMute(muted) => Some(OsdResponse {
+            text: String::new(),
+            icon_id: Some(OsdIconId::MicMute(muted)),
+            total_levels: 1,
+            current_level: !muted as u8,
+        }),
+        AppEvent::Trackpad(state) => Some(OsdResponse {
+            text: String::new(),
+            icon_id: Some(OsdIconId::Trackpad(state)),
+            total_levels: 1,
+            current_level: state as u8,
+        }),
+        AppEvent::RGBEffect(effect) => Some(OsdResponse {
+            text: effect.to_string(),
+            icon_id: Some(OsdIconId::RGBEffect),
+            total_levels: 0,
+            current_level: 0,
+        }),
+        AppEvent::UnderGlow(lvl) => Some(OsdResponse {
+            text: String::new(),
+            icon_id: Some(OsdIconId::UnderGlow(lvl > 0)),
+            total_levels: 1,
+            current_level: lvl / 255,
+        }),
+        AppEvent::RefreshRate(current, level, total) => Some(OsdResponse {
+            text: current.to_string(),
+            icon_id: Some(OsdIconId::RefreshRate),
+            total_levels: total,
+            current_level: level,
+        }),
         AppEvent::Quit => {
             device().shutdown();
             std::process::exit(0);
         }
         AppEvent::Restart => restart_app(0),
         AppEvent::StartupToggle(enabled) => {
-            if enabled {
-                if !Startup::is_registered() {
-                    Startup::register();
-                }
-            } else {
-                if Startup::is_registered() {
-                    Startup::unregister();
-                }
+            if enabled && !Startup::is_registered() {
+                Startup::register();
+            } else if !enabled && Startup::is_registered() {
+                Startup::unregister();
             }
-            (false, "".to_string(), None, 0, 0)
+            None
         }
-    };
-    if trigger_osd {
-        osd_text.clear();
-        osd_text.push_str(&text);
-        *osd_icon_id = icon_id;
-        *osd_total_levels = total_levels;
-        *osd_curr_level = curr_level;
     }
-    trigger_osd
-}
-
-pub fn get_icon_data(id: &OsdIconId) -> (&'static str, &'static [u8]) {
-    match id {
-        OsdIconId::Brightness => (
-            "bytes://brightness.svg",
-            include_bytes!("../../assets/brightness.svg"),
-        ),
-        OsdIconId::KeyboardBrightness => (
-            "bytes://keyboard.svg",
-            include_bytes!("../../assets/keyboard.svg"),
-        ),
-        OsdIconId::MicMute(false) => ("bytes://mic.svg", include_bytes!("../../assets/mic.svg")),
-        OsdIconId::MicMute(true) => (
-            "bytes://mic_off.svg",
-            include_bytes!("../../assets/mic_off.svg"),
-        ),
-        OsdIconId::Trackpad(true) => (
-            "bytes://trackpad.svg",
-            include_bytes!("../../assets/trackpad.svg"),
-        ),
-        OsdIconId::Trackpad(false) => (
-            "bytes://trackpad_off.svg",
-            include_bytes!("../../assets/trackpad_off.svg"),
-        ),
-        OsdIconId::RGBEffect => (
-            "bytes://rgb_effect.svg",
-            include_bytes!("../../assets/rgb_effect.svg"),
-        ),
-        OsdIconId::UnderGlow(true) => (
-            "bytes://underglow.svg",
-            include_bytes!("../../assets/underglow.svg"),
-        ),
-        OsdIconId::UnderGlow(false) => (
-            "bytes://underglow_off.svg",
-            include_bytes!("../../assets/underglow_off.svg"),
-        ),
-        OsdIconId::RefreshRate => (
-            "bytes://refresh.svg",
-            include_bytes!("../../assets/refresh.svg"),
-        ),
-    }
-}
-
-pub fn restart_app(code: i32) -> ! {
-    let current_exe = std::env::current_exe().expect("Failed to get current exe path");
-    std::process::Command::new(current_exe)
-        .spawn()
-        .expect("Failed to restart");
-    std::process::exit(code);
 }

@@ -5,7 +5,6 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use crate::ui::app_events::AppEvent;
 use crate::ui::tray_app::tray_app;
-use crate::win::power::IS_PLUGGED_IN;
 
 pub static SCREEN_TARGET_LVL: AtomicU8 = AtomicU8::new(100);
 pub static SCREEN_ADJUSTING: AtomicUsize = AtomicUsize::new(0);
@@ -79,9 +78,6 @@ impl BrightnessWorker {
                 SCREEN_ADJUSTING.fetch_sub(1, Ordering::SeqCst);
                 println!("Set brightness: {}", target);
             });
-            // if !IS_PLUGGED_IN.load(Ordering::SeqCst) {
-            //     std::thread::sleep(std::time::Duration::from_millis(100));
-            // }
         }
     }
 }

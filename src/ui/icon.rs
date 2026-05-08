@@ -1,8 +1,8 @@
 use crate::razer::device_handle::device;
-use crate::razer::device_state::PerfMode;
-use crate::ui::app_events::{AppEvent, restart_app};
+use crate::razer::enums::PerfMode;
+use crate::ui::app_events::AppEvent;
 use crate::ui::tray_app::tray_app;
-use crate::win::startup::Startup;
+use crate::win::system::startup::Startup;
 
 use resvg::{tiny_skia, usvg};
 use std::sync::Arc;
@@ -15,105 +15,67 @@ use tray_icon::{
 };
 use tray_icon::{MouseButton, TrayIconEvent};
 
-// Use to reload instead of panicking
-pub trait OptionReload<T> {
-    fn or_reload(self, msg: &str) -> T;
-}
+// ── Constants ───────────────────────────────────────────────────────────────
 
-impl<T> OptionReload<T> for Option<T> {
-    fn or_reload(self, msg: &str) -> T {
-        self.unwrap_or_else(|| {
-            eprintln!("Fatal internal error: {msg}");
-            restart_app(1);
-        })
-    }
-}
+const TRAY_ICON_SIZE: u32 = 64;
+const TRAY_ICON_SCALE_FACTOR: f32 = 1.2;
+const DEFAULT_ICON_COLOR: &str = "#95A5A6";
+const APP_TOOLTIP: &str = "Blade ControlHub";
 
-pub trait ResultReload<T, E> {
-    fn or_reload(self, msg: &str) -> T;
-}
-
-impl<T, E: std::fmt::Debug> ResultReload<T, E> for Result<T, E> {
-    fn or_reload(self, msg: &str) -> T {
-        self.unwrap_or_else(|err| {
-            eprintln!("Fatal internal error: {msg} - {:?}", err);
-            restart_app(1);
-        })
-    }
-}
+// ── Startup State ───────────────────────────────────────────────────────────
 
 static STARTUP_STATE: AtomicBool = AtomicBool::new(false);
 
-pub struct TrayIcon {}
+// ── Tray Icon Builder ───────────────────────────────────────────────────────
 
-impl TrayIcon {
-    pub fn new() -> tray_icon::TrayIcon {
-        let icon = load_tray_icon("#95A5A6");
+/// Builds and initializes the system tray icon with its context menu.
+pub fn build_tray_icon() -> tray_icon::TrayIcon {
+    let icon = load_tray_icon(DEFAULT_ICON_COLOR);
+    let tray_menu = build_tray_menu();
 
-        let tray_menu = Menu::new();
-        let quit_item = MenuItem::with_id("quit", "Quit", true, None);
-        let restart_item = MenuItem::with_id("restart", "Restart", true, None);
-        let startup_detect = Startup::is_registered();
-        let startup_item = CheckMenuItem::with_id(
-            "startup_toggle",
-            "Start with Windows",
-            true,
-            startup_detect,
-            None,
-        );
-        STARTUP_STATE.store(startup_detect, Ordering::SeqCst);
-        tray_menu.append(&quit_item).unwrap();
-        tray_menu.append(&restart_item).unwrap();
-        tray_menu.append(&startup_item).unwrap();
-        let startup_state = Arc::new(&STARTUP_STATE);
-        let tray_icon = TrayIconBuilder::new()
-            .with_menu(Box::new(tray_menu))
-            .with_tooltip("Blade ControlHub")
-            .with_icon(icon)
-            .build()
-            .unwrap();
+    let tray_icon = TrayIconBuilder::new()
+        .with_menu(Box::new(tray_menu))
+        .with_tooltip(APP_TOOLTIP)
+        .with_icon(icon)
+        .build()
+        .unwrap();
 
-        MenuEvent::set_event_handler(Some(move |event: MenuEvent| match event.id.0.as_str() {
-            "quit" => {
-                tray_app().send(AppEvent::Quit);
-            }
-            "restart" => {
-                tray_app().send(AppEvent::Restart);
-            }
-            "startup_toggle" => {
-                let is_checked = !startup_state.load(Ordering::SeqCst);
-                startup_state.store(is_checked, Ordering::SeqCst);
-                tray_app().send(AppEvent::StartupToggle(is_checked));
-            }
-            _ => {}
-        }));
-        detect_tray_activity_thread();
-        tray_icon
-    }
+    setup_menu_event_handler();
+    spawn_tray_click_listener();
+
+    tray_icon
 }
 
-pub fn set_perf_mode_icon(tray_icon: &mut tray_icon::TrayIcon, perf_mode: PerfMode) {
-    println!("Switching tay icon to {} colour", perf_mode);
-    let hex = match perf_mode {
-        PerfMode::Silent => "#00C853", // Silent
-        PerfMode::Quiet => "#00E5FF",
-        PerfMode::Balanced => "#FFD600",
-        PerfMode::Performance => "#FF5D00",
-        PerfMode::Turbo => "#D50000",
-        PerfMode::Custom => "#A200FF",
-        PerfMode::Unknown => "#95A5A6",
-    };
+// ── Perf Mode Icon ──────────────────────────────────────────────────────────
 
+/// Updates the tray icon color to reflect the current performance mode.
+pub fn set_perf_mode_icon(tray_icon: &mut tray_icon::TrayIcon, perf_mode: PerfMode) {
+    println!("Switching tray icon to {} colour", perf_mode);
+    let hex = perf_mode_color(perf_mode);
     let new_icon = load_tray_icon(hex);
     tray_icon
         .set_icon(Some(new_icon))
         .expect("Failed to update icon");
 }
 
+/// Maps a `PerfMode` to its corresponding tray icon hex color.
+fn perf_mode_color(mode: PerfMode) -> &'static str {
+    match mode {
+        PerfMode::Silent => "#00C853",
+        PerfMode::Quiet => "#00E5FF",
+        PerfMode::Balanced => "#FFD600",
+        PerfMode::Performance => "#FF5D00",
+        PerfMode::Turbo => "#D50000",
+        PerfMode::Custom => "#A200FF",
+        PerfMode::Unknown => DEFAULT_ICON_COLOR,
+    }
+}
+
+// ── SVG Icon Rendering ──────────────────────────────────────────────────────
+
+/// Renders the tray icon SVG with the given hex color and returns an `Icon`.
 fn load_tray_icon(hex_color: &str) -> Icon {
-    let width = 64;
-    let height = 64;
-    let mut pixmap = tiny_skia::Pixmap::new(width, height).unwrap();
+    let mut pixmap = tiny_skia::Pixmap::new(TRAY_ICON_SIZE, TRAY_ICON_SIZE).unwrap();
 
     let coloured_svg = include_str!("../../assets/icon.svg")
         .replace("#FFFFFF", hex_color)
@@ -123,14 +85,12 @@ fn load_tray_icon(hex_color: &str) -> Icon {
     let tree = usvg::Tree::from_str(&coloured_svg, &opt).expect("Failed to parse SVG");
 
     let svg_size = tree.size();
+    let base_scale =
+        (TRAY_ICON_SIZE as f32 / svg_size.width()).min(TRAY_ICON_SIZE as f32 / svg_size.height());
+    let final_scale = base_scale * TRAY_ICON_SCALE_FACTOR;
 
-    // Sscale it up by an extra 20-30%
-    let base_scale = (width as f32 / svg_size.width()).min(height as f32 / svg_size.height());
-    let final_scale = base_scale * 1.2;
-
-    // Recalculate centering for the overscaled icon
-    let tx = (width as f32 - (svg_size.width() * final_scale)) / 2.0;
-    let ty = (height as f32 - (svg_size.height() * final_scale)) / 2.0;
+    let tx = (TRAY_ICON_SIZE as f32 - (svg_size.width() * final_scale)) / 2.0;
+    let ty = (TRAY_ICON_SIZE as f32 - (svg_size.height() * final_scale)) / 2.0;
 
     let transform =
         tiny_skia::Transform::from_scale(final_scale, final_scale).post_translate(tx, ty);
@@ -138,10 +98,60 @@ fn load_tray_icon(hex_color: &str) -> Icon {
     resvg::render(&tree, transform, &mut pixmap.as_mut());
 
     let rgba = pixmap.take();
-    Icon::from_rgba(rgba, width, height).expect("Failed to create tray icon")
+    Icon::from_rgba(rgba, TRAY_ICON_SIZE, TRAY_ICON_SIZE).expect("Failed to create tray icon")
 }
 
-fn detect_tray_activity_thread() {
+// ── Menu Construction ───────────────────────────────────────────────────────
+
+/// Builds the tray context menu with Quit, Restart, and Startup toggle items.
+fn build_tray_menu() -> Menu {
+    let tray_menu = Menu::new();
+
+    let quit_item = MenuItem::with_id("quit", "Quit", true, None);
+    let restart_item = MenuItem::with_id("restart", "Restart", true, None);
+
+    let startup_detected = Startup::is_registered();
+    let startup_item = CheckMenuItem::with_id(
+        "startup_toggle",
+        "Start with Windows",
+        true,
+        startup_detected,
+        None,
+    );
+    STARTUP_STATE.store(startup_detected, Ordering::SeqCst);
+
+    tray_menu.append(&quit_item).unwrap();
+    tray_menu.append(&restart_item).unwrap();
+    tray_menu.append(&startup_item).unwrap();
+
+    tray_menu
+}
+
+/// Registers the global menu event handler for tray menu actions.
+fn setup_menu_event_handler() {
+    let startup_state = Arc::new(&STARTUP_STATE);
+
+    MenuEvent::set_event_handler(Some(move |event: MenuEvent| match event.id.0.as_str() {
+        "quit" => {
+            tray_app().send(AppEvent::Quit);
+        }
+        "restart" => {
+            tray_app().send(AppEvent::Restart);
+        }
+        "startup_toggle" => {
+            let is_checked = !startup_state.load(Ordering::SeqCst);
+            startup_state.store(is_checked, Ordering::SeqCst);
+            tray_app().send(AppEvent::StartupToggle(is_checked));
+        }
+        _ => {}
+    }));
+}
+
+// ── Tray Click Listener ─────────────────────────────────────────────────────
+
+/// Spawns a background thread that listens for left-clicks on the tray icon
+/// and triggers a performance mode query.
+fn spawn_tray_click_listener() {
     thread::spawn(move || {
         loop {
             while let Ok(event) = TrayIconEvent::receiver().recv() {

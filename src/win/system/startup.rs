@@ -25,7 +25,7 @@ impl Startup {
                 .to_str()
                 .expect("Directory path contains invalid Unicode");
 
-            let mut xml_content = include_str!("task.xml").to_string();
+            let mut xml_content = include_str!("../../win/task.xml").to_string();
 
             xml_content = xml_content.replace("__EXE_PATH__", path_str);
             xml_content = xml_content.replace("__EXE_DIR__", dir_str);

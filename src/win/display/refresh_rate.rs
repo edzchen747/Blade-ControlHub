@@ -109,7 +109,6 @@ impl DisplayManager {
             dev_mode.dmFields |= DM_DISPLAYFREQUENCY;
 
             // CDS_UPDATEREGISTRY makes the change persistent (survives reboot).
-            // Use CDS_FLAGS(0) if you only want it to last for the current session.
             let result = windows::Win32::Graphics::Gdi::ChangeDisplaySettingsW(
                 Some(&mut dev_mode),
                 CDS_UPDATEREGISTRY,

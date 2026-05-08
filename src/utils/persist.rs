@@ -4,6 +4,10 @@ use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// A debounced file writer that batches rapid writes into a single disk commit.
+///
+/// Sends to `PersistBuffer` are buffered and only flushed to disk after a 2-second
+/// quiet period, preventing excessive I/O during bursts of configuration changes.
 pub struct PersistBuffer {
     tx: Sender<String>,
 }
@@ -15,7 +19,7 @@ impl PersistBuffer {
         thread::spawn(move || {
             let mut pending_content: Option<String> = None;
             let mut flush_at: Option<Instant> = None;
-            let mut last_written_content = String::new(); // Change detection lives here
+            let mut last_written_content = String::new();
 
             loop {
                 let timeout = if let Some(target) = flush_at {

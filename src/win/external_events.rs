@@ -1,8 +1,11 @@
 use crate::{
     razer::device_handle::device,
     win::{
-        actions::{self, AudioType, get_screen_brightness},
-        brightness::{SCREEN_ADJUSTING, SCREEN_TARGET_LVL},
+        audio::{self, AudioType},
+        display::{
+            brightness::{SCREEN_ADJUSTING, SCREEN_TARGET_LVL},
+            screen_query::get_screen_brightness,
+        },
     },
 };
 use std::sync::atomic::Ordering;
@@ -10,11 +13,11 @@ use std::{thread, time::Duration};
 
 pub fn spawn_detect_external_updates_thread() {
     thread::spawn(|| {
-        DetectExternalUpdates::new(100, 1000).run_loop();
+        ExternalChangeMonitor::new(100, 1000).run_loop();
     });
 }
 
-struct DetectExternalUpdates {
+struct ExternalChangeMonitor {
     fast_interval_ms: u64,
     slow_interval_ms: u64,
     mic_muted: bool,
@@ -22,13 +25,13 @@ struct DetectExternalUpdates {
     screen_brightness: u8,
 }
 
-impl DetectExternalUpdates {
+impl ExternalChangeMonitor {
     pub fn new(fast: u64, slow: u64) -> Self {
         Self {
             fast_interval_ms: fast,
             slow_interval_ms: slow,
-            mic_muted: actions::is_audio_muted(AudioType::Mic),
-            speakers_muted: actions::is_audio_muted(AudioType::Speakers),
+            mic_muted: audio::is_audio_muted(AudioType::Mic),
+            speakers_muted: audio::is_audio_muted(AudioType::Speakers),
             screen_brightness: get_screen_brightness(),
         }
     }
@@ -36,13 +39,13 @@ impl DetectExternalUpdates {
     pub fn run_loop(&mut self) {
         let mut interval = 0;
         loop {
-            let curr_mic_muted = actions::is_audio_muted(AudioType::Mic);
+            let curr_mic_muted = audio::is_audio_muted(AudioType::Mic);
             if curr_mic_muted != self.mic_muted {
                 device().set_mic_mute_indicator(curr_mic_muted);
             };
             self.mic_muted = curr_mic_muted;
 
-            let curr_speakers_muted = actions::is_audio_muted(AudioType::Speakers);
+            let curr_speakers_muted = audio::is_audio_muted(AudioType::Speakers);
             if curr_speakers_muted != self.speakers_muted {
                 device().set_speakers_mute_indicator(curr_speakers_muted);
             };

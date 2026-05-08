@@ -2,6 +2,7 @@
 
 mod razer;
 mod ui;
+mod utils;
 mod win;
 
 use std::{thread, time::Duration};
@@ -20,9 +21,9 @@ fn main() {
 
 fn start_razer_service() {
     let device_pid = razer::device_handle::device().get_pid();
-    win::key_hook::init_keyboard_hooks(device_pid);
-    win::power::PowerMonitor::new();
-    win::standby::spawn_listener_thread();
+    win::input::key_hook::init_keyboard_hooks(device_pid);
+    win::system::power::PowerMonitor::new();
+    win::system::standby::spawn_listener_thread();
     win::external_events::spawn_detect_external_updates_thread();
 }
 

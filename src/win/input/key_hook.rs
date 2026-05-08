@@ -1,10 +1,9 @@
-use super::actions;
 use crate::razer;
 use crate::razer::device_handle::device;
 use crate::ui::app_events::AppEvent;
 use crate::ui::tray_app::tray_app;
-use crate::win::actions::get_trackpad_state;
-use actions::AudioType;
+use crate::win::audio::{self, AudioType};
+use crate::win::input::trackpad::get_trackpad_state;
 
 use hidapi::{HidApi, HidDevice};
 use once_cell::sync::Lazy;
@@ -273,7 +272,7 @@ pub static RAZER_KEY_MAP: Lazy<HashMap<u8, KeyConfig>> = Lazy::new(|| {
                 special: "",
                 default_original: false,
                 special_keys: KeyCombo::new(&[Key::Unknown(157)]),
-                func: Some(Box::new(|| actions::toggle_audio_mute(AudioType::Mic))),
+                func: Some(Box::new(|| audio::toggle_audio_mute(AudioType::Mic))),
             },
         ),
         (
