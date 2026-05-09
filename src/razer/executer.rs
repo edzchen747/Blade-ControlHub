@@ -193,7 +193,12 @@ impl<'a> Executer<'a> {
         } else {
             AmbientEffect::stop();
         }
-        let _ = command(self.device, 0x030a, &[rgb_effect as u8, 0], None);
+
+        let mut args = vec![rgb_effect as u8, 0];
+        if rgb_effect == RGBEffect::Reactive {
+            args = vec![rgb_effect as u8, 0, 32, 255, 255, 255];
+        }
+        let _ = command(self.device, 0x030a, &args, None);
         if save {
             self.app_config.get().rgb_effect.set(&rgb_effect);
             if rgb_effect != RGBEffect::Ambient {
@@ -205,7 +210,7 @@ impl<'a> Executer<'a> {
     }
 
     fn get_rgb_effect(&self) -> RGBEffect {
-        command(self.device, 0x038a, &[0, 3], Some(0)).into()
+        command(self.device, 0x038a, &[0], Some(0)).into()
     }
 
     fn toggle_under_glow(&mut self) {

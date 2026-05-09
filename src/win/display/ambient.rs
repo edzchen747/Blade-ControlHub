@@ -371,7 +371,7 @@ fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
 
 #[inline(always)]
 fn apply_vibrance(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
-    let (nr, ng, nb) = saturate_rgb(r, g, b, 1.3);
+    let (nr, ng, nb) = saturate_rgb(r, g, b, 2.0);
     normalize_to_midpoint(nr, ng, nb)
 }
 

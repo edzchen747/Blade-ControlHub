@@ -35,6 +35,8 @@ pub enum RGBEffect {
     Wave = 1,
     Breathe = 3,
     Ambient = 5,
+    Starlight = 25,
+    Reactive = 19,
     Unknown = 255,
 }
 
@@ -45,6 +47,9 @@ impl From<u8> for RGBEffect {
             1 => Self::Wave,
             3 => Self::Breathe,
             5 => Self::Ambient,
+            7 => Self::Starlight,
+            25 => Self::Starlight,
+            19 => Self::Reactive,
             _ => {
                 println!("Unknown RGB Effect: {}", value);
                 Self::Unknown
@@ -53,11 +58,13 @@ impl From<u8> for RGBEffect {
     }
 }
 
-pub const RGB_EFFECTS: [RGBEffect; 4] = [
+pub const RGB_EFFECTS: [RGBEffect; 6] = [
     RGBEffect::Cycle,
     RGBEffect::Wave,
     RGBEffect::Breathe,
     RGBEffect::Ambient,
+    RGBEffect::Starlight,
+    RGBEffect::Reactive,
 ];
 
 pub const PERF_MODES: [PerfMode; 6] = [
