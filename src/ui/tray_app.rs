@@ -88,20 +88,18 @@ impl TrayApp {
     fn trigger_osd(&mut self, ctx: &egui::Context) {
         self.state = OsdState::FadingIn;
         self.show_until = Some(Instant::now() + Duration::from_millis(OSD_DISPLAY_DURATION_MS));
+
+        // Reset the clock so the next update() doesn't have a massive dt
+        self.last_update = Instant::now();
+
         self.is_centered = false;
         ctx.send_viewport_cmd(egui::ViewportCommand::MousePassthrough(false));
+        ctx.request_repaint();
     }
 
     // ── Animation ───────────────────────────────────────────────────────
 
-    /// Advances the fade animation state machine and returns the current alpha.
     fn advance_animation(&mut self, ctx: &egui::Context, dt: f32) {
-        let target_alpha = match self.state {
-            OsdState::FadingIn | OsdState::Active => TARGET_ALPHA_VISIBLE,
-            OsdState::FadingOut | OsdState::Hidden => 0.0,
-        };
-
-        // Check if the active display timer has expired
         if self.state == OsdState::Active {
             if let Some(timeout) = self.show_until {
                 let now = Instant::now();
@@ -110,15 +108,18 @@ impl TrayApp {
                     self.show_until = None;
                     ctx.send_viewport_cmd(egui::ViewportCommand::MousePassthrough(true));
                     ctx.request_repaint();
+                    return;
                 } else {
-                    ctx.request_repaint_after(
-                        timeout.duration_since(now) + Duration::from_millis(16),
-                    );
+                    ctx.request_repaint_after(timeout.duration_since(now));
                 }
             }
         }
 
-        // Smoothly interpolate alpha towards the target
+        let target_alpha = match self.state {
+            OsdState::FadingIn | OsdState::Active => TARGET_ALPHA_VISIBLE,
+            OsdState::FadingOut | OsdState::Hidden => 0.0,
+        };
+
         let diff = target_alpha - self.fade_alpha;
         if diff.abs() > FADE_EPSILON {
             let speed = if self.state == OsdState::FadingIn {
@@ -168,7 +169,7 @@ impl TrayApp {
 
     /// Renders the OSD overlay content (icon, text, slider bar).
     fn render_osd(&self, ctx: &egui::Context) {
-        if self.fade_alpha <= FADE_EPSILON {
+        if self.state == OsdState::Hidden {
             return;
         }
 
@@ -267,6 +268,7 @@ impl eframe::App for TrayApp {
         if should_trigger {
             self.trigger_osd(ctx);
         } else if self.state == OsdState::Hidden {
+            self.last_update = Instant::now();
             return;
         }
 

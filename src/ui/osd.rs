@@ -74,6 +74,10 @@ pub fn native_options() -> NativeOptions {
             .with_always_on_top()
             .with_inner_size([OSD_WINDOW_SIZE.x, OSD_WINDOW_SIZE.y])
             .with_taskbar(false),
+
+        // Use standard sync/acceleration
+        vsync: true,
+        hardware_acceleration: eframe::HardwareAcceleration::Required,
         ..Default::default()
     }
 }
