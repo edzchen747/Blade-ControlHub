@@ -5,19 +5,20 @@ use crate::{
     razer::{
         config::AppConfig,
         device_handle::{DeviceCmd, device},
-        enums::{PerfMode, RGBEffect},
+        enums::{BatteryLimit, PerfMode, RGBEffect},
         protocol::command,
     },
-    ui::{app_events::AppEvent, tray_app::tray_app},
+    ui::{app_events::OsdEvent, tray_app::tray_app},
     utils::persist::PersistBuffer,
     win::{
         audio::AudioType,
         display::{
             ambient::AmbientEffect, brightness::BrightnessWorker, refresh_rate::DisplayManager,
         },
+        input::key_hook::DEFAULT_MULTIMEDIA_KEYS,
     },
 };
-use std::sync::mpsc::Receiver;
+use std::sync::{atomic::Ordering, mpsc::Receiver};
 use std::time::{Duration, Instant};
 
 // ── Executer ────────────────────────────────────────────────────────────────
@@ -32,6 +33,7 @@ pub struct Executer<'a> {
     brightness_worker: BrightnessWorker,
     display_manager: DisplayManager,
     refresh_cycle_timeout: Instant,
+    battery_cycle_timeout: Instant,
 }
 
 impl<'a> Executer<'a> {
@@ -49,6 +51,7 @@ impl<'a> Executer<'a> {
             brightness_worker: BrightnessWorker::new(),
             display_manager: DisplayManager::new().expect("Error: No displays found"),
             refresh_cycle_timeout: Instant::now(),
+            battery_cycle_timeout: Instant::now(),
         }
     }
 
@@ -83,14 +86,13 @@ impl<'a> Executer<'a> {
             DeviceCmd::AdjustScreenBrightness(change) => {
                 self.brightness_worker.adjust_screen_brightness(change);
             }
-            DeviceCmd::SetScreenBrightness(value) => {
-                self.brightness_worker
-                    .set_screen_brightness(value.clamp(0, 100));
-            }
             DeviceCmd::CycleRefreshRate => self.cycle_refresh_rate(),
 
             // Audio
             DeviceCmd::SetMuteIndicator(io, muted) => self.set_mute_indicator(io, muted),
+
+            // Battery Health Optimizer
+            DeviceCmd::CycleBatteryLimit => self.cycle_battery_limit(),
 
             // Queries
             DeviceCmd::GetPID(tx) => {
@@ -99,8 +101,11 @@ impl<'a> Executer<'a> {
             DeviceCmd::GetPerfMode(tx) => {
                 let _ = tx.send(self.get_perf_mode());
             }
-            DeviceCmd::GetRefreshRate(tx) => {
-                let _ = tx.send(self.get_refresh_rate());
+            DeviceCmd::GetDefaultMultimediaKeys(tx) => {
+                let _ = tx.send(self.get_default_multimedia_keys());
+            }
+            DeviceCmd::ToggleDefaultMultimediaKeys(tx) => {
+                let _ = tx.send(self.toggle_default_multimedia_keys());
             }
 
             // Config
@@ -111,6 +116,7 @@ impl<'a> Executer<'a> {
     // ── Initialization & Lifecycle ──────────────────────────────────────
 
     fn initialize(&mut self) {
+        PersistBuffer::disable();
         // Must set screen brightness first so SCREEN_TARGET_LVL is updated before next config persist
         let mut state = self.app_config.read();
 
@@ -122,9 +128,19 @@ impl<'a> Executer<'a> {
         self.set_keyboard_brightness(state.key_lvl);
         self.set_perf_mode(state.perf_mode.value());
 
+        let battery_limit = self.app_config.battery_limit.value();
+        self.set_battery_limit(battery_limit);
+
         if state.screen_refresh != 0 {
             self.set_refresh_rate(state.screen_refresh);
         }
+
+        match self.app_config.default_multimedia_keys {
+            true => self.enable_multimedia_keys(),
+            false => self.restore_fn_keys(),
+        }
+
+        PersistBuffer::enable();
     }
 
     fn sleep(&self) {
@@ -138,8 +154,9 @@ impl<'a> Executer<'a> {
         let _ = command(self.device, 0x0d02, &[1, 0, 6, 0], None); // reset perf mode
     }
 
-    fn shutdown(&self) {
+    fn shutdown(&mut self) {
         self.restore_fn_keys();
+        self.set_rgb_effect(RGBEffect::Cycle, false);
     }
 
     // ── Keyboard ────────────────────────────────────────────────────────
@@ -163,7 +180,7 @@ impl<'a> Executer<'a> {
 
     fn get_keyboard_brightness(&self) -> u8 {
         let brightness = command(self.device, 0x0383, &[1, 5, 0], Some(2));
-        tray_app().send(AppEvent::KeyboardBrightness(brightness));
+        tray_app().send(OsdEvent::KeyboardBrightness(brightness));
         brightness
     }
 
@@ -179,6 +196,23 @@ impl<'a> Executer<'a> {
         }
     }
 
+    fn get_default_multimedia_keys(&self) -> bool {
+        let current_default = self.app_config.default_multimedia_keys;
+        DEFAULT_MULTIMEDIA_KEYS.store(current_default, Ordering::SeqCst);
+        current_default
+    }
+
+    fn toggle_default_multimedia_keys(&mut self) -> bool {
+        let current_default = self.app_config.default_multimedia_keys;
+        self.app_config.default_multimedia_keys = !current_default;
+        match !current_default {
+            true => self.enable_multimedia_keys(),
+            false => self.restore_fn_keys(),
+        }
+        self.persist_config();
+        self.get_default_multimedia_keys()
+    }
+
     // ── RGB & Lighting ──────────────────────────────────────────────────
 
     fn cycle_rgb_mode(&mut self) {
@@ -189,7 +223,7 @@ impl<'a> Executer<'a> {
     fn set_rgb_effect(&mut self, rgb_effect: RGBEffect, save: bool) {
         if rgb_effect == RGBEffect::Ambient {
             AmbientEffect::start(device());
-            tray_app().send(AppEvent::RGBEffect(rgb_effect));
+            tray_app().send(OsdEvent::RGBEffect(rgb_effect));
         } else {
             AmbientEffect::stop();
         }
@@ -203,7 +237,7 @@ impl<'a> Executer<'a> {
             self.app_config.get().rgb_effect.set(&rgb_effect);
             if rgb_effect != RGBEffect::Ambient {
                 let effect = self.get_rgb_effect();
-                tray_app().send(AppEvent::RGBEffect(effect));
+                tray_app().send(OsdEvent::RGBEffect(effect));
             }
             self.persist_config();
         }
@@ -218,7 +252,7 @@ impl<'a> Executer<'a> {
         let new_brightness = if brightness > 0 { 0 } else { 255 };
         let _ = command(self.device, 0x0303, &[1, 38, new_brightness], None);
         let _ = command(self.device, 0x0300, &[1, 38, new_brightness / 255], None);
-        tray_app().send(AppEvent::UnderGlow(new_brightness));
+        tray_app().send(OsdEvent::UnderGlow(new_brightness));
         self.app_config.get().vc_lvl = new_brightness;
         self.persist_config();
     }
@@ -251,7 +285,7 @@ impl<'a> Executer<'a> {
 
     fn get_perf_mode(&self) -> PerfMode {
         let perf_mode: PerfMode = command(self.device, 0x0d82, &[0, 0, 0, 0], Some(2)).into();
-        tray_app().send(AppEvent::PerfMode(perf_mode));
+        tray_app().send(OsdEvent::PerfMode(perf_mode));
         perf_mode
     }
 
@@ -264,7 +298,7 @@ impl<'a> Executer<'a> {
             .iter()
             .position(|&rate| rate == current)
             .unwrap_or(0);
-        tray_app().send(AppEvent::RefreshRate(
+        tray_app().send(OsdEvent::RefreshRate(
             current,
             level as u8,
             supported.len() as u8,
@@ -290,6 +324,30 @@ impl<'a> Executer<'a> {
             let _ = self.display_manager.set_refresh_rate(refresh_rate);
             self.get_refresh_rate();
         }
+    }
+
+    // ── Battery ─────────────────────────────────────────────────────────
+
+    fn set_battery_limit(&mut self, limit: BatteryLimit) {
+        let _ = command(self.device, 0x0712, &[limit as u8], None);
+        let _ = command(self.device, 0x070f, &[10], None);
+        self.persist_config();
+    }
+
+    fn cycle_battery_limit(&mut self) {
+        if Instant::now() < self.battery_cycle_timeout {
+            let limit = self.app_config.battery_limit.next();
+            self.set_battery_limit(limit);
+        }
+        let current_limit = self.app_config.battery_limit.value();
+        let index = self.app_config.battery_limit.index;
+        let length = self.app_config.battery_limit.items.len();
+        tray_app().send(OsdEvent::BatteryLimit(
+            current_limit as u8,
+            index as u8,
+            length as u8,
+        ));
+        self.battery_cycle_timeout = Instant::now() + Duration::from_millis(1500);
     }
 
     // ── Audio ───────────────────────────────────────────────────────────

@@ -1,9 +1,8 @@
 use crate::config;
 use crate::razer::device_handle::device;
-use crate::ui::app_events::AppEvent;
-use crate::ui::tray_app::tray_app;
 use crate::win::audio::{self, AudioType};
-use crate::win::input::trackpad::get_trackpad_state;
+use crate::win::input::key;
+use crate::win::input::trackpad::toggle_trackpad;
 
 use hidapi::{HidApi, HidDevice};
 use once_cell::sync::Lazy;
@@ -15,11 +14,12 @@ use std::time::Duration;
 
 pub static FN_PRESSED: AtomicBool = AtomicBool::new(false);
 pub static ALT_PRESSED: AtomicBool = AtomicBool::new(false);
+pub static DEFAULT_MULTIMEDIA_KEYS: AtomicBool = AtomicBool::new(true);
 
 pub struct KeyCombo([Option<Key>; 4]);
 
 impl KeyCombo {
-    fn new(input: &[Key]) -> Self {
+    pub fn new(input: &[Key]) -> Self {
         let mut buffer = [None; 4];
         for (i, key) in input.iter().take(4).enumerate() {
             buffer[i] = Some(*key);
@@ -47,395 +47,348 @@ impl<'a> IntoIterator for &'a KeyCombo {
     }
 }
 
-pub struct KeyConfig {
-    pub normal: &'static str,
-    pub special: &'static str,
-    pub default_original: bool,
-    pub special_keys: KeyCombo,
-    pub func: Option<Box<dyn Fn() + Send + Sync>>,
+pub enum Source<'a> {
+    IsTrue(&'a AtomicBool),
+    IsFalse(&'a AtomicBool),
 }
 
-impl KeyConfig {
-    pub fn trigger(&self) {
-        self.special_keys.trigger();
-        if let Some(logic) = self.func.as_ref() {
-            logic();
+impl<'a> Source<'a> {
+    fn eval(&self) -> bool {
+        match self {
+            Source::IsTrue(atomic) => atomic.load(Ordering::SeqCst),
+            Source::IsFalse(atomic) => !atomic.load(Ordering::SeqCst),
         }
     }
 }
 
-pub static KEY_MAP: Lazy<HashMap<Key, KeyConfig>> = Lazy::new(|| {
-    HashMap::from([
-        (
-            Key::KeyR,
-            KeyConfig {
-                normal: "R",
-                special: "FN + R",
-                default_original: true,
-                special_keys: KeyCombo::new(&[]),
-                func: Some(Box::new(|| {
-                    device().cycle_refresh_rate();
-                })),
-            },
-        ),
-        (
-            Key::KeyT,
-            KeyConfig {
-                normal: "T",
-                special: "FN + T",
-                default_original: true,
-                special_keys: KeyCombo::new(&[Key::MetaLeft, Key::ControlLeft, Key::Unknown(135)]),
-                func: Some(Box::new(|| {
-                    tray_app().send(AppEvent::Trackpad(get_trackpad_state()))
-                })),
-            },
-        ),
-        (
-            Key::KeyV,
-            KeyConfig {
-                normal: "V",
-                special: "FN + V",
-                default_original: true,
-                special_keys: KeyCombo::new(&[]),
-                func: Some(Box::new(|| device().toggle_vc())),
-            },
-        ),
-        (
-            Key::KeyB,
-            KeyConfig {
-                normal: "B",
-                special: "FN + B",
-                default_original: true,
-                special_keys: KeyCombo::new(&[]),
-                func: None,
-            },
-        ),
-        (
-            Key::KeyP,
-            KeyConfig {
-                normal: "P",
-                special: "FN + P",
-                default_original: true,
-                special_keys: KeyCombo::new(&[]),
-                func: Some(Box::new(|| device().cycle_perf_mode())),
-            },
-        ),
-        (
-            Key::F1,
-            KeyConfig {
-                normal: "Mute",
-                special: "F1",
-                default_original: false,
-                special_keys: KeyCombo::new(&[Key::Unknown(173)]),
-                func: None,
-            },
-        ),
-        (
-            Key::F2,
-            KeyConfig {
-                normal: "Vol-",
-                special: "F2",
-                default_original: false,
-                special_keys: KeyCombo::new(&[Key::Unknown(174)]),
-                func: None,
-            },
-        ),
-        (
-            Key::F3,
-            KeyConfig {
-                normal: "Vol+",
-                special: "F3",
-                default_original: false,
-                special_keys: KeyCombo::new(&[Key::Unknown(175)]),
-                func: None,
-            },
-        ),
-        (
-            Key::F4,
-            KeyConfig {
-                normal: "Project",
-                special: "F4",
-                default_original: false,
-                special_keys: KeyCombo::new(&[Key::MetaLeft, Key::KeyP]),
-                func: None,
-            },
-        ),
-        (
-            Key::F5,
-            KeyConfig {
-                normal: "|◀◀",
-                special: "F5",
-                default_original: false,
-                special_keys: KeyCombo::new(&[Key::Unknown(177)]),
-                func: None,
-            },
-        ),
-        (
-            Key::F6,
-            KeyConfig {
-                normal: "▶||",
-                special: "F6",
-                default_original: false,
-                special_keys: KeyCombo::new(&[Key::Unknown(179)]),
-                func: None,
-            },
-        ),
-        (
-            Key::F7,
-            KeyConfig {
-                normal: "▶▶|",
-                special: "F7",
-                default_original: false,
-                special_keys: KeyCombo::new(&[Key::Unknown(176)]),
-                func: None,
-            },
-        ),
-        (
-            Key::F8,
-            KeyConfig {
-                normal: "Brightness-",
-                special: "F8",
-                default_original: false,
-                special_keys: KeyCombo::new(&[]),
-                func: Some(Box::new(|| device().adjust_screen_brightness(-10))),
-            },
-        ),
-        (
-            Key::F9,
-            KeyConfig {
-                normal: "Brightness+",
-                special: "F9",
-                default_original: false,
-                special_keys: KeyCombo::new(&[]),
-                func: Some(Box::new(|| device().adjust_screen_brightness(10))),
-            },
-        ),
-        (
-            Key::F10,
-            KeyConfig {
-                normal: "Keyboard-",
-                special: "F10",
-                default_original: false,
-                special_keys: KeyCombo::new(&[]),
-                func: Some(Box::new(|| device().keyboard_light_down())),
-            },
-        ),
-        (
-            Key::F11,
-            KeyConfig {
-                normal: "Keyboard+",
-                special: "F11",
-                default_original: false,
-                special_keys: KeyCombo::new(&[]),
-                func: Some(Box::new(|| device().keyboard_light_up())),
-            },
-        ),
-        (
-            Key::F12,
-            KeyConfig {
-                normal: "prt sc",
-                special: "F12",
-                default_original: false,
-                special_keys: KeyCombo::new(&[Key::PrintScreen]),
-                func: None,
-            },
-        ),
-    ])
-});
+pub struct KeyEventAction<'a> {
+    action: Box<dyn Fn() + Send + Sync>,
+    condition: Vec<Source<'a>>,
+}
 
-pub static RAZER_KEY_MAP: Lazy<HashMap<u8, KeyConfig>> = Lazy::new(|| {
+impl<'a> KeyEventAction<'a> {
+    pub fn new(action: Box<dyn Fn() + Send + Sync>, condition: Vec<Source<'a>>) -> Self {
+        Self { action, condition }
+    }
+    pub fn execute(&self) -> bool {
+        let conditions_met = self.condition.iter().all(|check| check.eval());
+        if conditions_met {
+            (self.action)();
+        }
+        conditions_met
+    }
+}
+
+pub static KEY_MAP: Lazy<HashMap<key::Key, KeyEventAction>> = Lazy::new(|| {
     HashMap::from([
         (
-            0x0a,
-            KeyConfig {
-                normal: "fn",
-                special: "",
-                default_original: false,
-                special_keys: KeyCombo::new(&[]),
-                func: Some(Box::new(|| FN_PRESSED.store(true, Ordering::SeqCst))),
-            },
+            key::Key::B,
+            KeyEventAction::new(
+                Box::new(|| {
+                    device().cycle_battery_limit();
+                }),
+                vec![Source::IsTrue(&FN_PRESSED)],
+            ),
         ),
         (
-            0x00,
-            KeyConfig {
-                normal: "clear",
-                special: "",
-                default_original: false,
-                special_keys: KeyCombo::new(&[]),
-                func: Some(Box::new(|| FN_PRESSED.store(false, Ordering::SeqCst))),
-            },
+            key::Key::P,
+            KeyEventAction::new(
+                Box::new(|| {
+                    device().cycle_perf_mode();
+                }),
+                vec![Source::IsTrue(&FN_PRESSED)],
+            ),
         ),
         (
-            0xd4,
-            KeyConfig {
-                normal: "Mic Mute Toggle",
-                special: "",
-                default_original: false,
-                special_keys: KeyCombo::new(&[Key::Unknown(157)]),
-                func: Some(Box::new(|| audio::toggle_audio_mute(AudioType::Mic))),
-            },
+            key::Key::R,
+            KeyEventAction::new(
+                Box::new(|| {
+                    device().cycle_refresh_rate();
+                }),
+                vec![Source::IsTrue(&FN_PRESSED)],
+            ),
         ),
         (
-            0xdd,
-            KeyConfig {
-                normal: "Trackpad Toggle",
-                special: "",
-                default_original: false,
-                special_keys: KeyCombo::new(&[Key::MetaLeft, Key::ControlLeft, Key::Unknown(135)]),
-                func: Some(Box::new(|| {
-                    tray_app().send(AppEvent::Trackpad(get_trackpad_state()))
-                })),
-            },
+            key::Key::T,
+            KeyEventAction::new(
+                Box::new(|| {
+                    toggle_trackpad();
+                }),
+                vec![Source::IsTrue(&FN_PRESSED)],
+            ),
         ),
         (
-            0xd3,
-            KeyConfig {
-                normal: "Performance Mode Cycle",
-                special: "",
-                default_original: false,
-                special_keys: KeyCombo::new(&[]),
-                func: Some(Box::new(|| device().cycle_perf_mode())),
-            },
+            key::Key::V,
+            KeyEventAction::new(
+                Box::new(|| {
+                    device().toggle_vc();
+                }),
+                vec![Source::IsTrue(&FN_PRESSED)],
+            ),
         ),
         (
-            0x24,
-            KeyConfig {
-                normal: "M1",
-                special: "",
-                default_original: false,
-                special_keys: KeyCombo::new(&[]),
-                func: None,
-            },
+            key::Key::F1,
+            KeyEventAction::new(
+                Box::new(|| {
+                    KeyCombo::new(&[Key::Unknown(173)]).trigger();
+                }),
+                vec![
+                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
+                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsFalse(&ALT_PRESSED),
+                ],
+            ),
         ),
         (
-            0x25,
-            KeyConfig {
-                normal: "M2",
-                special: "",
-                default_original: false,
-                special_keys: KeyCombo::new(&[]),
-                func: None,
-            },
+            key::Key::F2,
+            KeyEventAction::new(
+                Box::new(|| {
+                    KeyCombo::new(&[Key::Unknown(174)]).trigger();
+                }),
+                vec![
+                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
+                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsFalse(&ALT_PRESSED),
+                ],
+            ),
         ),
         (
-            0x26,
-            KeyConfig {
-                normal: "M3",
-                special: "",
-                default_original: false,
-                special_keys: KeyCombo::new(&[]),
-                func: None,
-            },
+            key::Key::F3,
+            KeyEventAction::new(
+                Box::new(|| {
+                    KeyCombo::new(&[Key::Unknown(175)]).trigger();
+                }),
+                vec![
+                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
+                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsFalse(&ALT_PRESSED),
+                ],
+            ),
         ),
         (
-            0x27,
-            KeyConfig {
-                normal: "M4",
-                special: "",
-                default_original: false,
-                special_keys: KeyCombo::new(&[]),
-                func: None,
-            },
+            key::Key::F4,
+            KeyEventAction::new(
+                Box::new(|| {
+                    KeyCombo::new(&[Key::MetaLeft, Key::KeyP]).trigger();
+                }),
+                vec![
+                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
+                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsFalse(&ALT_PRESSED),
+                ],
+            ),
         ),
         (
-            0x03,
-            KeyConfig {
-                normal: "Game Mode Toggle",
-                special: "",
-                default_original: false,
-                special_keys: KeyCombo::new(&[]),
-                func: None,
-            },
+            key::Key::F5,
+            KeyEventAction::new(
+                Box::new(|| {
+                    KeyCombo::new(&[Key::Unknown(177)]).trigger();
+                }),
+                vec![
+                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
+                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsFalse(&ALT_PRESSED),
+                ],
+            ),
         ),
         (
-            0xd2,
-            KeyConfig {
-                normal: "CoPilot",
-                special: "",
-                default_original: false,
-                special_keys: KeyCombo::new(&[]),
-                func: Some(Box::new(|| device().cycle_rgb_mode())),
-            },
+            key::Key::F6,
+            KeyEventAction::new(
+                Box::new(|| {
+                    KeyCombo::new(&[Key::Unknown(179)]).trigger();
+                }),
+                vec![
+                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
+                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsFalse(&ALT_PRESSED),
+                ],
+            ),
         ),
         (
-            0xd5,
-            KeyConfig {
-                normal: "home",
-                special: "",
-                default_original: false,
-                special_keys: KeyCombo::new(&[Key::Unknown(36)]),
-                func: None,
-            },
+            key::Key::F7,
+            KeyEventAction::new(
+                Box::new(|| {
+                    KeyCombo::new(&[Key::Unknown(176)]).trigger();
+                }),
+                vec![
+                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
+                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsFalse(&ALT_PRESSED),
+                ],
+            ),
         ),
         (
-            0xd6,
-            KeyConfig {
-                normal: "up",
-                special: "",
-                default_original: false,
-                special_keys: KeyCombo::new(&[Key::Unknown(38)]),
-                func: None,
-            },
+            key::Key::F8,
+            KeyEventAction::new(
+                Box::new(|| {
+                    device().adjust_screen_brightness(-10);
+                }),
+                vec![
+                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
+                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsFalse(&ALT_PRESSED),
+                ],
+            ),
         ),
         (
-            0xd7,
-            KeyConfig {
-                normal: "pg up",
-                special: "",
-                default_original: false,
-                special_keys: KeyCombo::new(&[Key::Unknown(33)]),
-                func: None,
-            },
+            key::Key::F9,
+            KeyEventAction::new(
+                Box::new(|| {
+                    device().adjust_screen_brightness(10);
+                }),
+                vec![
+                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
+                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsFalse(&ALT_PRESSED),
+                ],
+            ),
         ),
         (
-            0xd8,
-            KeyConfig {
-                normal: "left",
-                special: "",
-                default_original: false,
-                special_keys: KeyCombo::new(&[Key::Unknown(37)]),
-                func: None,
-            },
+            key::Key::F10,
+            KeyEventAction::new(
+                Box::new(|| {
+                    device().keyboard_light_down();
+                }),
+                vec![
+                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
+                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsFalse(&ALT_PRESSED),
+                ],
+            ),
         ),
         (
-            0xd9,
-            KeyConfig {
-                normal: "right",
-                special: "",
-                default_original: false,
-                special_keys: KeyCombo::new(&[Key::Unknown(39)]),
-                func: None,
-            },
+            key::Key::F11,
+            KeyEventAction::new(
+                Box::new(|| {
+                    device().keyboard_light_up();
+                }),
+                vec![
+                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
+                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsFalse(&ALT_PRESSED),
+                ],
+            ),
         ),
         (
-            0xda,
-            KeyConfig {
-                normal: "end",
-                special: "",
-                default_original: false,
-                special_keys: KeyCombo::new(&[Key::Unknown(35)]),
-                func: None,
-            },
+            key::Key::F12,
+            KeyEventAction::new(
+                Box::new(|| {
+                    KeyCombo::new(&[Key::PrintScreen]).trigger();
+                }),
+                vec![
+                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
+                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsFalse(&ALT_PRESSED),
+                ],
+            ),
         ),
         (
-            0xdb,
-            KeyConfig {
-                normal: "down",
-                special: "",
-                default_original: false,
-                special_keys: KeyCombo::new(&[Key::Unknown(40)]),
-                func: None,
-            },
+            key::Key::Mic,
+            KeyEventAction::new(
+                Box::new(|| {
+                    audio::toggle_audio_mute(AudioType::Mic);
+                }),
+                vec![],
+            ),
         ),
         (
-            0xdc,
-            KeyConfig {
-                normal: "pg dn",
-                special: "",
-                default_original: false,
-                special_keys: KeyCombo::new(&[Key::Unknown(34)]),
-                func: None,
-            },
+            key::Key::Trackpad,
+            KeyEventAction::new(
+                Box::new(|| {
+                    toggle_trackpad();
+                }),
+                vec![],
+            ),
+        ),
+        (
+            key::Key::Perf,
+            KeyEventAction::new(
+                Box::new(|| {
+                    device().cycle_perf_mode();
+                }),
+                vec![],
+            ),
+        ),
+        (
+            key::Key::CoPilot,
+            KeyEventAction::new(
+                Box::new(|| {
+                    device().cycle_rgb_mode();
+                }),
+                vec![],
+            ),
+        ),
+        (
+            key::Key::Home,
+            KeyEventAction::new(
+                Box::new(|| {
+                    KeyCombo::new(&[Key::Unknown(36)]).trigger();
+                }),
+                vec![],
+            ),
+        ),
+        (
+            key::Key::Up,
+            KeyEventAction::new(
+                Box::new(|| {
+                    KeyCombo::new(&[Key::Unknown(38)]).trigger();
+                }),
+                vec![],
+            ),
+        ),
+        (
+            key::Key::PgUp,
+            KeyEventAction::new(
+                Box::new(|| {
+                    KeyCombo::new(&[Key::Unknown(33)]).trigger();
+                }),
+                vec![],
+            ),
+        ),
+        (
+            key::Key::Left,
+            KeyEventAction::new(
+                Box::new(|| {
+                    KeyCombo::new(&[Key::Unknown(37)]).trigger();
+                }),
+                vec![],
+            ),
+        ),
+        (
+            key::Key::Right,
+            KeyEventAction::new(
+                Box::new(|| {
+                    KeyCombo::new(&[Key::Unknown(39)]).trigger();
+                }),
+                vec![],
+            ),
+        ),
+        (
+            key::Key::End,
+            KeyEventAction::new(
+                Box::new(|| {
+                    KeyCombo::new(&[Key::Unknown(35)]).trigger();
+                }),
+                vec![],
+            ),
+        ),
+        (
+            key::Key::Down,
+            KeyEventAction::new(
+                Box::new(|| {
+                    KeyCombo::new(&[Key::Unknown(40)]).trigger();
+                }),
+                vec![],
+            ),
+        ),
+        (
+            key::Key::PgDn,
+            KeyEventAction::new(
+                Box::new(|| {
+                    KeyCombo::new(&[Key::Unknown(34)]).trigger();
+                }),
+                vec![],
+            ),
         ),
     ])
 });
@@ -488,21 +441,25 @@ pub fn spawn_special_key_listener_thread(device_api: HidDevice, iface_num: i32, 
         let mut buf = [0u8; 16];
         // Close interfaces as soon as we detect they are likely not the target
         while let Ok(len) = device_api.read(&mut buf) {
-            if len > 0 {
-                if buf[0] == 0x04 {
-                    if let Some(config) = RAZER_KEY_MAP.get(&buf[1]) {
-                        println!("{} DETECTED!", config.normal);
-                        config.trigger();
-                    }
-                } else if buf[0] == 0x01 {
-                    // pass - standard key codes
-                } else {
-                    break;
-                }
-            } else {
+            if !(len > 0) {
                 println!("noise?");
                 break;
-            };
+            }
+            if buf[0] == 0x04 {
+                // Razer special key events
+                match buf[1] {
+                    0x0a => FN_PRESSED.store(true, Ordering::SeqCst),
+                    0x00 => FN_PRESSED.store(false, Ordering::SeqCst),
+                    _ => {
+                        let key = key::Key::from(buf[1]);
+                        if let Some(action) = KEY_MAP.get(&key) {
+                            let _ = action.execute();
+                        }
+                    }
+                }
+            } else {
+                break;
+            }
         }
         println!("Closed Interface {} (Path: {:?})", iface_num, path);
     });
@@ -518,45 +475,24 @@ pub fn spawn_standard_key_listener_thread() {
 }
 
 fn standard_key_callback(event: Event) -> Option<Event> {
-    if let EventType::KeyPress(key) = event.event_type {
-        if let Some(config) = KEY_MAP.get(&key) {
-            let is_fn = FN_PRESSED.load(Ordering::SeqCst);
-            let is_alt = ALT_PRESSED.load(Ordering::SeqCst);
-
-            if is_alt {
-                // Alt modifier key should use F keys even if they are set to defualt multimedia (e.g. Alt F4)
-                Some(event)
-            } else if is_fn {
-                println!("{} DETECTED!", config.special);
-                if config.default_original {
-                    config.trigger();
-                    None
-                } else {
-                    Some(event)
-                }
-            } else {
-                println!("{} DETECTED!", config.normal);
-                if config.default_original {
-                    Some(event)
-                } else {
-                    config.trigger();
-                    None
-                }
-            }
-        } else {
-            if key == Key::Alt {
-                println! {"alt pressed"}
-                ALT_PRESSED.store(true, Ordering::SeqCst);
-            }
-            Some(event)
+    if let EventType::KeyPress(rdev_key) = event.event_type {
+        if rdev_key == Key::Alt {
+            ALT_PRESSED.store(true, Ordering::SeqCst);
         }
-    } else {
-        if let EventType::KeyRelease(key) = event.event_type
-            && key == Key::Alt
-        {
-            println! {"released alt"}
+
+        let key = key::Key::from(rdev_key);
+        if key != key::Key::Unknown(0) {
+            if let Some(event_action) = KEY_MAP.get(&key) {
+                match event_action.execute() {
+                    true => return None,
+                    false => (),
+                }
+            }
+        }
+    } else if let EventType::KeyRelease(key) = event.event_type {
+        if key == Key::Alt {
             ALT_PRESSED.store(false, Ordering::SeqCst);
         }
-        Some(event)
     }
+    Some(event)
 }

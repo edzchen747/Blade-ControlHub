@@ -2,13 +2,8 @@ use std::borrow::Cow;
 use std::sync::LazyLock;
 
 use crate::{
-    razer::{
-        device_handle::device,
-        enums::{PerfMode, RGBEffect},
-    },
+    razer::enums::{BatteryLimit, PerfMode, RGBEffect},
     ui::icon,
-    utils::reload::restart_app,
-    win::system::startup::Startup,
 };
 
 // ── OSD Icon Identifiers ────────────────────────────────────────────────────
@@ -23,6 +18,8 @@ pub enum OsdIconId {
     RGBEffect,
     UnderGlow(bool),
     RefreshRate,
+    BatteryLimit(bool),
+    FunctionKey,
 }
 
 // ── Strike-through Overlay ──────────────────────────────────────────────────
@@ -46,6 +43,8 @@ static TRACKPAD_OFF_SVG: LazyLock<Vec<u8>> =
     LazyLock::new(|| with_strikethrough(include_bytes!("../../assets/trackpad.svg")));
 static UNDERGLOW_OFF_SVG: LazyLock<Vec<u8>> =
     LazyLock::new(|| with_strikethrough(include_bytes!("../../assets/underglow.svg")));
+static BATTERY_LIMIT_OFF: LazyLock<Vec<u8>> =
+    LazyLock::new(|| with_strikethrough(include_bytes!("../../assets/battery_limit.svg")));
 
 impl OsdIconId {
     /// Returns the `(uri, bytes)` pair for embedding the icon in the OSD.
@@ -88,6 +87,18 @@ impl OsdIconId {
                 "bytes://refresh.svg",
                 Cow::Borrowed(include_bytes!("../../assets/refresh.svg")),
             ),
+            Self::BatteryLimit(true) => (
+                "bytes://battery_limit.svg",
+                Cow::Borrowed(include_bytes!("../../assets/battery_limit.svg")),
+            ),
+            Self::BatteryLimit(false) => (
+                "bytes://battery_limit_off.svg",
+                Cow::Borrowed(&BATTERY_LIMIT_OFF),
+            ),
+            Self::FunctionKey => (
+                "bytes://function_key.svg",
+                Cow::Borrowed(include_bytes!("../../assets/function_key.svg")),
+            ),
         }
     }
 }
@@ -105,7 +116,7 @@ pub struct OsdResponse {
 // ── Application Events ──────────────────────────────────────────────────────
 
 /// High-level events that drive the application UI and system actions.
-pub enum AppEvent {
+pub enum OsdEvent {
     ScreenBrightness(u8),
     KeyboardBrightness(u8),
     PerfMode(PerfMode),
@@ -114,30 +125,29 @@ pub enum AppEvent {
     RGBEffect(RGBEffect),
     UnderGlow(u8),
     RefreshRate(u32, u8, u8),
-    Quit,
-    Restart,
-    StartupToggle(bool),
+    BatteryLimit(u8, u8, u8),
+    ToggleDefaultMultimediaKeys(bool),
 }
 
 // ── Event Processing ────────────────────────────────────────────────────────
 
-/// Processes an `AppEvent` and returns `Some(OsdResponse)` when the OSD should
+/// Processes an `OsdEvent` and returns `Some(OsdResponse)` when the OSD should
 /// be triggered, or `None` for silent actions.
-pub fn process_event(event: AppEvent, tray_icon: &mut tray_icon::TrayIcon) -> Option<OsdResponse> {
+pub fn process_event(event: OsdEvent, tray_icon: &mut tray_icon::TrayIcon) -> Option<OsdResponse> {
     match event {
-        AppEvent::ScreenBrightness(lvl) => Some(OsdResponse {
+        OsdEvent::ScreenBrightness(lvl) => Some(OsdResponse {
             text: String::new(),
             icon_id: Some(OsdIconId::Brightness),
             total_levels: 10,
             current_level: lvl / 10,
         }),
-        AppEvent::KeyboardBrightness(lvl) => Some(OsdResponse {
+        OsdEvent::KeyboardBrightness(lvl) => Some(OsdResponse {
             text: String::new(),
             icon_id: Some(OsdIconId::KeyboardBrightness),
             total_levels: 5,
             current_level: lvl / 51,
         }),
-        AppEvent::PerfMode(mode) => {
+        OsdEvent::PerfMode(mode) => {
             icon::set_perf_mode_icon(tray_icon, mode);
             Some(OsdResponse {
                 text: mode.to_string(),
@@ -146,48 +156,55 @@ pub fn process_event(event: AppEvent, tray_icon: &mut tray_icon::TrayIcon) -> Op
                 current_level: 0,
             })
         }
-        AppEvent::MicMute(muted) => Some(OsdResponse {
+        OsdEvent::MicMute(muted) => Some(OsdResponse {
             text: String::new(),
             icon_id: Some(OsdIconId::MicMute(muted)),
             total_levels: 1,
             current_level: !muted as u8,
         }),
-        AppEvent::Trackpad(state) => Some(OsdResponse {
+        OsdEvent::Trackpad(state) => Some(OsdResponse {
             text: String::new(),
             icon_id: Some(OsdIconId::Trackpad(state)),
             total_levels: 1,
             current_level: state as u8,
         }),
-        AppEvent::RGBEffect(effect) => Some(OsdResponse {
+        OsdEvent::RGBEffect(effect) => Some(OsdResponse {
             text: effect.to_string(),
             icon_id: Some(OsdIconId::RGBEffect),
             total_levels: 0,
             current_level: 0,
         }),
-        AppEvent::UnderGlow(lvl) => Some(OsdResponse {
+        OsdEvent::UnderGlow(lvl) => Some(OsdResponse {
             text: String::new(),
             icon_id: Some(OsdIconId::UnderGlow(lvl > 0)),
             total_levels: 1,
             current_level: lvl / 255,
         }),
-        AppEvent::RefreshRate(current, level, total) => Some(OsdResponse {
+        OsdEvent::RefreshRate(current, level, total) => Some(OsdResponse {
             text: current.to_string(),
             icon_id: Some(OsdIconId::RefreshRate),
             total_levels: total,
             current_level: level,
         }),
-        AppEvent::Quit => {
-            device().shutdown();
-            std::process::exit(0);
-        }
-        AppEvent::Restart => restart_app(0),
-        AppEvent::StartupToggle(enabled) => {
-            if enabled && !Startup::is_registered() {
-                Startup::register();
-            } else if !enabled && Startup::is_registered() {
-                Startup::unregister();
-            }
-            None
+        OsdEvent::BatteryLimit(current, level, total) => Some(OsdResponse {
+            text: BatteryLimit::from(current).to_string(),
+            icon_id: Some(OsdIconId::BatteryLimit(
+                BatteryLimit::from(current) != BatteryLimit::Off,
+            )),
+            total_levels: total,
+            current_level: level,
+        }),
+        OsdEvent::ToggleDefaultMultimediaKeys(is_multimedia) => {
+            let text = match is_multimedia {
+                true => "Multimedia".to_string(),
+                false => "Function".to_string(),
+            };
+            Some(OsdResponse {
+                text: text,
+                icon_id: Some(OsdIconId::FunctionKey),
+                total_levels: 1,
+                current_level: is_multimedia as u8,
+            })
         }
     }
 }

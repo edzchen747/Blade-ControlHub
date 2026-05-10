@@ -12,7 +12,7 @@ use crate::utils::oncelock_ext::OnceLockExt;
 
 // ── Global State ────────────────────────────────────────────────────────────
 
-static TRAY_APP_TX: OnceLock<Sender<AppEvent>> = OnceLock::new();
+static TRAY_APP_TX: OnceLock<Sender<OsdEvent>> = OnceLock::new();
 static OSD_CONTEXT: OnceLock<egui::Context> = OnceLock::new();
 
 // ── Fade Animation ──────────────────────────────────────────────────────────
@@ -33,7 +33,7 @@ struct TrayApp {
     last_update: Instant,
 
     // Event channel
-    rx: Receiver<AppEvent>,
+    rx: Receiver<OsdEvent>,
 
     // System tray
     tray_icon: TrayIcon,
@@ -46,7 +46,7 @@ struct TrayApp {
 }
 
 impl TrayApp {
-    fn new(rx: Receiver<AppEvent>) -> Self {
+    fn new(rx: Receiver<OsdEvent>) -> Self {
         Self {
             state: OsdState::Hidden,
             show_until: None,
@@ -286,13 +286,13 @@ impl eframe::App for TrayApp {
 
 // ── Public Handle ───────────────────────────────────────────────────────────
 
-/// A clonable handle for sending `AppEvent`s to the OSD application.
+/// A clonable handle for sending `OsdEvent`s to the OSD application.
 pub struct TrayAppHandle {
-    tx: Sender<AppEvent>,
+    tx: Sender<OsdEvent>,
 }
 
 impl TrayAppHandle {
-    pub fn send(&self, event: AppEvent) {
+    pub fn send(&self, event: OsdEvent) {
         self.tx
             .send(event)
             .expect("Fatal internal error: OSD TX send");
@@ -315,7 +315,7 @@ pub fn tray_app() -> TrayAppHandle {
 
 /// Launches the eframe-based OSD overlay and tray icon application.
 pub fn run() {
-    let (tx, rx) = mpsc::channel::<AppEvent>();
+    let (tx, rx) = mpsc::channel::<OsdEvent>();
     eframe::run_native(
         "Blade ControlHub OSD",
         native_options(),

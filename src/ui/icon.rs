@@ -1,13 +1,14 @@
 use crate::razer::device_handle::device;
 use crate::razer::enums::PerfMode;
-use crate::ui::app_events::AppEvent;
+use crate::ui::app_events::OsdEvent;
 use crate::ui::tray_app::tray_app;
+use crate::utils::reload::restart_app;
 use crate::win::system::startup::Startup;
 
 use resvg::{tiny_skia, usvg};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
+use std::{thread, time};
 use tray_icon::menu::CheckMenuItem;
 use tray_icon::{
     Icon, TrayIconBuilder,
@@ -111,6 +112,7 @@ fn build_tray_menu() -> Menu {
     let restart_item = MenuItem::with_id("restart", "Restart", true, None);
 
     let startup_detected = Startup::is_registered();
+    let default_multimedia_keys = device().get_default_multimedia_keys();
     let startup_item = CheckMenuItem::with_id(
         "startup_toggle",
         "Start with Windows",
@@ -118,11 +120,19 @@ fn build_tray_menu() -> Menu {
         startup_detected,
         None,
     );
+    let default_keys_item = CheckMenuItem::with_id(
+        "default_multimedia_keys",
+        "Default Multimedia Keys",
+        true,
+        default_multimedia_keys,
+        None,
+    );
     STARTUP_STATE.store(startup_detected, Ordering::SeqCst);
 
     tray_menu.append(&quit_item).unwrap();
     tray_menu.append(&restart_item).unwrap();
     tray_menu.append(&startup_item).unwrap();
+    tray_menu.append(&default_keys_item).unwrap();
 
     tray_menu
 }
@@ -133,15 +143,25 @@ fn setup_menu_event_handler() {
 
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| match event.id.0.as_str() {
         "quit" => {
-            tray_app().send(AppEvent::Quit);
+            device().shutdown();
+            std::thread::sleep(time::Duration::from_millis(500));
+            std::process::exit(0);
         }
         "restart" => {
-            tray_app().send(AppEvent::Restart);
+            restart_app(0);
         }
         "startup_toggle" => {
             let is_checked = !startup_state.load(Ordering::SeqCst);
             startup_state.store(is_checked, Ordering::SeqCst);
-            tray_app().send(AppEvent::StartupToggle(is_checked));
+            if is_checked && !Startup::is_registered() {
+                Startup::register();
+            } else if !is_checked && Startup::is_registered() {
+                Startup::unregister();
+            }
+        }
+        "default_multimedia_keys" => {
+            let new_default = device().toggle_default_multimedia_keys();
+            tray_app().send(OsdEvent::ToggleDefaultMultimediaKeys(new_default))
         }
         _ => {}
     }));

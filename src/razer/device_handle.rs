@@ -42,13 +42,14 @@ pub enum DeviceCmd {
     AdjustKeyboardLight(bool),
     GetPID(mpsc::Sender<u16>),
     GetPerfMode(mpsc::Sender<PerfMode>),
+    GetDefaultMultimediaKeys(mpsc::Sender<bool>),
+    ToggleDefaultMultimediaKeys(mpsc::Sender<bool>),
     SetMuteIndicator(AudioType, bool),
+    CycleBatteryLimit,
     CycleRGBMode,
     CyclePerfMode,
     ToggleUnderGlow,
     AdjustScreenBrightness(i8),
-    SetScreenBrightness(u8),
-    GetRefreshRate(mpsc::Sender<u32>),
     CycleRefreshRate,
     KeyboardColor(u8, u8, u8),
     PersistConfig,
@@ -76,9 +77,14 @@ impl DeviceHandle {
             .expect("Get performance mode error")
     }
 
-    pub fn get_refresh_rate(&self) -> u32 {
-        self.query(DeviceCmd::GetRefreshRate)
-            .expect("Get refresh rate error")
+    pub fn get_default_multimedia_keys(&self) -> bool {
+        self.query(DeviceCmd::GetDefaultMultimediaKeys)
+            .expect("Get default keys error")
+    }
+
+    pub fn toggle_default_multimedia_keys(&self) -> bool {
+        self.query(DeviceCmd::ToggleDefaultMultimediaKeys)
+            .expect("Get default keys error")
     }
 
     // ── Fire-and-forget commands ────────────────────────────────────
@@ -133,6 +139,10 @@ impl DeviceHandle {
 
     pub fn cycle_refresh_rate(&self) {
         self.send(DeviceCmd::CycleRefreshRate);
+    }
+
+    pub fn cycle_battery_limit(&self) {
+        self.send(DeviceCmd::CycleBatteryLimit);
     }
 
     pub fn persist_config(&self) {

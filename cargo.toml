@@ -20,7 +20,6 @@ pollster = "0.4.0"
 
 # Keyboard hooks
 rdev = { version = "0.5", features = ["unstable_grab"] }
-keycode = "1.0.0"
 
 # SVG rendering
 resvg = "0.42"

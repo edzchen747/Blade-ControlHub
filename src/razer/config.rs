@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 /// Tracks a current index and advances through the collection in a loop.
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct CycleState<T> {
-    index: usize,
+    pub index: usize,
     pub items: Vec<T>,
 }
 
@@ -89,6 +89,8 @@ fn default_perf_mode() -> CycleState<PerfMode> {
 pub struct AppConfig {
     power_state: DeviceState,
     battery_state: DeviceState,
+    pub battery_limit: CycleState<BatteryLimit>,
+    pub default_multimedia_keys: bool,
 }
 
 impl Default for AppConfig {
@@ -96,18 +98,16 @@ impl Default for AppConfig {
         Self {
             power_state: DeviceState::default(),
             battery_state: DeviceState::default(),
+            battery_limit: CycleState {
+                index: 0,
+                items: BATTERY_LIMITS.to_vec(),
+            },
+            default_multimedia_keys: false,
         }
     }
 }
 
 impl AppConfig {
-    pub fn from(power_state: DeviceState, battery_state: DeviceState) -> Self {
-        Self {
-            power_state,
-            battery_state,
-        }
-    }
-
     /// Returns a mutable reference to the active power state.
     pub fn get(&mut self) -> &mut DeviceState {
         if IS_PLUGGED_IN.load(Ordering::SeqCst) {

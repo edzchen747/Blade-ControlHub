@@ -9,6 +9,8 @@ mod win;
 use std::{thread, time::Duration};
 use sysinfo::System;
 
+use crate::razer::device_handle::device;
+
 fn main() {
     let exe_path = std::env::current_exe().unwrap();
     let exe_dir = exe_path.parent().unwrap();
@@ -17,6 +19,7 @@ fn main() {
     close_running_instances();
     start_razer_service();
     println!("Razer service started...");
+    device().initialize();
     ui::tray_app::run();
 }
 

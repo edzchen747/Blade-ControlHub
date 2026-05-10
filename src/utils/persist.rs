@@ -1,8 +1,11 @@
 use std::fs::File;
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
+
+pub static PERSIST_ENABLED: AtomicBool = AtomicBool::new(true);
 
 /// A debounced file writer that batches rapid writes into a single disk commit.
 ///
@@ -31,11 +34,13 @@ impl PersistBuffer {
                 match rx.recv_timeout(timeout) {
                     // New data sent to be persisted
                     Ok(content) => {
-                        if flush_at.is_none() {
-                            // Set timer for a "debounced" write (2 seconds)
-                            flush_at = Some(Instant::now() + Duration::from_secs(2));
+                        if PERSIST_ENABLED.load(Ordering::SeqCst) {
+                            if flush_at.is_none() {
+                                // Set timer for a "debounced" write (2 seconds)
+                                flush_at = Some(Instant::now() + Duration::from_secs(2));
+                            }
+                            pending_content = Some(content);
                         }
-                        pending_content = Some(content);
                     }
 
                     // Timer expired: Time to save to disk
@@ -79,5 +84,13 @@ impl PersistBuffer {
             }
             Err(e) => eprintln!("Failed to write config to {}: {}", path, e),
         }
+    }
+
+    pub fn enable() {
+        PERSIST_ENABLED.store(true, Ordering::SeqCst);
+    }
+
+    pub fn disable() {
+        PERSIST_ENABLED.store(false, Ordering::SeqCst);
     }
 }
