@@ -4,7 +4,7 @@ use winreg::enums::*;
 
 use crate::ui::app_events::OsdEvent;
 use crate::ui::tray_app::tray_app;
-use crate::win::input::key_hook::KeyCombo;
+use crate::win::input::key_map::KeyCombo;
 
 /// Queries the Windows registry to determine if the precision touchpad is enabled.
 pub fn get_trackpad_state() -> bool {

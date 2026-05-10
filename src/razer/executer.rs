@@ -15,7 +15,7 @@ use crate::{
         display::{
             ambient::AmbientEffect, brightness::BrightnessWorker, refresh_rate::DisplayManager,
         },
-        input::key_hook::DEFAULT_MULTIMEDIA_KEYS,
+        input::key_map::DEFAULT_MULTIMEDIA_KEYS,
     },
 };
 use std::sync::{atomic::Ordering, mpsc::Receiver};
@@ -341,7 +341,7 @@ impl<'a> Executer<'a> {
         }
         let current_limit = self.app_config.battery_limit.value();
         let index = self.app_config.battery_limit.index;
-        let length = self.app_config.battery_limit.items.len();
+        let length = self.app_config.battery_limit.items.len() - 1;
         tray_app().send(OsdEvent::BatteryLimit(
             current_limit as u8,
             index as u8,

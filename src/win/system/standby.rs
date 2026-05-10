@@ -79,77 +79,84 @@ unsafe extern "system" fn standby_callback(
     }
 }
 
-pub fn spawn_listener_thread() {
-    thread::spawn(|| {
-        unsafe {
-            let instance = GetModuleHandleW(None).expect("Fatal internal error: GetModuleHandleW");
-            let class_name: Vec<u16> = "RazerPowerListener\0".encode_utf16().collect();
+pub struct StandbyMonitor {}
 
-            let wnd_class = WNDCLASSW {
-                hInstance: instance.into(),
-                lpszClassName: PCWSTR(class_name.as_ptr()),
-                lpfnWndProc: Some(wnd_proc),
-                ..Default::default()
-            };
-            RegisterClassW(&wnd_class);
+impl StandbyMonitor {
+    pub fn start() {
+        thread::spawn(|| {
+            unsafe {
+                let instance =
+                    GetModuleHandleW(None).expect("Fatal internal error: GetModuleHandleW");
+                let class_name: Vec<u16> = "RazerPowerListener\0".encode_utf16().collect();
 
-            MAIN_HWND = CreateWindowExW(
-                Default::default(),
-                PCWSTR(class_name.as_ptr()),
-                PCWSTR(class_name.as_ptr()),
-                WS_OVERLAPPED,
-                0,
-                0,
-                0,
-                0,
-                None,
-                None,
-                instance,
-                None,
-            )
-            .expect("Fatal internal error: CreateWindowExW");
+                let wnd_class = WNDCLASSW {
+                    hInstance: instance.into(),
+                    lpszClassName: PCWSTR(class_name.as_ptr()),
+                    lpfnWndProc: Some(wnd_proc),
+                    ..Default::default()
+                };
+                RegisterClassW(&wnd_class);
 
-            let params = Box::leak(Box::new(DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS {
-                Callback: Some(standby_callback),
-                Context: null_mut(),
-            }));
+                MAIN_HWND = CreateWindowExW(
+                    Default::default(),
+                    PCWSTR(class_name.as_ptr()),
+                    PCWSTR(class_name.as_ptr()),
+                    WS_OVERLAPPED,
+                    0,
+                    0,
+                    0,
+                    0,
+                    None,
+                    None,
+                    instance,
+                    None,
+                )
+                .expect("Fatal internal error: CreateWindowExW");
 
-            let _ = RegisterSuspendResumeNotification(
-                HANDLE(params as *const _ as *mut _),
-                DEVICE_NOTIFY_CALLBACK,
-            );
+                let params = Box::leak(Box::new(DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS {
+                    Callback: Some(standby_callback),
+                    Context: null_mut(),
+                }));
 
-            println!("\n--- Windows Standby Monitor Started ---");
+                let _ = RegisterSuspendResumeNotification(
+                    HANDLE(params as *const _ as *mut _),
+                    DEVICE_NOTIFY_CALLBACK,
+                );
 
-            let mut last_state = StandbyState::Wake;
+                println!("\n--- Windows Standby Monitor Started ---");
 
-            let mut msg = MSG::default();
-            while GetMessageW(&mut msg, HWND(null_mut()), 0, 0).as_bool() {
-                let _ = TranslateMessage(&msg);
-                let _ = DispatchMessageW(&msg);
+                let mut last_state = StandbyState::Wake;
 
-                // React only to our specific standby change signal
-                if msg.message == WM_STANDBY_CHANGE {
-                    let mut lock = STATE_MANAGER.state.lock().unwrap();
-                    if *lock != last_state {
-                        match *lock {
-                            StandbyState::Sleep => {
-                                razer::device_handle::device().sleep();
-                                println!(
-                                    "[!] State updated to SLEEP. Handling hardware shutdown..."
-                                );
-                            }
-                            StandbyState::Wake => {
-                                razer::device_handle::device().initialize();
-                                *lock = StandbyState::Normal; // Reset state
-                                println!("[+] State updated to WAKE. Handling hardware re-init...");
-                            }
-                            _ => {}
-                        };
-                        last_state = *lock;
+                let mut msg = MSG::default();
+                while GetMessageW(&mut msg, HWND(null_mut()), 0, 0).as_bool() {
+                    let _ = TranslateMessage(&msg);
+                    let _ = DispatchMessageW(&msg);
+
+                    // React only to our specific standby change signal
+                    if msg.message == WM_STANDBY_CHANGE {
+                        let mut lock = STATE_MANAGER.state.lock().unwrap();
+                        if *lock != last_state {
+                            match *lock {
+                                StandbyState::Sleep => {
+                                    razer::device_handle::device().sleep();
+                                    println!(
+                                        "[!] State updated to SLEEP. Handling hardware shutdown..."
+                                    );
+                                }
+                                StandbyState::Wake => {
+                                    razer::device_handle::device().initialize();
+                                    *lock = StandbyState::Normal; // Reset state
+                                    println!(
+                                        "[+] State updated to WAKE. Handling hardware re-init..."
+                                    );
+                                }
+                                _ => {}
+                            };
+                            last_state = *lock;
+                        }
                     }
                 }
-            }
-        };
-    });
+            };
+        });
+    }
 }

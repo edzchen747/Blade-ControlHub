@@ -6,6 +6,7 @@ mod ui;
 mod utils;
 mod win;
 
+use core::time;
 use std::{thread, time::Duration};
 use sysinfo::System;
 
@@ -21,14 +22,17 @@ fn main() {
     println!("Razer service started...");
     device().initialize();
     ui::tray_app::run();
+    loop {
+        std::thread::sleep(time::Duration::from_hours(1));
+    }
 }
 
 fn start_razer_service() {
     let device_pid = razer::device_handle::device().get_pid();
-    win::input::key_hook::init_keyboard_hooks(device_pid);
-    win::system::power::PowerMonitor::new();
-    win::system::standby::spawn_listener_thread();
-    win::external_events::spawn_detect_external_updates_thread();
+    win::input::start_keyboard_hooks(device_pid);
+    win::system::power::PowerMonitor::start();
+    win::system::standby::StandbyMonitor::start();
+    win::external_events::ExternalChangeMonitor::start();
 }
 
 fn close_running_instances() {

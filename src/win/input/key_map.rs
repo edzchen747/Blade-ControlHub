@@ -1,12 +1,12 @@
-use crate::config;
 use crate::razer::device_handle::device;
 use crate::win::audio::{self, AudioType};
+use crate::win::input::blocker::KeyBlocker;
+use crate::win::input::hidapi::HidApiListener;
 use crate::win::input::key;
 use crate::win::input::trackpad::toggle_trackpad;
 
-use hidapi::{HidApi, HidDevice};
 use once_cell::sync::Lazy;
-use rdev::{Event, EventType, Key, grab, simulate};
+use rdev::{EventType, Key, simulate};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -392,107 +392,3 @@ pub static KEY_MAP: Lazy<HashMap<key::Key, KeyEventAction>> = Lazy::new(|| {
         ),
     ])
 });
-
-pub fn init_keyboard_hooks(device_pid: u16) {
-    let api = HidApi::new().expect("Failed to init HID API");
-    let mut opened_count = 0;
-
-    for device_info in api
-        .device_list()
-        .filter(|d| d.vendor_id() == config::RAZER_VID && d.product_id() == device_pid)
-    {
-        let path = device_info.path().to_owned();
-        let iface_num = device_info.interface_number();
-
-        if let Ok(device_api) = api.open_path(&path) {
-            // Test if we can read (check for Access Denied)
-            let mut test_buf = [0u8; 16];
-            if device_api.read_timeout(&mut test_buf, 5).is_ok()
-                || !device_api
-                    .read_timeout(&mut test_buf, 5)
-                    .unwrap_err()
-                    .to_string()
-                    .contains("denied")
-            {
-                opened_count += 1;
-                println!("Opened Interface {} (Path: {:?})", iface_num, path);
-                spawn_special_key_listener_thread(
-                    device_api,
-                    iface_num,
-                    path.to_string_lossy().into_owned(),
-                );
-            }
-        } else {
-            println!("LOCKED: Interface {}", iface_num);
-        }
-    }
-
-    assert!(opened_count > 0, "No Razer interfaces were accessible.");
-
-    println!(
-        "\n--- {} HID listeners active. Keyboard (special key) hook thread started. ---",
-        opened_count
-    );
-    spawn_standard_key_listener_thread();
-}
-
-pub fn spawn_special_key_listener_thread(device_api: HidDevice, iface_num: i32, path: String) {
-    thread::spawn(move || {
-        let mut buf = [0u8; 16];
-        // Close interfaces as soon as we detect they are likely not the target
-        while let Ok(len) = device_api.read(&mut buf) {
-            if !(len > 0) {
-                println!("noise?");
-                break;
-            }
-            if buf[0] == 0x04 {
-                // Razer special key events
-                match buf[1] {
-                    0x0a => FN_PRESSED.store(true, Ordering::SeqCst),
-                    0x00 => FN_PRESSED.store(false, Ordering::SeqCst),
-                    _ => {
-                        let key = key::Key::from(buf[1]);
-                        if let Some(action) = KEY_MAP.get(&key) {
-                            let _ = action.execute();
-                        }
-                    }
-                }
-            } else {
-                break;
-            }
-        }
-        println!("Closed Interface {} (Path: {:?})", iface_num, path);
-    });
-}
-
-pub fn spawn_standard_key_listener_thread() {
-    thread::spawn(|| {
-        println!("\n--- Keyboard (standard key) grab thread started. ---");
-        if let Err(e) = grab(standard_key_callback) {
-            eprintln!("Keyboard grab failed: {:?}", e);
-        }
-    });
-}
-
-fn standard_key_callback(event: Event) -> Option<Event> {
-    if let EventType::KeyPress(rdev_key) = event.event_type {
-        if rdev_key == Key::Alt {
-            ALT_PRESSED.store(true, Ordering::SeqCst);
-        }
-
-        let key = key::Key::from(rdev_key);
-        if key != key::Key::Unknown(0) {
-            if let Some(event_action) = KEY_MAP.get(&key) {
-                match event_action.execute() {
-                    true => return None,
-                    false => (),
-                }
-            }
-        }
-    } else if let EventType::KeyRelease(key) = event.event_type {
-        if key == Key::Alt {
-            ALT_PRESSED.store(false, Ordering::SeqCst);
-        }
-    }
-    Some(event)
-}

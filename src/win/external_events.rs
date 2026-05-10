@@ -17,7 +17,7 @@ pub fn spawn_detect_external_updates_thread() {
     });
 }
 
-struct ExternalChangeMonitor {
+pub struct ExternalChangeMonitor {
     fast_interval_ms: u64,
     slow_interval_ms: u64,
     mic_muted: bool,
@@ -36,7 +36,13 @@ impl ExternalChangeMonitor {
         }
     }
 
-    pub fn run_loop(&mut self) {
+    pub fn start() {
+        thread::spawn(|| {
+            Self::new(100, 1000).run_loop();
+        });
+    }
+
+    fn run_loop(&mut self) {
         let mut interval = 0;
         loop {
             let curr_mic_muted = audio::is_audio_muted(AudioType::Mic);

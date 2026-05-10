@@ -12,16 +12,14 @@ use crate::razer::device_handle::device;
 
 pub static IS_PLUGGED_IN: AtomicBool = AtomicBool::new(false);
 
-pub struct PowerMonitor {
-    _thread_handle: thread::JoinHandle<()>,
-}
+pub struct PowerMonitor {}
 
 impl PowerMonitor {
-    pub fn new() -> Self {
+    pub fn start() {
         // Initial sync so the state is correct before the first event
         sync_power_state();
 
-        let handle = thread::spawn(move || {
+        thread::spawn(move || {
             unsafe {
                 let window_class = "PowerEventWindow\0".as_ptr();
                 let wnd_class = WNDCLASSA {
@@ -60,10 +58,6 @@ impl PowerMonitor {
                 }
             }
         });
-
-        Self {
-            _thread_handle: handle,
-        }
     }
 }
 
