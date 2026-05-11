@@ -3,14 +3,14 @@ macro_rules! define_keymap {
         #[derive(Debug, PartialEq, Copy, Clone, Eq, Hash)]
         pub enum Key {
             $($name,)*
-            Unknown(u8),
+            Unknown,
         }
 
         impl From<u8> for Key {
             fn from(code: u8) -> Self {
                 match code {
                     $($val => Key::$name,)*
-                    _ => Key::Unknown(code),
+                    _ => Key::Unknown,
                 }
             }
         }
@@ -79,7 +79,7 @@ impl From<rdev::Key> for Key {
             rdev::Key::F10 => Self::F10,
             rdev::Key::F11 => Self::F11,
             rdev::Key::F12 => Self::F12,
-            _ => Self::Unknown(0),
+            _ => Self::Unknown,
         }
     }
 }

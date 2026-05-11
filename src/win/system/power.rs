@@ -73,7 +73,7 @@ unsafe extern "system" fn power_wnd_proc(
         sync_power_state();
     }
     // Let Windows handle the rest of the window overhead
-    DefWindowProcA(hwnd, msg, wparam, lparam)
+    unsafe { DefWindowProcA(hwnd, msg, wparam, lparam) }
 }
 
 fn sync_power_state() {

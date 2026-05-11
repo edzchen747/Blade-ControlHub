@@ -11,12 +11,6 @@ use crate::{
 use std::sync::atomic::Ordering;
 use std::{thread, time::Duration};
 
-pub fn spawn_detect_external_updates_thread() {
-    thread::spawn(|| {
-        ExternalChangeMonitor::new(100, 1000).run_loop();
-    });
-}
-
 pub struct ExternalChangeMonitor {
     fast_interval_ms: u64,
     slow_interval_ms: u64,
