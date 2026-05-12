@@ -109,6 +109,9 @@ impl<'a> Executer<'a> {
             }
 
             // Config
+            DeviceCmd::GetConfig(tx) => {
+                let _ = tx.send(self.app_config.clone());
+            }
             DeviceCmd::PersistConfig => self.persist_config(),
         }
     }

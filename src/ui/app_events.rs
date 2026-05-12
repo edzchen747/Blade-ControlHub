@@ -116,6 +116,7 @@ pub struct OsdResponse {
 // ── Application Events ──────────────────────────────────────────────────────
 
 /// High-level events that drive the application UI and system actions.
+#[derive(PartialEq)]
 pub enum OsdEvent {
     ScreenBrightness(u8),
     KeyboardBrightness(u8),
@@ -127,6 +128,7 @@ pub enum OsdEvent {
     RefreshRate(u32, u8, u8),
     BatteryLimit(u8, u8, u8),
     ToggleDefaultMultimediaKeys(bool),
+    OpenSettings,
 }
 
 // ── Event Processing ────────────────────────────────────────────────────────
@@ -206,5 +208,6 @@ pub fn process_event(event: OsdEvent, tray_icon: &mut tray_icon::TrayIcon) -> Op
                 current_level: is_multimedia as u8,
             })
         }
+        OsdEvent::OpenSettings => None,
     }
 }

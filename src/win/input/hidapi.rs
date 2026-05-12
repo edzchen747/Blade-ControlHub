@@ -82,6 +82,8 @@ impl HidApiListener {
                             let key = scancode::Key::from(buf[1]);
                             if let Some(action) = KEY_MAP.get(&key) {
                                 let _ = action.execute();
+                            } else {
+                                println!("Unmapped keycode detected: {:#04x}", buf[1]);
                             }
                         }
                     }

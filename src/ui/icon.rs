@@ -110,6 +110,7 @@ fn build_tray_menu() -> Menu {
 
     let quit_item = MenuItem::with_id("quit", "Quit", true, None);
     let restart_item = MenuItem::with_id("restart", "Restart", true, None);
+    let settings_item = MenuItem::with_id("settings_window", "Settings", true, None);
 
     let startup_detected = Startup::is_registered();
     let default_multimedia_keys = device().get_default_multimedia_keys();
@@ -131,6 +132,7 @@ fn build_tray_menu() -> Menu {
 
     tray_menu.append(&quit_item).unwrap();
     tray_menu.append(&restart_item).unwrap();
+    tray_menu.append(&settings_item).unwrap();
     tray_menu.append(&startup_item).unwrap();
     tray_menu.append(&default_keys_item).unwrap();
 
@@ -150,6 +152,7 @@ fn setup_menu_event_handler() {
         "restart" => {
             restart_app(0);
         }
+        "settings_window" => tray_app().send(OsdEvent::OpenSettings),
         "startup_toggle" => {
             let is_checked = !startup_state.load(Ordering::SeqCst);
             startup_state.store(is_checked, Ordering::SeqCst);

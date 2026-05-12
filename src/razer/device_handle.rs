@@ -1,4 +1,5 @@
 use crate::config::{self, CONFIG_PATH};
+use crate::razer::config::AppConfig;
 use crate::razer::enums::PerfMode;
 use crate::razer::executer::Executer;
 use crate::utils::persist::PersistBuffer;
@@ -53,6 +54,7 @@ pub enum DeviceCmd {
     CycleRefreshRate,
     KeyboardColor(u8, u8, u8),
     PersistConfig,
+    GetConfig(mpsc::Sender<AppConfig>),
     Shutdown,
 }
 
@@ -85,6 +87,10 @@ impl DeviceHandle {
     pub fn toggle_default_multimedia_keys(&self) -> bool {
         self.query(DeviceCmd::ToggleDefaultMultimediaKeys)
             .expect("Get default keys error")
+    }
+
+    pub fn get_config(&self) -> AppConfig {
+        self.query(DeviceCmd::GetConfig).expect("Get config error")
     }
 
     // ── Fire-and-forget commands ────────────────────────────────────
