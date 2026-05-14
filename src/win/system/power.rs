@@ -88,7 +88,7 @@ fn sync_power_state() {
                     // Strange Windows behaviour - it will re-set brightness on unplug / plug,
                     // so we delay to ensure our brightness action happens last
                     thread::sleep(Duration::from_millis(500));
-                    device().initialize();
+                    device().initialize(false);
                 });
             }
             println!(

@@ -1,20 +1,20 @@
 use crate::razer::device_handle::device;
 use crate::razer::enums::PerfMode;
-use crate::ui::app_events::OsdEvent;
-use crate::ui::tray_app::tray_app;
+use crate::ui::app::app;
+use crate::ui::app_events::{AppEvent, OsdEvent};
 use crate::utils::reload::restart_app;
 use crate::win::system::startup::Startup;
 
 use resvg::{tiny_skia, usvg};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::{thread, time};
+use std::thread;
 use tray_icon::menu::CheckMenuItem;
 use tray_icon::{
     Icon, TrayIconBuilder,
     menu::{Menu, MenuEvent, MenuItem},
 };
-use tray_icon::{MouseButton, TrayIconEvent};
+use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -145,14 +145,12 @@ fn setup_menu_event_handler() {
 
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| match event.id.0.as_str() {
         "quit" => {
-            device().shutdown();
-            std::thread::sleep(time::Duration::from_millis(500));
-            std::process::exit(0);
+            app().send(AppEvent::Shutdown);
         }
         "restart" => {
             restart_app(0);
         }
-        "settings_window" => tray_app().send(OsdEvent::OpenSettings),
+        "settings_window" => app().send(AppEvent::OpenSettings),
         "startup_toggle" => {
             let is_checked = !startup_state.load(Ordering::SeqCst);
             startup_state.store(is_checked, Ordering::SeqCst);
@@ -164,7 +162,7 @@ fn setup_menu_event_handler() {
         }
         "default_multimedia_keys" => {
             let new_default = device().toggle_default_multimedia_keys();
-            tray_app().send(OsdEvent::ToggleDefaultMultimediaKeys(new_default))
+            app().send(OsdEvent::ToggleDefaultMultimediaKeys(new_default).into())
         }
         _ => {}
     }));
@@ -177,15 +175,17 @@ fn setup_menu_event_handler() {
 fn spawn_tray_click_listener() {
     thread::spawn(move || {
         loop {
-            while let Ok(event) = TrayIconEvent::receiver().recv() {
-                if matches!(
-                    event,
+            if let Ok(event) = TrayIconEvent::receiver().recv() {
+                match event {
                     TrayIconEvent::Click {
                         button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
                         ..
+                    } => {
+                        println!("Tray clicked");
+                        app().send(AppEvent::ToggleSettings);
                     }
-                ) {
-                    device().get_perf_mode();
+                    _ => {}
                 }
             }
         }

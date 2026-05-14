@@ -97,6 +97,13 @@ impl From<u8> for BatteryLimit {
     }
 }
 
+#[derive(Clone, Copy, Display, Debug, PartialEq, Serialize, Deserialize)]
+pub enum LidLogoMode {
+    On = 2,
+    Breathing = 1,
+    Off = 0,
+}
+
 pub const RGB_EFFECTS: [RGBEffect; 6] = [
     RGBEffect::Cycle,
     RGBEffect::Wave,

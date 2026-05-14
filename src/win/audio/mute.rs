@@ -1,5 +1,5 @@
 use super::{AudioType, get_endpoint};
-use crate::ui::{app_events::OsdEvent, tray_app::tray_app};
+use crate::ui::{app::app, app_events::OsdEvent};
 
 /// Returns whether the given audio endpoint is currently muted.
 pub fn is_audio_muted(io: AudioType) -> bool {
@@ -25,7 +25,7 @@ pub fn toggle_audio_mute(io: AudioType) {
                     println!("Error setting {:?} endpoint mute: {:?}", io, err);
                 }
                 if io == AudioType::Mic {
-                    tray_app().send(OsdEvent::MicMute(bool::from(!current_mute)));
+                    app().send(OsdEvent::MicMute(bool::from(!current_mute)).into());
                 }
             } else {
                 println!("Error getting {:?} endpoint mute", io);

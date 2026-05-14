@@ -3,8 +3,8 @@ use futures::stream::StreamExt;
 use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
+use crate::ui::app::app;
 use crate::ui::app_events::OsdEvent;
-use crate::ui::tray_app::tray_app;
 
 pub static SCREEN_TARGET_LVL: AtomicU8 = AtomicU8::new(100);
 pub static SCREEN_ADJUSTING: AtomicUsize = AtomicUsize::new(0);
@@ -27,7 +27,7 @@ impl BrightnessWorker {
 
     pub fn set_screen_brightness(&self, new_level: u8) {
         let discrete_lvl = (new_level as f64 / 10.0).round() as u8 * 10;
-        tray_app().send(OsdEvent::ScreenBrightness(discrete_lvl));
+        app().send(OsdEvent::ScreenBrightness(discrete_lvl).into());
         println!("Trying to set screen brightness: {}", discrete_lvl);
         SCREEN_TARGET_LVL.store(discrete_lvl, Ordering::SeqCst);
         let _ = self.tx.send(());

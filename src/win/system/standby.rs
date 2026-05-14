@@ -144,7 +144,7 @@ impl StandbyMonitor {
                                     );
                                 }
                                 StandbyState::Wake => {
-                                    razer::device_handle::device().initialize();
+                                    razer::device_handle::device().initialize(false);
                                     *lock = StandbyState::Normal; // Reset state
                                     println!(
                                         "[+] State updated to WAKE. Handling hardware re-init..."

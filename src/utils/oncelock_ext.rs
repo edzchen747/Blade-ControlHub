@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 
 // ── OnceLock Timeout Extension ──────────────────────────────────────────────
 
-const ONCELOCK_TIMEOUT_MS: u64 = 500;
-const ONCELOCK_POLL_INTERVAL_MS: u64 = 50;
+const ONCELOCK_TIMEOUT_MS: u64 = 1000;
+const ONCELOCK_POLL_INTERVAL_MS: u64 = 100;
 
 pub trait OnceLockExt<T> {
     fn get_or_timeout(&self) -> Option<T>

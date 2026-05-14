@@ -39,7 +39,7 @@ impl AmbientEffect {
 
                 let (r, g, b) = engine.tick(&scan_data, ctx.s_w, ctx.s_h);
                 print_color_preview(r, g, b);
-                device_handle.keyboard_color(r, g, b);
+                device_handle.set_keyboard_color(r, g, b);
 
                 sleep_until_next_frame(start);
             }

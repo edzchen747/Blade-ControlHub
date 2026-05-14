@@ -1,6 +1,6 @@
 use crate::config::{self, CONFIG_PATH};
 use crate::razer::config::AppConfig;
-use crate::razer::enums::PerfMode;
+use crate::razer::enums::{LidLogoMode, PerfMode};
 use crate::razer::executer::Executer;
 use crate::utils::persist::PersistBuffer;
 use crate::win::audio::AudioType;
@@ -38,7 +38,7 @@ pub fn device() -> DeviceHandle {
 
 /// Commands that can be sent to the background device thread.
 pub enum DeviceCmd {
-    InitializeDevice,
+    InitializeDevice(bool),
     SleepDevice,
     AdjustKeyboardLight(bool),
     GetPID(mpsc::Sender<u16>),
@@ -52,10 +52,11 @@ pub enum DeviceCmd {
     ToggleUnderGlow,
     AdjustScreenBrightness(i8),
     CycleRefreshRate,
-    KeyboardColor(u8, u8, u8),
+    SetKeyboardColor(u8, u8, u8),
+    SetLidLogo(LidLogoMode),
     PersistConfig,
     GetConfig(mpsc::Sender<AppConfig>),
-    Shutdown,
+    Shutdown(mpsc::Sender<bool>),
 }
 
 // ── DeviceHandle ────────────────────────────────────────────────────────────
@@ -93,18 +94,18 @@ impl DeviceHandle {
         self.query(DeviceCmd::GetConfig).expect("Get config error")
     }
 
+    pub fn shutdown(&self) -> bool {
+        self.query(DeviceCmd::Shutdown).expect("Failed to shutdown")
+    }
+
     // ── Fire-and-forget commands ────────────────────────────────────
 
-    pub fn initialize(&self) {
-        self.send(DeviceCmd::InitializeDevice);
+    pub fn initialize(&self, notify_startup: bool) {
+        self.send(DeviceCmd::InitializeDevice(notify_startup));
     }
 
     pub fn sleep(&self) {
         self.send(DeviceCmd::SleepDevice);
-    }
-
-    pub fn shutdown(&self) {
-        self.send(DeviceCmd::Shutdown);
     }
 
     pub fn keyboard_light_up(&self) {
@@ -115,8 +116,12 @@ impl DeviceHandle {
         self.send(DeviceCmd::AdjustKeyboardLight(false));
     }
 
-    pub fn keyboard_color(&self, r: u8, g: u8, b: u8) {
-        self.send(DeviceCmd::KeyboardColor(r, g, b));
+    pub fn set_keyboard_color(&self, r: u8, g: u8, b: u8) {
+        self.send(DeviceCmd::SetKeyboardColor(r, g, b));
+    }
+
+    pub fn set_lid_logo(&self, mode: LidLogoMode) {
+        self.send(DeviceCmd::SetLidLogo(mode));
     }
 
     pub fn set_speakers_mute_indicator(&self, muted: bool) {
@@ -175,7 +180,7 @@ impl DeviceHandle {
             .expect("Device handle thread is no longer running");
 
         resp_rx
-            .recv_timeout(Duration::from_secs(1))
+            .recv_timeout(Duration::from_secs(5))
             .map_err(|_| anyhow::anyhow!("Hardware response timeout"))
     }
 }

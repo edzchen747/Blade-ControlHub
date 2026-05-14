@@ -1,3 +1,7 @@
+use std::time::Duration;
+
+use sysinfo::System;
+
 /// Restarts the application by spawning a new instance and exiting.
 pub fn restart_app(code: i32) -> ! {
     let current_exe = std::env::current_exe().expect("Failed to get current exe path");
@@ -32,5 +36,25 @@ impl<T, E: std::fmt::Debug> ResultReload<T, E> for Result<T, E> {
             eprintln!("Fatal internal error: {msg} - {:?}", err);
             restart_app(1);
         })
+    }
+}
+
+pub fn close_running_instances() {
+    let mut sys = System::new_all();
+    sys.refresh_processes();
+
+    let current_pid = sysinfo::get_current_pid().expect("Failed to get app PID");
+    let my_name = "hidapi.exe";
+
+    let mut found_old = false;
+    for (pid, process) in sys.processes() {
+        if process.name() == my_name && *pid != current_pid {
+            process.kill();
+            found_old = true;
+        }
+    }
+
+    if found_old {
+        std::thread::sleep(Duration::from_millis(150));
     }
 }

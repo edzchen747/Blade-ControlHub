@@ -5,10 +5,10 @@ use crate::{
     razer::{
         config::AppConfig,
         device_handle::{DeviceCmd, device},
-        enums::{BatteryLimit, PerfMode, RGBEffect},
+        enums::{BatteryLimit, LidLogoMode, PerfMode, RGBEffect},
         protocol::command,
     },
-    ui::{app_events::OsdEvent, tray_app::tray_app},
+    ui::{app::app, app_events::OsdEvent},
     utils::persist::PersistBuffer,
     win::{
         audio::AudioType,
@@ -67,17 +67,20 @@ impl<'a> Executer<'a> {
 
     fn dispatch(&mut self, cmd: DeviceCmd) {
         match cmd {
-            DeviceCmd::InitializeDevice => self.initialize(),
+            DeviceCmd::InitializeDevice(notify_startup) => self.initialize(notify_startup),
             DeviceCmd::SleepDevice => self.sleep(),
-            DeviceCmd::Shutdown => self.shutdown(),
+            DeviceCmd::Shutdown(tx) => {
+                let _ = tx.send(self.shutdown());
+            }
 
             // Keyboard
             DeviceCmd::AdjustKeyboardLight(up) => self.adjust_keyboard_light(up),
-            DeviceCmd::KeyboardColor(r, g, b) => self.keyboard_color(r, g, b),
 
             // RGB & lighting
             DeviceCmd::CycleRGBMode => self.cycle_rgb_mode(),
             DeviceCmd::ToggleUnderGlow => self.toggle_under_glow(),
+            DeviceCmd::SetKeyboardColor(r, g, b) => self.set_keyboard_color(r, g, b),
+            DeviceCmd::SetLidLogo(mode) => self.set_lid_logo(mode),
 
             // Performance
             DeviceCmd::CyclePerfMode => self.cycle_perf_mode(),
@@ -118,15 +121,16 @@ impl<'a> Executer<'a> {
 
     // ── Initialization & Lifecycle ──────────────────────────────────────
 
-    fn initialize(&mut self) {
+    fn initialize(&mut self, notify_startup: bool) {
         PersistBuffer::disable();
+        app().send(OsdEvent::EnableOSD(false).into());
         // Must set screen brightness first so SCREEN_TARGET_LVL is updated before next config persist
         let mut state = self.app_config.read();
 
         self.brightness_worker
             .set_screen_brightness(state.screen_lvl);
         self.enable_multimedia_keys();
-        self.set_rgb_effect(state.rgb_effect.value(), false);
+        self.set_rgb_effect(state.rgb_effect.value());
         self.enable_under_glow(state.vc_lvl);
         self.set_keyboard_brightness(state.key_lvl);
         self.set_perf_mode(state.perf_mode.value());
@@ -134,15 +138,18 @@ impl<'a> Executer<'a> {
         let battery_limit = self.app_config.battery_limit.value();
         self.set_battery_limit(battery_limit);
 
-        if state.screen_refresh != 0 {
-            self.set_refresh_rate(state.screen_refresh);
-        }
-
         match self.app_config.default_multimedia_keys {
             true => self.enable_multimedia_keys(),
             false => self.restore_fn_keys(),
         }
 
+        app().send(OsdEvent::EnableOSD(true).into());
+        if notify_startup {
+            app().send(OsdEvent::Startup.into());
+        }
+        if state.screen_refresh != 0 {
+            self.set_refresh_rate(state.screen_refresh);
+        }
         PersistBuffer::enable();
     }
 
@@ -157,9 +164,10 @@ impl<'a> Executer<'a> {
         let _ = command(self.device, 0x0d02, &[1, 0, 6, 0], None); // reset perf mode
     }
 
-    fn shutdown(&mut self) {
+    fn shutdown(&mut self) -> bool {
         self.restore_fn_keys();
-        self.set_rgb_effect(RGBEffect::Cycle, false);
+        self.set_rgb_effect(RGBEffect::Cycle);
+        true
     }
 
     // ── Keyboard ────────────────────────────────────────────────────────
@@ -183,20 +191,8 @@ impl<'a> Executer<'a> {
 
     fn get_keyboard_brightness(&self) -> u8 {
         let brightness = command(self.device, 0x0383, &[1, 5, 0], Some(2));
-        tray_app().send(OsdEvent::KeyboardBrightness(brightness));
+        app().send(OsdEvent::KeyboardBrightness(brightness).into());
         brightness
-    }
-
-    fn keyboard_color(&self, r: u8, g: u8, b: u8) {
-        let mut args = vec![
-            255, 0, 0, 18, 0, 0, 0, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b,
-            r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g,
-            b, r, g, b,
-        ];
-        for row in 0..=6 {
-            args[1] = row;
-            let _ = custom_command(self.device, 0x030b, &args);
-        }
     }
 
     fn get_default_multimedia_keys(&self) -> bool {
@@ -220,13 +216,13 @@ impl<'a> Executer<'a> {
 
     fn cycle_rgb_mode(&mut self) {
         let new_rgb_effect = self.app_config.get().rgb_effect.next();
-        self.set_rgb_effect(new_rgb_effect, true);
+        self.set_rgb_effect(new_rgb_effect);
     }
 
-    fn set_rgb_effect(&mut self, rgb_effect: RGBEffect, save: bool) {
+    fn set_rgb_effect(&mut self, rgb_effect: RGBEffect) {
         if rgb_effect == RGBEffect::Ambient {
             AmbientEffect::start(device());
-            tray_app().send(OsdEvent::RGBEffect(rgb_effect));
+            app().send(OsdEvent::RGBEffect(rgb_effect).into());
         } else {
             AmbientEffect::stop();
         }
@@ -236,14 +232,13 @@ impl<'a> Executer<'a> {
             args = vec![rgb_effect as u8, 0, 32, 255, 255, 255];
         }
         let _ = command(self.device, 0x030a, &args, None);
-        if save {
-            self.app_config.get().rgb_effect.set(&rgb_effect);
-            if rgb_effect != RGBEffect::Ambient {
-                let effect = self.get_rgb_effect();
-                tray_app().send(OsdEvent::RGBEffect(effect));
-            }
-            self.persist_config();
+
+        self.app_config.get().rgb_effect.set(&rgb_effect);
+        if rgb_effect != RGBEffect::Ambient {
+            let effect = self.get_rgb_effect();
+            app().send(OsdEvent::RGBEffect(effect).into());
         }
+        self.persist_config();
     }
 
     fn get_rgb_effect(&self) -> RGBEffect {
@@ -255,7 +250,7 @@ impl<'a> Executer<'a> {
         let new_brightness = if brightness > 0 { 0 } else { 255 };
         let _ = command(self.device, 0x0303, &[1, 38, new_brightness], None);
         let _ = command(self.device, 0x0300, &[1, 38, new_brightness / 255], None);
-        tray_app().send(OsdEvent::UnderGlow(new_brightness));
+        app().send(OsdEvent::UnderGlow(new_brightness).into());
         self.app_config.get().vc_lvl = new_brightness;
         self.persist_config();
     }
@@ -269,6 +264,33 @@ impl<'a> Executer<'a> {
         let brightness = command(self.device, 0x0383, &[1, 38, 0], Some(2));
         let active = command(self.device, 0x0380, &[1, 38, 0], Some(2));
         brightness * active
+    }
+
+    fn set_keyboard_color(&self, r: u8, g: u8, b: u8) {
+        let mut args = vec![
+            255, 0, 0, 18, 0, 0, 0, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b,
+            r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g,
+            b, r, g, b,
+        ];
+        for row in 0..=6 {
+            args[1] = row;
+            let _ = custom_command(self.device, 0x030b, &args);
+        }
+    }
+
+    fn set_lid_logo(&mut self, mode: LidLogoMode) {
+        if mode == LidLogoMode::Off {
+            command(self.device, 0x0300, &[1, 4, 0], None);
+        } else {
+            command(self.device, 0x0300, &[1, 4, 1], None);
+            if mode == LidLogoMode::On {
+                command(self.device, 0x0302, &[1, 4, 0], None);
+            } else {
+                command(self.device, 0x0302, &[1, 4, 1], None);
+            }
+        }
+        app().send(OsdEvent::LidLogo(mode).into());
+        self.persist_config();
     }
 
     // ── Performance ─────────────────────────────────────────────────────
@@ -288,7 +310,7 @@ impl<'a> Executer<'a> {
 
     fn get_perf_mode(&self) -> PerfMode {
         let perf_mode: PerfMode = command(self.device, 0x0d82, &[0, 0, 0, 0], Some(2)).into();
-        tray_app().send(OsdEvent::PerfMode(perf_mode));
+        app().send(OsdEvent::PerfMode(perf_mode).into());
         perf_mode
     }
 
@@ -301,11 +323,7 @@ impl<'a> Executer<'a> {
             .iter()
             .position(|&rate| rate == current)
             .unwrap_or(0);
-        tray_app().send(OsdEvent::RefreshRate(
-            current,
-            level as u8,
-            supported.len() as u8,
-        ));
+        app().send(OsdEvent::RefreshRate(current, level as u8, supported.len() as u8).into());
         self.app_config.get().screen_refresh = current;
         self.persist_config();
         self.refresh_cycle_timeout = Instant::now() + Duration::from_millis(1500);
@@ -345,11 +363,7 @@ impl<'a> Executer<'a> {
         let current_limit = self.app_config.battery_limit.value();
         let index = self.app_config.battery_limit.index;
         let length = self.app_config.battery_limit.items.len() - 1;
-        tray_app().send(OsdEvent::BatteryLimit(
-            current_limit as u8,
-            index as u8,
-            length as u8,
-        ));
+        app().send(OsdEvent::BatteryLimit(current_limit as u8, index as u8, length as u8).into());
         self.battery_cycle_timeout = Instant::now() + Duration::from_millis(1500);
     }
 

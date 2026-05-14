@@ -6,55 +6,90 @@ use tray_icon::TrayIcon;
 
 use crate::razer::device_handle::device;
 use crate::ui::app_events::*;
-use crate::ui::icon;
 use crate::ui::osd::*;
 use crate::ui::settings::Settings;
+use crate::ui::tray;
 use crate::utils::oncelock_ext::OnceLockExt;
 
 // ── Global State ────────────────────────────────────────────────────────────
 
-static TRAY_APP_TX: OnceLock<Sender<OsdEvent>> = OnceLock::new();
+static APP_TX: OnceLock<Sender<AppEvent>> = OnceLock::new();
 static OSD_CONTEXT: OnceLock<egui::Context> = OnceLock::new();
 
-// ── TrayApp (eframe application) ────────────────────────────────────────────
+// ── App (eframe application) ────────────────────────────────────────────
 
-struct TrayApp {
+struct App {
     // Event channel
-    rx: Receiver<OsdEvent>,
+    rx: Receiver<AppEvent>,
 
     // System tray
     tray_icon: TrayIcon,
 
     // OSD
     osd: OSD,
+    osd_enabled: bool,
 
-    // Configurator Window
-    config_window: Arc<Mutex<Settings>>,
+    // Settings Window
+    settings: Arc<Mutex<Settings>>,
 }
 
-impl TrayApp {
-    fn new(rx: Receiver<OsdEvent>) -> Self {
+impl Drop for App {
+    fn drop(&mut self) {
+        device().shutdown();
+    }
+}
+
+impl App {
+    fn new(rx: Receiver<AppEvent>) -> Self {
         Self {
             rx,
-            tray_icon: icon::build_tray_icon(),
+            tray_icon: tray::build_tray_icon(),
             osd: OSD::new(),
-            config_window: Arc::new(Mutex::new(Settings::new())),
+            osd_enabled: true,
+            settings: Arc::new(Mutex::new(Settings::new())),
         }
     }
 
     // ── Event Handling ──────────────────────────────────────────────────
 
     /// Drains pending events and returns whether the OSD should be shown.
-    fn poll_osd_events(&mut self) -> bool {
+    fn handle_app_events(&mut self, ctx: &egui::Context) -> bool {
         let mut wake = false;
         while let Ok(event) = self.rx.try_recv() {
-            if event == OsdEvent::OpenSettings {
-                let app_config = device().get_config();
-                self.config_window.lock().unwrap().show(app_config);
+            match event {
+                AppEvent::ToggleSettings => {
+                    let app_config = device().get_config();
+                    self.settings.lock().unwrap().toggle(app_config);
+                }
+                AppEvent::OpenSettings => {
+                    let app_config = device().get_config();
+                    self.settings.lock().unwrap().show(app_config);
+                }
+                AppEvent::Shutdown => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+                AppEvent::OsdEvent(OsdEvent::EnableOSD(enable)) => {
+                    self.osd_enabled = enable;
+                }
+                AppEvent::RazerKeyCode(key_code) => {
+                    let is_listening = self
+                        .settings
+                        .lock()
+                        .unwrap()
+                        .custom_key_map
+                        .listening_idx
+                        .is_some();
+                    if is_listening {
+                        self.settings.lock().unwrap().custom_key_map.special_key = Some(key_code);
+                    }
+                }
+                AppEvent::OsdEvent(_) => (),
             }
-            if let Some(response) = process_event(event, &mut self.tray_icon) {
-                self.osd.apply_osd_response(response);
-                wake = true;
+            if let Some(response) = process_osd_event(event, &mut self.tray_icon) {
+                if self.osd_enabled {
+                    self.osd.apply_osd_response(response);
+                    wake = true;
+                }
             }
         }
         wake
@@ -63,11 +98,11 @@ impl TrayApp {
 
 // ── eframe::App Implementation ──────────────────────────────────────────────
 
-impl eframe::App for TrayApp {
+impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        Settings::run(ctx, self.config_window.clone());
+        Settings::run(ctx, self.settings.clone());
 
-        let trigger_osd = self.poll_osd_events();
+        let trigger_osd = self.handle_app_events(ctx);
         self.osd.run(ctx, trigger_osd);
     }
 
@@ -79,12 +114,12 @@ impl eframe::App for TrayApp {
 // ── Public Handle ───────────────────────────────────────────────────────────
 
 /// A clonable handle for sending `OsdEvent`s to the OSD application.
-pub struct TrayAppHandle {
-    tx: Sender<OsdEvent>,
+pub struct AppHandle {
+    tx: Sender<AppEvent>,
 }
 
-impl TrayAppHandle {
-    pub fn send(&self, event: OsdEvent) {
+impl AppHandle {
+    pub fn send(&self, event: AppEvent) {
         self.tx
             .send(event)
             .expect("Fatal internal error: OSD TX send");
@@ -95,24 +130,24 @@ impl TrayAppHandle {
     }
 }
 
-/// Returns a handle to the running `TrayApp` event channel.
-pub fn tray_app() -> TrayAppHandle {
-    let tx = TRAY_APP_TX
+/// Returns a handle to the running `App` event channel.
+pub fn app() -> AppHandle {
+    let tx = APP_TX
         .get_or_timeout()
-        .expect("Fatal internal error: TrayApp channel initialization timeout");
-    TrayAppHandle { tx: tx.clone() }
+        .expect("Fatal internal error: App channel initialization timeout");
+    AppHandle { tx: tx.clone() }
 }
 
 // ── Entry Point ─────────────────────────────────────────────────────────────
 
 /// Launches the eframe-based OSD overlay and tray icon application.
 pub fn run() {
-    let (tx, rx) = mpsc::channel::<OsdEvent>();
+    let (tx, rx) = mpsc::channel::<AppEvent>();
     eframe::run_native(
         "Blade ControlHub OSD",
         native_options(),
         Box::new(move |cc| {
-            TRAY_APP_TX
+            APP_TX
                 .set(tx)
                 .expect("Fatal internal error: OSD channel initialize error");
             OSD_CONTEXT
@@ -120,7 +155,7 @@ pub fn run() {
                 .expect("Fatal internal error: OSD Context initialize error");
             egui_extras::install_image_loaders(&cc.egui_ctx);
 
-            Box::new(TrayApp::new(rx))
+            Box::new(App::new(rx))
         }),
     )
     .expect("Fatal internal error: OSD error");

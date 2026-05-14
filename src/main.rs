@@ -6,10 +6,6 @@ mod ui;
 mod utils;
 mod win;
 
-use core::time;
-use std::{thread, time::Duration};
-use sysinfo::System;
-
 use crate::razer::device_handle::device;
 
 fn main() {
@@ -17,14 +13,9 @@ fn main() {
     let exe_dir = exe_path.parent().unwrap();
     std::env::set_current_dir(exe_dir).unwrap();
 
-    close_running_instances();
+    utils::reload::close_running_instances();
     start_razer_service();
-    println!("Razer service started...");
-    device().initialize();
-    ui::tray_app::run();
-    loop {
-        std::thread::sleep(time::Duration::from_hours(1));
-    }
+    ui::app::run();
 }
 
 fn start_razer_service() {
@@ -33,24 +24,6 @@ fn start_razer_service() {
     win::system::power::PowerMonitor::start();
     win::system::standby::StandbyMonitor::start();
     win::external_events::ExternalChangeMonitor::start();
-}
-
-fn close_running_instances() {
-    let mut sys = System::new_all();
-    sys.refresh_processes();
-
-    let current_pid = sysinfo::get_current_pid().expect("Failed to get app PID");
-    let my_name = "hidapi.exe";
-
-    let mut found_old = false;
-    for (pid, process) in sys.processes() {
-        if process.name() == my_name && *pid != current_pid {
-            process.kill();
-            found_old = true;
-        }
-    }
-
-    if found_old {
-        thread::sleep(Duration::from_millis(150));
-    }
+    println!("Razer service started...");
+    device().initialize(true);
 }
