@@ -42,7 +42,7 @@ impl BrightnessWorker {
     fn worker_loop(rx: Receiver<()>) {
         let mut monitor = pollster::block_on(async {
             let mut devices = brightness::brightness_devices();
-            while let Some(Ok(dev)) = devices.next().await {
+            if let Some(Ok(dev)) = devices.next().await {
                 return Some(dev); // Return the first working device found
             }
             println!("Fatal internal error: no monitor device found");
