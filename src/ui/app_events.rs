@@ -241,7 +241,7 @@ pub fn process_osd_event(
                 false => "Function".to_string(),
             };
             Some(OsdResponse {
-                text: text,
+                text,
                 icon_id: Some(OsdIconId::FunctionKey),
                 total_levels: 1,
                 current_level: is_multimedia as u8,

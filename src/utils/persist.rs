@@ -58,10 +58,10 @@ impl PersistBuffer {
 
                     // Final emergency save
                     Err(RecvTimeoutError::Disconnected) => {
-                        if let Some(content) = pending_content.take() {
-                            if content != last_written_content {
-                                Self::perform_commit(&path, &content);
-                            }
+                        if let Some(content) = pending_content.take()
+                            && content != last_written_content
+                        {
+                            Self::perform_commit(&path, &content);
                         }
                         break;
                     }

@@ -26,7 +26,7 @@ struct App {
     tray_icon: TrayIcon,
 
     // OSD
-    osd: OSD,
+    osd: Osd,
     osd_enabled: bool,
 
     // Settings Window
@@ -44,7 +44,7 @@ impl App {
         Self {
             rx,
             tray_icon: tray::build_tray_icon(),
-            osd: OSD::new(),
+            osd: Osd::new(),
             osd_enabled: true,
             settings: Arc::new(Mutex::new(Settings::new())),
         }
@@ -85,11 +85,11 @@ impl App {
                 }
                 AppEvent::OsdEvent(_) => (),
             }
-            if let Some(response) = process_osd_event(event, &mut self.tray_icon) {
-                if self.osd_enabled {
-                    self.osd.apply_osd_response(response);
-                    wake = true;
-                }
+            if let Some(response) = process_osd_event(event, &mut self.tray_icon)
+                && self.osd_enabled
+            {
+                self.osd.apply_osd_response(response);
+                wake = true;
             }
         }
         wake

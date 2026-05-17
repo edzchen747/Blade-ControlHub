@@ -71,9 +71,9 @@ impl OsdColors {
     }
 }
 
-// ── OSD ─────────────────────────────────────────────────────────────────────
+// ── Osd ─────────────────────────────────────────────────────────────────────
 
-pub struct OSD {
+pub struct Osd {
     // OSD animation state
     state: OsdState,
     show_until: Option<Instant>,
@@ -88,7 +88,7 @@ pub struct OSD {
     osd_current_level: u8,
 }
 
-impl OSD {
+impl Osd {
     pub fn new() -> Self {
         Self {
             state: OsdState::Hidden,
@@ -144,18 +144,18 @@ impl OSD {
     // ── Animation ───────────────────────────────────────────────────────
 
     fn advance_animation(&mut self, ctx: &egui::Context, dt: f32) {
-        if self.state == OsdState::Active {
-            if let Some(timeout) = self.show_until {
-                let now = Instant::now();
-                if now >= timeout {
-                    self.state = OsdState::FadingOut;
-                    self.show_until = None;
-                    ctx.send_viewport_cmd(egui::ViewportCommand::MousePassthrough(true));
-                    ctx.request_repaint();
-                    return;
-                } else {
-                    ctx.request_repaint_after(timeout.duration_since(now));
-                }
+        if self.state == OsdState::Active
+            && let Some(timeout) = self.show_until
+        {
+            let now = Instant::now();
+            if now >= timeout {
+                self.state = OsdState::FadingOut;
+                self.show_until = None;
+                ctx.send_viewport_cmd(egui::ViewportCommand::MousePassthrough(true));
+                ctx.request_repaint();
+                return;
+            } else {
+                ctx.request_repaint_after(timeout.duration_since(now));
             }
         }
 

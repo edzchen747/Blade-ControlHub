@@ -175,18 +175,14 @@ fn setup_menu_event_handler() {
 fn spawn_tray_click_listener() {
     thread::spawn(move || {
         loop {
-            if let Ok(event) = TrayIconEvent::receiver().recv() {
-                match event {
-                    TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } => {
-                        println!("Tray clicked");
-                        app().send(AppEvent::ToggleSettings);
-                    }
-                    _ => {}
-                }
+            if let Ok(TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            }) = TrayIconEvent::receiver().recv()
+            {
+                println!("Tray clicked");
+                app().send(AppEvent::ToggleSettings);
             }
         }
     });

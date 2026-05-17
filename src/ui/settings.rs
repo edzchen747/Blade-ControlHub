@@ -12,7 +12,9 @@ use crate::{
     ui::{app::app, app_events::OsdEvent},
 };
 
+#[allow(dead_code)]
 pub struct CustomKeyMap {
+    #[allow(dead_code)]
     func_keys: Vec<FuncKeyMap>,
     razer_keys: Vec<RazerKeyMap>,
     pub listening_idx: Option<usize>,
@@ -30,6 +32,7 @@ impl Default for CustomKeyMap {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Default, Clone)]
 struct FuncKeyMap {
     key: String,
@@ -334,7 +337,7 @@ pub fn load_settings_icon() -> egui::IconData {
     }
 }
 
-fn reset_value(vec: &mut Vec<RazerKeyMap>, key_code: u8) {
+fn reset_value(vec: &mut [RazerKeyMap], key_code: u8) {
     for key_map in vec.iter_mut() {
         if key_map.key_code == key_code {
             key_map.key_code = 0;

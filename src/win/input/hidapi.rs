@@ -32,13 +32,8 @@ impl HidApiListener {
             if let Ok(device_api) = api.open_path(&path) {
                 // Test if we can read (check for Access Denied)
                 let mut test_buf = [0u8; 16];
-                if device_api.read_timeout(&mut test_buf, 5).is_ok()
-                    || !device_api
-                        .read_timeout(&mut test_buf, 5)
-                        .unwrap_err()
-                        .to_string()
-                        .contains("denied")
-                {
+                let read_result = device_api.read_timeout(&mut test_buf, 5);
+                if read_result.is_ok() || !read_result.unwrap_err().to_string().contains("denied") {
                     opened_count += 1;
                     println!("Opened Interface {} (Path: {:?})", iface_num, path);
                     self.spawn_special_key_listener_thread(
@@ -70,7 +65,7 @@ impl HidApiListener {
             let mut buf = [0u8; 16];
             // Close interfaces as soon as we detect they are likely not the target
             while let Ok(len) = device_api.read(&mut buf) {
-                if !(len > 0) {
+                if len == 0 {
                     println!("noise?");
                     break;
                 }

@@ -34,7 +34,7 @@ impl Startup {
             fs::write(&temp_xml_path, xml_content).expect("Failed to write temporary XML file");
 
             let status = Command::new("schtasks")
-                .args(&[
+                .args([
                     "/Create",
                     "/TN",
                     Self::TASK_NAME,
@@ -57,7 +57,7 @@ impl Startup {
 
     pub fn unregister() {
         let status = Command::new("schtasks")
-            .args(&["/Delete", "/TN", Self::TASK_NAME, "/F"])
+            .args(["/Delete", "/TN", Self::TASK_NAME, "/F"])
             .status()
             .expect("Failed to delete startup task");
 
@@ -75,14 +75,14 @@ impl Startup {
         };
 
         let output = Command::new("schtasks")
-            .args(&["/Query", "/TN", Self::TASK_NAME, "/XML"])
+            .args(["/Query", "/TN", Self::TASK_NAME, "/XML"])
             .output();
 
-        if let Ok(out) = output {
-            if out.status.success() {
-                let xml_content = String::from_utf8_lossy(&out.stdout);
-                return xml_content.contains(&current_path);
-            }
+        if let Ok(out) = output
+            && out.status.success()
+        {
+            let xml_content = String::from_utf8_lossy(&out.stdout);
+            return xml_content.contains(&current_path);
         }
         false
     }

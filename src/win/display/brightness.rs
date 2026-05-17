@@ -65,11 +65,11 @@ impl BrightnessWorker {
             pollster::block_on(async {
                 let mut success = false;
 
-                if let Some(ref mut dev) = monitor {
-                    if dev.set(target as u32).await.is_ok() {
-                        success = true;
-                        last_processed_lvl = target;
-                    }
+                if let Some(ref mut dev) = monitor
+                    && dev.set(target as u32).await.is_ok()
+                {
+                    success = true;
+                    last_processed_lvl = target;
                 }
 
                 if !success {

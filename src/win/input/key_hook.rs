@@ -31,16 +31,16 @@ fn key_event_handler(event: Event) -> Option<Event> {
             return Some(event);
         }
 
-        if let Some(event_action) = KEY_MAP.get(&key) {
-            match event_action.execute() {
-                true => return None,
-                false => (),
-            }
+        if let Some(event_action) = KEY_MAP.get(&key)
+            && event_action.execute()
+        {
+            return None;
         }
-    } else if let EventType::KeyRelease(key) = event.event_type {
-        if key == Key::Alt {
-            ALT_PRESSED.store(false, Ordering::SeqCst);
-        }
+    }
+    if let EventType::KeyRelease(key) = event.event_type
+        && key == Key::Alt
+    {
+        ALT_PRESSED.store(false, Ordering::SeqCst);
     }
     Some(event)
 }

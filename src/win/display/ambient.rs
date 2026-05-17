@@ -86,7 +86,7 @@ impl ScreenCaptureContext {
                     biHeight: -TOTAL_SCAN_LINES, // Negative for top-down DIB
                     biPlanes: 1,
                     biBitCount: 32,
-                    biCompression: BI_RGB.0 as u32,
+                    biCompression: BI_RGB.0,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -265,9 +265,9 @@ impl ColorEngine {
                 let bucket = (r & 0xF0, g & 0xF0, b & 0xF0);
 
                 let mut found = false;
-                for j in 0..c_idx {
-                    if candidates[j].0 == bucket {
-                        candidates[j].1 += weight;
+                for c in candidates.iter_mut().take(c_idx) {
+                    if c.0 == bucket {
+                        c.1 += weight;
                         found = true;
                         break;
                     }

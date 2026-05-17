@@ -21,6 +21,7 @@ impl PowerMonitor {
 
         thread::spawn(move || {
             unsafe {
+                #[allow(clippy::manual_c_str_literals)]
                 let window_class = "PowerEventWindow\0".as_ptr();
                 let wnd_class = WNDCLASSA {
                     lpfnWndProc: Some(power_wnd_proc),
@@ -35,6 +36,7 @@ impl PowerMonitor {
                 let hwnd = CreateWindowExA(
                     0,
                     window_class,
+                    #[allow(clippy::manual_c_str_literals)]
                     "\0".as_ptr(),
                     0, // No WS_VISIBLE flag means it stays hidden
                     0,

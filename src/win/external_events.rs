@@ -53,16 +53,14 @@ impl ExternalChangeMonitor {
 
             interval += self.fast_interval_ms;
 
-            if interval >= self.slow_interval_ms {
-                if SCREEN_ADJUSTING.load(Ordering::SeqCst) == 0 {
-                    interval = 0;
-                    let curr_screen_brightness = get_screen_brightness();
-                    if self.screen_brightness != curr_screen_brightness {
-                        SCREEN_TARGET_LVL.store(curr_screen_brightness, Ordering::SeqCst);
-                        device().persist_config();
-                        self.screen_brightness = curr_screen_brightness;
-                        println!("Detect brightness = {}", curr_screen_brightness);
-                    }
+            if interval >= self.slow_interval_ms && SCREEN_ADJUSTING.load(Ordering::SeqCst) == 0 {
+                interval = 0;
+                let curr_screen_brightness = get_screen_brightness();
+                if self.screen_brightness != curr_screen_brightness {
+                    SCREEN_TARGET_LVL.store(curr_screen_brightness, Ordering::SeqCst);
+                    device().persist_config();
+                    self.screen_brightness = curr_screen_brightness;
+                    println!("Detect brightness = {}", curr_screen_brightness);
                 }
             }
             thread::sleep(Duration::from_millis(self.fast_interval_ms));

@@ -42,6 +42,7 @@ pub enum DeviceCmd {
     SleepDevice,
     AdjustKeyboardLight(bool),
     GetPID(mpsc::Sender<u16>),
+    #[allow(dead_code)]
     GetPerfMode(mpsc::Sender<PerfMode>),
     GetDefaultMultimediaKeys(mpsc::Sender<bool>),
     ToggleDefaultMultimediaKeys(mpsc::Sender<bool>),
@@ -53,6 +54,7 @@ pub enum DeviceCmd {
     AdjustScreenBrightness(i8),
     CycleRefreshRate,
     SetKeyboardColor(u8, u8, u8),
+    #[allow(dead_code)]
     SetLidLogo(LidLogoMode),
     PersistConfig,
     GetConfig(mpsc::Sender<AppConfig>),
@@ -75,6 +77,7 @@ impl DeviceHandle {
             .expect("Device PID config error")
     }
 
+    #[allow(dead_code)]
     pub fn get_perf_mode(&self) -> PerfMode {
         self.query(DeviceCmd::GetPerfMode)
             .expect("Get performance mode error")
@@ -120,6 +123,7 @@ impl DeviceHandle {
         self.send(DeviceCmd::SetKeyboardColor(r, g, b));
     }
 
+    #[allow(dead_code)]
     pub fn set_lid_logo(&self, mode: LidLogoMode) {
         self.send(DeviceCmd::SetLidLogo(mode));
     }

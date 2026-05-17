@@ -12,6 +12,7 @@ pub fn restart_app(code: i32) -> ! {
 }
 
 /// Extension trait for `Option<T>` that restarts the app on `None` instead of panicking.
+#[allow(dead_code)]
 pub trait OptionReload<T> {
     fn or_reload(self, msg: &str) -> T;
 }
@@ -26,6 +27,7 @@ impl<T> OptionReload<T> for Option<T> {
 }
 
 /// Extension trait for `Result<T, E>` that restarts the app on `Err` instead of panicking.
+#[allow(dead_code)]
 pub trait ResultReload<T, E> {
     fn or_reload(self, msg: &str) -> T;
 }

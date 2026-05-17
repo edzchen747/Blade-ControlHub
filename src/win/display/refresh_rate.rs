@@ -110,7 +110,7 @@ impl DisplayManager {
 
             // CDS_UPDATEREGISTRY makes the change persistent (survives reboot).
             let result = windows::Win32::Graphics::Gdi::ChangeDisplaySettingsW(
-                Some(&mut dev_mode),
+                Some(&dev_mode),
                 CDS_UPDATEREGISTRY,
             );
 
