@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use strum_macros::Display;
+use tracing::warn;
 
 #[derive(Clone, Copy, Display, Debug, PartialEq, Serialize, Deserialize)]
 pub enum PerfMode {
@@ -22,7 +23,10 @@ impl From<u8> for PerfMode {
             1 => Self::Turbo,
             4 => Self::Custom,
             _ => {
-                println!("Unknown Performance Mode: {}", value);
+                warn!(
+                    value,
+                    "Unknown PerfMode discriminant, defaulting to Unknown"
+                );
                 Self::Unknown
             }
         }
@@ -47,11 +51,15 @@ impl From<u8> for RGBEffect {
             1 => Self::Wave,
             3 => Self::Breathe,
             5 => Self::Ambient,
+            // Firmware on some devices reports Starlight as 0x07
             7 => Self::Starlight,
             25 => Self::Starlight,
             19 => Self::Reactive,
             _ => {
-                println!("Unknown RGB Effect: {}", value);
+                warn!(
+                    value,
+                    "Unknown RGBEffect discriminant, defaulting to Unknown"
+                );
                 Self::Unknown
             }
         }
@@ -90,7 +98,10 @@ impl From<u8> for BatteryLimit {
             203 => Self::Limit75,
             208 => Self::Limit80,
             _ => {
-                println!("Unknown Battery Health Optimizer Value: {}", value);
+                warn!(
+                    value,
+                    "Unknown BatteryLimit discriminant, defaulting to Unknown"
+                );
                 Self::Unknown
             }
         }

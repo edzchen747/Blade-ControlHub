@@ -52,7 +52,7 @@ fn cycle_state_two_item_list_cycles_correctly() {
 #[test]
 fn cycle_state_set_moves_index_to_matching_value() {
     let mut cs = CycleState::new(vec![10, 20, 30]);
-    cs.set(&20);
+    cs.set(&20).unwrap();
     assert_eq!(cs.index, 1);
     assert_eq!(cs.value(), 20);
 }
@@ -60,22 +60,22 @@ fn cycle_state_set_moves_index_to_matching_value() {
 #[test]
 fn cycle_state_set_to_first_element() {
     let mut cs = CycleState::new(vec![10, 20, 30]);
-    cs.set(&10);
+    cs.set(&10).unwrap();
     assert_eq!(cs.index, 0);
 }
 
 #[test]
 fn cycle_state_set_to_last_element() {
     let mut cs = CycleState::new(vec![10, 20, 30]);
-    cs.set(&30);
+    cs.set(&30).unwrap();
     assert_eq!(cs.index, 2);
 }
 
 #[test]
-#[should_panic(expected = "Internal State Error")]
-fn cycle_state_set_panics_on_value_not_in_list() {
+fn cycle_state_set_returns_err_on_value_not_in_list() {
     let mut cs = CycleState::new(vec![10, 20, 30]);
-    cs.set(&99);
+    let result = cs.set(&99);
+    assert!(result.is_err(), "expected Err for value not in list");
 }
 
 // ── String type ──────────────────────────────────────────────────────────────
@@ -112,14 +112,73 @@ fn cycle_state_string_set_moves_to_correct_position() {
         "beta".to_string(),
         "gamma".to_string(),
     ]);
-    cs.set(&"gamma".to_string());
+    cs.set(&"gamma".to_string()).unwrap();
     assert_eq!(cs.index, 2);
     assert_eq!(cs.value(), "gamma");
 }
 
 #[test]
-#[should_panic(expected = "Internal State Error")]
-fn cycle_state_string_set_panics_on_missing_value() {
+fn cycle_state_string_set_returns_err_on_missing_value() {
     let mut cs = CycleState::new(vec!["alpha".to_string(), "beta".to_string()]);
-    cs.set(&"not_found".to_string());
+    let result = cs.set(&"not_found".to_string());
+    assert!(result.is_err(), "expected Err for missing string value");
+}
+
+// ── set() Result API ──────────────────────────────────────────────────────────
+
+#[test]
+fn cycle_state_set_success_returns_ok() {
+    let mut cs = CycleState::new(vec![10u8, 20, 30]);
+    assert!(cs.set(&20).is_ok());
+    assert_eq!(cs.index, 1);
+}
+
+#[test]
+fn cycle_state_set_to_current_value_is_ok_and_idempotent() {
+    let mut cs = CycleState::new(vec![10u8, 20, 30]);
+    assert!(cs.set(&10).is_ok());
+    assert_eq!(cs.index, 0);
+    assert!(cs.set(&10).is_ok());
+    assert_eq!(cs.index, 0);
+}
+
+#[test]
+fn cycle_state_set_err_does_not_change_index() {
+    let mut cs = CycleState::new(vec![10u8, 20, 30]);
+    cs.set(&20).unwrap(); // move to index 1
+    let _ = cs.set(&99); // should fail
+    assert_eq!(cs.index, 1, "index must not change on Err");
+}
+
+// ── next() boundary cases ─────────────────────────────────────────────────────
+
+#[test]
+fn cycle_state_single_item_next_stays_at_index_zero() {
+    let mut cs = CycleState::new(vec![42u8]);
+    assert_eq!(cs.next(), 42);
+    assert_eq!(cs.index, 0);
+    assert_eq!(cs.next(), 42);
+    assert_eq!(cs.index, 0);
+}
+
+#[test]
+fn cycle_state_next_full_cycle_returns_to_start() {
+    let items = vec![1u8, 2, 3, 4, 5];
+    let len = items.len();
+    let mut cs = CycleState::new(items.clone());
+    for _ in 0..len {
+        cs.next();
+    }
+    assert_eq!(cs.index, 0, "after a full cycle, index must wrap to 0");
+    assert_eq!(cs.value(), items[0]);
+}
+
+// ── value() does not advance ──────────────────────────────────────────────────
+
+#[test]
+fn cycle_state_value_after_next_reflects_new_item() {
+    let mut cs = CycleState::new(vec![100u16, 200, 300]);
+    cs.next();
+    assert_eq!(cs.value(), 200);
+    assert_eq!(cs.value(), 200); // calling value() twice does not advance
 }

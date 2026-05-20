@@ -3,6 +3,7 @@ use crate::utils::persist::PersistBuffer;
 use crate::win::display::brightness::SCREEN_TARGET_LVL;
 
 use std::sync::atomic::Ordering;
+use tracing::error;
 
 /// Persists the current application config to disk via the provided buffer.
 ///
@@ -13,7 +14,7 @@ pub fn persist_config(app_config: &mut AppConfig, persist_buffer: &PersistBuffer
     let json = match serde_json::to_string_pretty(&*app_config) {
         Ok(json) => json,
         Err(e) => {
-            eprintln!("Failed to serialize config for persistence: {}", e);
+            error!(error = %e, "Config serialization failed; skipping disk write");
             return;
         }
     };

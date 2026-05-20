@@ -3,6 +3,7 @@ use crate::razer;
 use std::ptr::null_mut;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use tracing::{error, info, warn};
 use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Power::{
@@ -54,7 +55,13 @@ unsafe extern "system" fn standby_callback(
     _: *const std::ffi::c_void,
 ) -> u32 {
     unsafe {
-        let mut lock = STATE_MANAGER.state.lock().unwrap();
+        let mut lock = match STATE_MANAGER.state.lock() {
+            Ok(g) => g,
+            Err(poisoned) => {
+                warn!("Standby state mutex poisoned; recovering");
+                poisoned.into_inner()
+            }
+        };
         let mut should_notify = false;
 
         match event_type {
@@ -85,8 +92,13 @@ impl StandbyMonitor {
     pub fn start() {
         thread::spawn(|| {
             unsafe {
-                let instance =
-                    GetModuleHandleW(None).expect("Fatal internal error: GetModuleHandleW");
+                let instance = match GetModuleHandleW(None) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        error!(error = ?e, "GetModuleHandleW failed; standby monitor will not start");
+                        return;
+                    }
+                };
                 let class_name: Vec<u16> = "RazerPowerListener\0".encode_utf16().collect();
 
                 let wnd_class = WNDCLASSW {
@@ -97,7 +109,7 @@ impl StandbyMonitor {
                 };
                 RegisterClassW(&wnd_class);
 
-                MAIN_HWND = CreateWindowExW(
+                MAIN_HWND = match CreateWindowExW(
                     Default::default(),
                     PCWSTR(class_name.as_ptr()),
                     PCWSTR(class_name.as_ptr()),
@@ -110,8 +122,13 @@ impl StandbyMonitor {
                     None,
                     instance,
                     None,
-                )
-                .expect("Fatal internal error: CreateWindowExW");
+                ) {
+                    Ok(hwnd) => hwnd,
+                    Err(e) => {
+                        error!(error = ?e, "CreateWindowExW failed; standby monitor will not start");
+                        return;
+                    }
+                };
 
                 let params = Box::leak(Box::new(DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS {
                     Callback: Some(standby_callback),
@@ -123,7 +140,7 @@ impl StandbyMonitor {
                     DEVICE_NOTIFY_CALLBACK,
                 );
 
-                println!("\n--- Windows Standby Monitor Started ---");
+                info!("Windows standby monitor started");
 
                 let mut last_state = StandbyState::Wake;
 
@@ -134,21 +151,25 @@ impl StandbyMonitor {
 
                     // React only to our specific standby change signal
                     if msg.message == WM_STANDBY_CHANGE {
-                        let mut lock = STATE_MANAGER.state.lock().unwrap();
+                        let mut lock = match STATE_MANAGER.state.lock() {
+                            Ok(g) => g,
+                            Err(poisoned) => {
+                                warn!("Standby state mutex poisoned; recovering");
+                                poisoned.into_inner()
+                            }
+                        };
                         if *lock != last_state {
                             match *lock {
                                 StandbyState::Sleep => {
                                     razer::device_handle::device().sleep();
-                                    println!(
-                                        "[!] State updated to SLEEP. Handling hardware shutdown..."
+                                    info!(
+                                        "System entering sleep; executing hardware shutdown sequence"
                                     );
                                 }
                                 StandbyState::Wake => {
                                     razer::device_handle::device().initialize(false);
                                     *lock = StandbyState::Normal; // Reset state
-                                    println!(
-                                        "[+] State updated to WAKE. Handling hardware re-init..."
-                                    );
+                                    info!("System waking from sleep; re-initialising hardware");
                                 }
                                 _ => {}
                             };

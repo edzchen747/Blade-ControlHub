@@ -3,6 +3,7 @@ use std::env;
 use std::fs;
 use std::process::Command;
 use std::thread;
+use tracing::{error, info};
 
 pub struct Startup;
 
@@ -14,16 +15,35 @@ impl Startup {
         thread::spawn(move || {
             thread::sleep(time::Duration::from_secs(2));
 
-            let exe_path =
-                env::current_exe().expect("Fatal internal error: Unable to get current path");
-            let exe_dir = exe_path
-                .parent()
-                .expect("Unable to get executable directory");
+            let exe_path = match env::current_exe() {
+                Ok(p) => p,
+                Err(e) => {
+                    error!(error = %e, "Failed to get executable path");
+                    return;
+                }
+            };
+            let exe_dir = match exe_path.parent() {
+                Some(p) => p,
+                None => {
+                    error!("Unable to get executable directory");
+                    return;
+                }
+            };
 
-            let path_str = exe_path.to_str().expect("Path contains invalid Unicode");
-            let dir_str = exe_dir
-                .to_str()
-                .expect("Directory path contains invalid Unicode");
+            let path_str = match exe_path.to_str() {
+                Some(s) => s,
+                None => {
+                    error!("Executable path contains invalid Unicode");
+                    return;
+                }
+            };
+            let dir_str = match exe_dir.to_str() {
+                Some(s) => s,
+                None => {
+                    error!("Directory path contains invalid Unicode");
+                    return;
+                }
+            };
 
             let mut xml_content = include_str!("../../win/task.xml").to_string();
 
@@ -31,40 +51,64 @@ impl Startup {
             xml_content = xml_content.replace("__EXE_DIR__", dir_str);
 
             let temp_xml_path = env::temp_dir().join("blade_task_config.xml");
-            fs::write(&temp_xml_path, xml_content).expect("Failed to write temporary XML file");
+            if let Err(e) = fs::write(&temp_xml_path, xml_content) {
+                error!(error = %e, "Failed to write temporary task XML file");
+                return;
+            }
 
-            let status = Command::new("schtasks")
+            let temp_xml_str = match temp_xml_path.to_str() {
+                Some(s) => s,
+                None => {
+                    error!("Temporary file path contains invalid Unicode");
+                    return;
+                }
+            };
+
+            let status = match Command::new("schtasks")
                 .args([
                     "/Create",
                     "/TN",
                     Self::TASK_NAME,
                     "/XML",
-                    temp_xml_path.to_str().expect("Temp path invalid Unicode"),
+                    temp_xml_str,
                     "/F",
                 ])
                 .status()
-                .expect("Fatal internal error: Unable to create schtasks task");
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    error!(error = %e, "Failed to execute schtasks create command");
+                    let _ = fs::remove_file(temp_xml_path);
+                    return;
+                }
+            };
 
             let _ = fs::remove_file(temp_xml_path);
 
             if status.success() {
-                println!("Startup task created");
+                info!("Windows Task Scheduler startup entry created");
             } else {
-                println!("Failed to create startup task");
+                error!("Failed to create Task Scheduler startup entry");
             }
         });
     }
 
     pub fn unregister() {
-        let status = Command::new("schtasks")
+        let status = match Command::new("schtasks")
             .args(["/Delete", "/TN", Self::TASK_NAME, "/F"])
             .status()
-            .expect("Failed to delete startup task");
+        {
+            Ok(s) => s,
+            Err(e) => {
+                error!(error = %e, "Failed to execute schtasks delete command");
+                return;
+            }
+        };
 
         if !status.success() {
-            println!("Failed to delete startup task");
+            error!("Failed to delete startup task");
         } else {
-            println!("Startup task removed");
+            info!("Startup task removed");
         }
     }
 

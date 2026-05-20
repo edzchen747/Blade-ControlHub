@@ -1,11 +1,12 @@
 [package]
 authors = ["me"]
 edition = "2024"
-name = "hidapi"
+name = "blade-controlhub"
 version = "1.0.0"
 
 [dependencies]
 anyhow = "1.0"
+thiserror = "1"
 
 # windows power state / utility actions
 brightness = "0.8"
@@ -60,6 +61,10 @@ winit = "0.29"
 eframe = "0.27"
 strum_macros = "0.28.0"
 egui_extras = { version = "0.27", features = ["svg"] }
+
+# Structured logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [build-dependencies]
 winres = "0.1"

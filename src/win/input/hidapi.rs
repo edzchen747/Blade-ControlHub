@@ -2,6 +2,7 @@ use std::sync::atomic::Ordering;
 
 use crate::{
     config,
+    error::{AppError, AppResult},
     ui::{app::app, app_events::AppEvent},
     win::input::{
         key_map::{FN_PRESSED, KEY_MAP},
@@ -9,6 +10,7 @@ use crate::{
     },
 };
 use hidapi::{HidApi, HidDevice};
+use tracing::{info, warn};
 
 pub struct HidApiListener {
     device_pid: u16,
@@ -18,8 +20,8 @@ impl HidApiListener {
     pub fn new(device_pid: u16) -> Self {
         Self { device_pid }
     }
-    pub fn start(&self) {
-        let api = HidApi::new().expect("Failed to init HID API");
+    pub fn start(&self) -> AppResult<()> {
+        let api = HidApi::new().map_err(|e| AppError::HidApi(e.to_string()))?;
         let mut opened_count = 0;
 
         for device_info in api
@@ -35,7 +37,7 @@ impl HidApiListener {
                 let read_result = device_api.read_timeout(&mut test_buf, 5);
                 if read_result.is_ok() || !read_result.unwrap_err().to_string().contains("denied") {
                     opened_count += 1;
-                    println!("Opened Interface {} (Path: {:?})", iface_num, path);
+                    info!(interface = iface_num, path = %path.to_string_lossy(), "HID interface opened");
                     self.spawn_special_key_listener_thread(
                         device_api,
                         iface_num,
@@ -43,16 +45,19 @@ impl HidApiListener {
                     );
                 }
             } else {
-                println!("LOCKED: Interface {}", iface_num);
+                warn!(
+                    interface = iface_num,
+                    "HID interface locked by OS or another process"
+                );
             }
         }
 
-        assert!(opened_count > 0, "No Razer interfaces were accessible.");
+        if opened_count == 0 {
+            return Err(AppError::NoInterfacesAccessible);
+        }
 
-        println!(
-            "\n--- {} HID listeners active. Keyboard (special key) hook thread started. ---",
-            opened_count
-        );
+        info!(listener_count = opened_count, "HID listener threads active");
+        Ok(())
     }
 
     fn spawn_special_key_listener_thread(
@@ -66,7 +71,10 @@ impl HidApiListener {
             // Close interfaces as soon as we detect they are likely not the target
             while let Ok(len) = device_api.read(&mut buf) {
                 if len == 0 {
-                    println!("noise?");
+                    warn!(
+                        interface = iface_num,
+                        "HID read returned zero bytes (noise), closing interface"
+                    );
                     break;
                 }
                 if buf[0] == 0x04 {
@@ -80,7 +88,7 @@ impl HidApiListener {
                             if let Some(action) = KEY_MAP.get(&key) {
                                 let _ = action.execute();
                             } else {
-                                println!("Unmapped keycode detected: {:#04x}", buf[1]);
+                                warn!(keycode = buf[1], "Unmapped Razer keycode received");
                             }
                         }
                     }
@@ -88,7 +96,7 @@ impl HidApiListener {
                     break;
                 }
             }
-            println!("Closed Interface {} (Path: {:?})", iface_num, path);
+            info!(interface = iface_num, path = %path, "HID interface listener closed");
         });
     }
 }

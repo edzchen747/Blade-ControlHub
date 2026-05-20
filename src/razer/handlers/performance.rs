@@ -1,4 +1,5 @@
 use librazer::device::Device;
+use tracing::info;
 
 use crate::{
     config::persist_config,
@@ -38,15 +39,19 @@ impl<'a> PerformanceHandler<'a> {
     }
 
     pub fn set_perf_mode(&mut self, perf_mode: PerfMode) {
-        println!("Set Perf Mode: {:?}", perf_mode.to_string());
+        info!(mode = %perf_mode, "Setting performance mode");
         let _ = command(self.device, 0x0d02, &[1, 0, perf_mode as u8, 0], None);
         let perf_mode = self.get_perf_mode();
-        self.app_config.get().perf_mode.set(&perf_mode);
+        // value comes from hardware readback; mismatch is non-fatal
+        let _ = self.app_config.get().perf_mode.set(&perf_mode);
         self.persist_config();
     }
 
     pub fn get_perf_mode(&self) -> PerfMode {
-        let perf_mode: PerfMode = command(self.device, 0x0d82, &[0, 0, 0, 0], Some(2)).into();
+        // unwrap_or(0): returns PerfMode 0 on hardware/protocol failure
+        let perf_mode: PerfMode = command(self.device, 0x0d82, &[0, 0, 0, 0], Some(2))
+            .unwrap_or(0)
+            .into();
         app().send(OsdEvent::PerfMode(perf_mode).into());
         perf_mode
     }

@@ -1,20 +1,31 @@
+use std::sync::OnceLock;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex, OnceLock};
 
 use eframe::{NativeOptions, egui};
 use tray_icon::TrayIcon;
 
-use crate::razer::device_handle::device;
-use crate::ui::app_events::*;
-use crate::ui::osd::*;
-use crate::ui::settings::Settings;
+use crate::razer::device_handle::{DeviceHandle, device};
+use crate::ui::app_events::AppEvent;
+use crate::ui::event_dispatcher::{EventDispatcher, SideEffect};
+use crate::ui::osd::Osd;
+use crate::ui::settings_store::SettingsStore;
+use crate::ui::theme::OSD_WINDOW_SIZE;
 use crate::ui::tray;
 use crate::utils::oncelock_ext::OnceLockExt;
 
 // ── Global State ────────────────────────────────────────────────────────────
 
-static APP_TX: OnceLock<Sender<AppEvent>> = OnceLock::new();
-static OSD_CONTEXT: OnceLock<egui::Context> = OnceLock::new();
+/// Centralized application context: bundles the event channel sender, the
+/// egui rendering context, and the device handle. Replaces the previous
+/// scattered globals with a single source of truth.
+#[derive(Clone)]
+pub struct AppContext {
+    pub tx: Sender<AppEvent>,
+    pub egui_ctx: egui::Context,
+    pub device: DeviceHandle,
+}
+
+static APP_CONTEXT: OnceLock<AppContext> = OnceLock::new();
 
 // ── App (eframe application) ────────────────────────────────────────────
 
@@ -30,12 +41,14 @@ struct App {
     osd_enabled: bool,
 
     // Settings Window
-    settings: Arc<Mutex<Settings>>,
+    settings: SettingsStore,
 }
 
 impl Drop for App {
     fn drop(&mut self) {
-        device().shutdown();
+        if let Some(ctx) = APP_CONTEXT.get() {
+            let _ = ctx.device.shutdown();
+        }
     }
 }
 
@@ -46,7 +59,7 @@ impl App {
             tray_icon: tray::build_tray_icon(),
             osd: Osd::new(),
             osd_enabled: true,
-            settings: Arc::new(Mutex::new(Settings::new())),
+            settings: SettingsStore::new(),
         }
     }
 
@@ -56,36 +69,15 @@ impl App {
     fn handle_app_events(&mut self, ctx: &egui::Context) -> bool {
         let mut wake = false;
         while let Ok(event) = self.rx.try_recv() {
-            match event {
-                AppEvent::ToggleSettings => {
-                    let app_config = device().get_config();
-                    self.settings.lock().unwrap().toggle(app_config);
-                }
-                AppEvent::OpenSettings => {
-                    let app_config = device().get_config();
-                    self.settings.lock().unwrap().show(app_config);
-                }
-                AppEvent::Shutdown => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                }
-                AppEvent::OsdEvent(OsdEvent::EnableOSD(enable)) => {
-                    self.osd_enabled = enable;
-                }
-                AppEvent::RazerKeyCode(key_code) => {
-                    let is_listening = self
-                        .settings
-                        .lock()
-                        .unwrap()
-                        .custom_key_map
-                        .listening_idx
-                        .is_some();
-                    if is_listening {
-                        self.settings.lock().unwrap().custom_key_map.special_key = Some(key_code);
-                    }
-                }
-                AppEvent::OsdEvent(_) => (),
+            let (osd_response, side_effect) = EventDispatcher::dispatch(event);
+
+            // Process side effects first
+            if let Some(side) = side_effect {
+                self.apply_side_effect(side, ctx);
             }
-            if let Some(response) = process_osd_event(event, &mut self.tray_icon)
+
+            // Then optionally trigger OSD
+            if let Some(response) = osd_response
                 && self.osd_enabled
             {
                 self.osd.apply_osd_response(response);
@@ -94,13 +86,51 @@ impl App {
         }
         wake
     }
+
+    /// Applies a side effect from the event dispatcher.
+    fn apply_side_effect(&mut self, side: SideEffect, ctx: &egui::Context) {
+        match side {
+            SideEffect::ToggleSettings => {
+                let app_config = APP_CONTEXT
+                    .get()
+                    .expect("App context not initialized")
+                    .device
+                    .get_config()
+                    .unwrap_or_default();
+                self.settings.toggle(app_config);
+            }
+            SideEffect::OpenSettings => {
+                let app_config = APP_CONTEXT
+                    .get()
+                    .expect("App context not initialized")
+                    .device
+                    .get_config()
+                    .unwrap_or_default();
+                self.settings.show(app_config);
+            }
+            SideEffect::Shutdown => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            SideEffect::EnableOsd(enable) => {
+                self.osd_enabled = enable;
+            }
+            SideEffect::RazerKeyCode(key_code) => {
+                if self.settings.is_listening_for_key() {
+                    self.settings.set_razer_key_code(key_code);
+                }
+            }
+            SideEffect::PerfMode(mode) => {
+                tray::set_perf_mode_icon(&mut self.tray_icon, mode);
+            }
+        }
+    }
 }
 
 // ── eframe::App Implementation ──────────────────────────────────────────────
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        Settings::run(ctx, self.settings.clone());
+        self.settings.run(ctx);
 
         let trigger_osd = self.handle_app_events(ctx);
         self.osd.run(ctx, trigger_osd);
@@ -113,29 +143,35 @@ impl eframe::App for App {
 
 // ── Public Handle ───────────────────────────────────────────────────────────
 
-/// A clonable handle for sending `OsdEvent`s to the OSD application.
+/// A handle for sending `AppEvent`s to the application, requesting
+/// repaints on the egui context, and accessing the device layer.
+/// All internal fields are reference-counted, so cloning is cheap.
+#[derive(Clone)]
 pub struct AppHandle {
     tx: Sender<AppEvent>,
+    pub egui_ctx: egui::Context,
+    pub device: DeviceHandle,
 }
 
 impl AppHandle {
     pub fn send(&self, event: AppEvent) {
         self.tx
             .send(event)
-            .expect("Fatal internal error: OSD TX send");
-        OSD_CONTEXT
-            .get()
-            .expect("Fatal internal error: OSD Context get error")
-            .request_repaint();
+            .expect("Fatal internal error: App TX send");
+        self.egui_ctx.request_repaint();
     }
 }
 
 /// Returns a handle to the running `App` event channel.
 pub fn app() -> AppHandle {
-    let tx = APP_TX
+    let ctx = APP_CONTEXT
         .get_or_timeout()
-        .expect("Fatal internal error: App channel initialization timeout");
-    AppHandle { tx: tx.clone() }
+        .expect("Fatal internal error: App context initialization timeout");
+    AppHandle {
+        tx: ctx.tx.clone(),
+        egui_ctx: ctx.egui_ctx.clone(),
+        device: ctx.device.clone(),
+    }
 }
 
 // ── Entry Point ─────────────────────────────────────────────────────────────
@@ -147,18 +183,18 @@ pub fn run() {
         "Blade ControlHub OSD",
         native_options(),
         Box::new(move |cc| {
-            APP_TX
-                .set(tx)
-                .expect("Fatal internal error: OSD channel initialize error");
-            OSD_CONTEXT
-                .set(cc.egui_ctx.clone())
-                .expect("Fatal internal error: OSD Context initialize error");
+            let device_handle = device();
+            let _ = APP_CONTEXT.set(AppContext {
+                tx,
+                egui_ctx: cc.egui_ctx.clone(),
+                device: device_handle,
+            });
             egui_extras::install_image_loaders(&cc.egui_ctx);
 
             Box::new(App::new(rx))
         }),
     )
-    .expect("Fatal internal error: OSD error");
+    .expect("Fatal internal error: App error");
 }
 
 // ── Window Options ──────────────────────────────────────────────────────────

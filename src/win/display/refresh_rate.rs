@@ -1,4 +1,7 @@
 use std::collections::BTreeSet;
+
+use crate::error::{AppError, AppResult};
+use tracing::info;
 use windows::Win32::Graphics::Gdi::{
     CDS_UPDATEREGISTRY, DEVMODEW, DISP_CHANGE_SUCCESSFUL, DISPLAY_DEVICE_ATTACHED_TO_DESKTOP,
     DISPLAY_DEVICE_PRIMARY_DEVICE, DISPLAY_DEVICEW, DM_DISPLAYFREQUENCY, ENUM_CURRENT_SETTINGS,
@@ -93,8 +96,8 @@ impl DisplayManager {
         }
     }
 
-    pub fn set_refresh_rate(&self, new_rate: u32) -> Result<(), i32> {
-        println!("Setting refresh rate to {} Hz", new_rate);
+    pub fn set_refresh_rate(&self, new_rate: u32) -> AppResult<()> {
+        info!(rate_hz = new_rate, "Setting refresh rate");
         let mut dev_mode: DEVMODEW = unsafe { std::mem::zeroed() };
         dev_mode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
 
@@ -102,7 +105,9 @@ impl DisplayManager {
             // Get current settings to keep current resolution
             if !EnumDisplaySettingsW(self.pcwstr(), ENUM_CURRENT_SETTINGS, &mut dev_mode).as_bool()
             {
-                return Err(-1);
+                return Err(AppError::Internal(
+                    "EnumDisplaySettingsW failed to get current settings".to_string(),
+                ));
             }
 
             dev_mode.dmDisplayFrequency = new_rate;
@@ -117,15 +122,18 @@ impl DisplayManager {
             if result == DISP_CHANGE_SUCCESSFUL {
                 Ok(())
             } else {
-                Err(result.0)
+                Err(AppError::Internal(format!(
+                    "ChangeDisplaySettingsW failed for {}Hz: Win32 code {}",
+                    new_rate, result.0
+                )))
             }
         }
     }
 
-    pub fn cycle_refresh_rate(&self) -> Result<u32, String> {
+    pub fn cycle_refresh_rate(&self) -> AppResult<u32> {
         let supported = self.get_supported_rates();
         if supported.is_empty() {
-            return Err("No supported refresh rates found.".to_string());
+            return Err(AppError::DisplayNotFound);
         }
 
         let current = self.get_current_rate();
@@ -133,12 +141,15 @@ impl DisplayManager {
         // Find the first rate in the sorted list that is higher than our current rate
         let next_rate = match supported.iter().find(|&&rate| rate > current) {
             Some(&higher_rate) => higher_rate,
-            None => *supported.first().unwrap(),
+            None => supported
+                .first()
+                .copied()
+                .ok_or(AppError::DisplayNotFound)?,
         };
 
         match self.set_refresh_rate(next_rate) {
             Ok(_) => Ok(next_rate),
-            Err(e) => Err(format!("Win32 Error Code: {}", e)),
+            Err(e) => Err(e),
         }
     }
 }

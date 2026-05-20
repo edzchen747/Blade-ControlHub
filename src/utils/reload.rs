@@ -1,13 +1,20 @@
 use std::time::Duration;
 
 use sysinfo::System;
+use tracing::error;
 
 /// Restarts the application by spawning a new instance and exiting.
 pub fn restart_app(code: i32) -> ! {
-    let current_exe = std::env::current_exe().expect("Failed to get current exe path");
-    std::process::Command::new(current_exe)
-        .spawn()
-        .expect("Failed to restart");
+    match std::env::current_exe() {
+        Ok(current_exe) => {
+            if let Err(e) = std::process::Command::new(&current_exe).spawn() {
+                error!(error = %e, "Failed to spawn restart process");
+            }
+        }
+        Err(e) => {
+            error!(error = %e, "Failed to resolve current executable path for restart");
+        }
+    }
     std::process::exit(code);
 }
 
@@ -20,7 +27,10 @@ pub trait OptionReload<T> {
 impl<T> OptionReload<T> for Option<T> {
     fn or_reload(self, msg: &str) -> T {
         self.unwrap_or_else(|| {
-            eprintln!("Fatal internal error: {msg}");
+            error!(
+                message = msg,
+                "Fatal: Option::None where value was required; restarting"
+            );
             restart_app(1);
         })
     }
@@ -35,18 +45,25 @@ pub trait ResultReload<T, E> {
 impl<T, E: std::fmt::Debug> ResultReload<T, E> for Result<T, E> {
     fn or_reload(self, msg: &str) -> T {
         self.unwrap_or_else(|err| {
-            eprintln!("Fatal internal error: {msg} - {:?}", err);
+            error!(message = msg, error = ?err, "Fatal: Result::Err in non-recoverable path; restarting");
             restart_app(1);
         })
     }
 }
 
 pub fn close_running_instances() {
+    let current_pid = match sysinfo::get_current_pid() {
+        Ok(pid) => pid,
+        Err(e) => {
+            error!(error = ?e, "Failed to resolve current process PID; skipping instance cleanup");
+            return;
+        }
+    };
+
     let mut sys = System::new_all();
     sys.refresh_processes();
 
-    let current_pid = sysinfo::get_current_pid().expect("Failed to get app PID");
-    let my_name = "hidapi.exe";
+    let my_name = "blade-controlhub.exe";
 
     let mut found_old = false;
     for (pid, process) in sys.processes() {

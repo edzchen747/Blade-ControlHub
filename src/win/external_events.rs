@@ -10,6 +10,7 @@ use crate::{
 };
 use std::sync::atomic::Ordering;
 use std::{thread, time::Duration};
+use tracing::debug;
 
 pub struct ExternalChangeMonitor {
     fast_interval_ms: u64,
@@ -60,7 +61,10 @@ impl ExternalChangeMonitor {
                     SCREEN_TARGET_LVL.store(curr_screen_brightness, Ordering::SeqCst);
                     device().persist_config();
                     self.screen_brightness = curr_screen_brightness;
-                    println!("Detect brightness = {}", curr_screen_brightness);
+                    debug!(
+                        brightness = curr_screen_brightness,
+                        "External brightness change detected"
+                    );
                 }
             }
             thread::sleep(Duration::from_millis(self.fast_interval_ms));

@@ -1,9 +1,11 @@
 use crate::config::{self, CONFIG_PATH};
+use crate::error::{AppError, AppResult};
 use crate::razer::config::AppConfig;
 use crate::razer::enums::{LidLogoMode, PerfMode};
 use crate::razer::executer::Executer;
 use crate::utils::persist::PersistBuffer;
 use crate::win::audio::AudioType;
+use tracing::{error, warn};
 
 use librazer::device::Device;
 use std::sync::OnceLock;
@@ -22,10 +24,23 @@ pub fn device() -> DeviceHandle {
         let (tx, rx) = mpsc::channel::<DeviceCmd>();
 
         thread::spawn(move || {
-            let device = Device::detect().expect("No compatible device found");
+            let device = match Device::detect() {
+                Ok(d) => d,
+                Err(e) => {
+                    error!(error = ?e, "No compatible Razer device found; worker thread exiting");
+                    return;
+                }
+            };
             let mut app_config = config::load_config();
             let persist_buffer = PersistBuffer::new(CONFIG_PATH.to_string());
-            Executer::new(&device, &mut app_config, persist_buffer, rx).process_commands();
+            let mut executer = match Executer::new(&device, &mut app_config, persist_buffer, rx) {
+                Ok(e) => e,
+                Err(e) => {
+                    error!(error = %e, "Failed to initialise Executer; worker thread exiting");
+                    return;
+                }
+            };
+            executer.process_commands();
         });
 
         tx
@@ -72,33 +87,29 @@ pub struct DeviceHandle {
 impl DeviceHandle {
     // ── Queries (blocking) ──────────────────────────────────────────
 
-    pub fn get_pid(&self) -> u16 {
+    pub fn get_pid(&self) -> AppResult<u16> {
         self.query(DeviceCmd::GetPID)
-            .expect("Device PID config error")
     }
 
     #[allow(dead_code)]
-    pub fn get_perf_mode(&self) -> PerfMode {
+    pub fn get_perf_mode(&self) -> AppResult<PerfMode> {
         self.query(DeviceCmd::GetPerfMode)
-            .expect("Get performance mode error")
     }
 
-    pub fn get_default_multimedia_keys(&self) -> bool {
+    pub fn get_default_multimedia_keys(&self) -> AppResult<bool> {
         self.query(DeviceCmd::GetDefaultMultimediaKeys)
-            .expect("Get default keys error")
     }
 
-    pub fn toggle_default_multimedia_keys(&self) -> bool {
+    pub fn toggle_default_multimedia_keys(&self) -> AppResult<bool> {
         self.query(DeviceCmd::ToggleDefaultMultimediaKeys)
-            .expect("Get default keys error")
     }
 
-    pub fn get_config(&self) -> AppConfig {
-        self.query(DeviceCmd::GetConfig).expect("Get config error")
+    pub fn get_config(&self) -> AppResult<AppConfig> {
+        self.query(DeviceCmd::GetConfig)
     }
 
-    pub fn shutdown(&self) -> bool {
-        self.query(DeviceCmd::Shutdown).expect("Failed to shutdown")
+    pub fn shutdown(&self) -> AppResult<bool> {
+        self.query(DeviceCmd::Shutdown)
     }
 
     // ── Fire-and-forget commands ────────────────────────────────────
@@ -166,13 +177,15 @@ impl DeviceHandle {
 
     // ── Internal helpers ────────────────────────────────────────────
 
-    /// Sends a command and ignores the result.
+    /// Sends a command and logs an error if the device thread has exited.
     fn send(&self, cmd: DeviceCmd) {
-        let _ = self.sender.send(cmd);
+        if self.sender.send(cmd).is_err() {
+            warn!("Device worker thread has exited; command dropped");
+        }
     }
 
-    /// Sends a query command and blocks until the response arrives (1s timeout).
-    fn query<T, F>(&self, make_query: F) -> anyhow::Result<T>
+    /// Sends a query command and blocks until the response arrives (5s timeout).
+    fn query<T, F>(&self, make_query: F) -> AppResult<T>
     where
         F: FnOnce(mpsc::Sender<T>) -> DeviceCmd,
     {
@@ -181,10 +194,70 @@ impl DeviceHandle {
 
         self.sender
             .send(cmd)
-            .expect("Device handle thread is no longer running");
+            .map_err(|_| AppError::ChannelDisconnected)?;
 
         resp_rx
             .recv_timeout(Duration::from_secs(5))
-            .map_err(|_| anyhow::anyhow!("Hardware response timeout"))
+            .map_err(|_| AppError::HardwareTimeout)
+    }
+}
+
+// ── DeviceController Trait Implementation ─────────────────────────────────────
+
+impl crate::core::traits::DeviceController for DeviceHandle {
+    fn initialize(&self, notify_startup: bool) {
+        DeviceHandle::initialize(self, notify_startup);
+    }
+
+    fn sleep(&self) {
+        DeviceHandle::sleep(self);
+    }
+
+    fn shutdown(&self) -> crate::error::AppResult<bool> {
+        DeviceHandle::shutdown(self)
+    }
+
+    fn get_pid(&self) -> crate::error::AppResult<u16> {
+        DeviceHandle::get_pid(self)
+    }
+
+    fn cycle_perf_mode(&self) {
+        DeviceHandle::cycle_perf_mode(self);
+    }
+
+    fn cycle_rgb_mode(&self) {
+        DeviceHandle::cycle_rgb_mode(self);
+    }
+
+    fn cycle_refresh_rate(&self) {
+        DeviceHandle::cycle_refresh_rate(self);
+    }
+
+    fn cycle_battery_limit(&self) {
+        DeviceHandle::cycle_battery_limit(self);
+    }
+
+    fn toggle_vc(&self) {
+        DeviceHandle::toggle_vc(self);
+    }
+
+    fn keyboard_light_up(&self) {
+        DeviceHandle::keyboard_light_up(self);
+    }
+
+    fn keyboard_light_down(&self) {
+        DeviceHandle::keyboard_light_down(self);
+    }
+
+    fn adjust_screen_brightness(&self, change: i8) {
+        DeviceHandle::adjust_screen_brightness(self, change);
+    }
+
+    fn set_lid_logo(&self, mode: crate::razer::enums::LidLogoMode) {
+        DeviceHandle::set_lid_logo(self, mode);
+    }
+
+    fn persist_config(&self) {
+        DeviceHandle::persist_config(self);
     }
 }

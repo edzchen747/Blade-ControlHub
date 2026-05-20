@@ -1,3 +1,4 @@
+use crate::error::{AppError, AppResult};
 use crate::razer::enums::*;
 use crate::win::system::power::IS_PLUGGED_IN;
 use std::sync::atomic::Ordering;
@@ -21,8 +22,12 @@ impl<T: Clone + PartialEq> CycleState<T> {
 
     /// Advances to the next item and returns it.
     pub fn next(&mut self) -> T {
+        debug_assert!(
+            !self.items.is_empty(),
+            "CycleState::next called on empty items"
+        );
         if self.items.is_empty() {
-            panic!("Cannot get next value from an empty collection");
+            return self.items[0].clone(); // unreachable in practice; debug_assert fires in dev
         }
         self.index = (self.index + 1) % self.items.len();
         self.items[self.index].clone()
@@ -34,11 +39,15 @@ impl<T: Clone + PartialEq> CycleState<T> {
     }
 
     /// Sets the current index to the position of the given value.
-    pub fn set(&mut self, value: &T) {
-        if let Some(pos) = self.items.iter().position(|x| x == value) {
-            self.index = pos;
-        } else {
-            panic!("Internal State Error");
+    pub fn set(&mut self, value: &T) -> AppResult<()> {
+        match self.items.iter().position(|x| x == value) {
+            Some(pos) => {
+                self.index = pos;
+                Ok(())
+            }
+            None => Err(AppError::Internal(
+                "CycleState::set: value not found in items list".to_string(),
+            )),
         }
     }
 }

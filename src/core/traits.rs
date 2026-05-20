@@ -1,12 +1,14 @@
+use crate::error::AppResult;
 use crate::razer::enums::LidLogoMode;
 
 /// Trait abstracting hardware device control operations.
-/// Implemented by DeviceHandle. Enables future unit testing via mock impls.
+/// Implemented by both DeviceHandle (production) and MockDeviceController (tests).
+#[expect(dead_code)]
 pub trait DeviceController {
     fn initialize(&self, notify_startup: bool);
     fn sleep(&self);
-    fn shutdown(&self) -> bool;
-    fn get_pid(&self) -> u16;
+    fn shutdown(&self) -> AppResult<bool>;
+    fn get_pid(&self) -> AppResult<u16>;
     fn cycle_perf_mode(&self);
     fn cycle_rgb_mode(&self);
     fn cycle_refresh_rate(&self);

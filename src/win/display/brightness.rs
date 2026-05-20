@@ -5,6 +5,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use crate::ui::app::app;
 use crate::ui::app_events::OsdEvent;
+use tracing::{debug, error};
 
 pub static SCREEN_TARGET_LVL: AtomicU8 = AtomicU8::new(100);
 pub static SCREEN_ADJUSTING: AtomicUsize = AtomicUsize::new(0);
@@ -28,7 +29,7 @@ impl BrightnessWorker {
     pub fn set_screen_brightness(&self, new_level: u8) {
         let discrete_lvl = (new_level as f64 / 10.0).round() as u8 * 10;
         app().send(OsdEvent::ScreenBrightness(discrete_lvl).into());
-        println!("Trying to set screen brightness: {}", discrete_lvl);
+        debug!(level = discrete_lvl, "Queuing screen brightness change");
         SCREEN_TARGET_LVL.store(discrete_lvl, Ordering::SeqCst);
         let _ = self.tx.send(());
     }
@@ -45,7 +46,7 @@ impl BrightnessWorker {
             if let Some(Ok(dev)) = devices.next().await {
                 return Some(dev); // Return the first working device found
             }
-            println!("Fatal internal error: no monitor device found");
+            error!("No monitor brightness device found; brightness control disabled");
             None
         });
         let mut last_processed_lvl: u8 = 101;
@@ -57,7 +58,10 @@ impl BrightnessWorker {
 
             // skip if target has not changed
             if target == last_processed_lvl {
-                println!("skipped as last brightness was: {}", last_processed_lvl);
+                debug!(
+                    level = last_processed_lvl,
+                    "Brightness target unchanged; skipping write"
+                );
                 continue;
             }
             SCREEN_ADJUSTING.fetch_add(1, Ordering::SeqCst);
@@ -73,10 +77,10 @@ impl BrightnessWorker {
                 }
 
                 if !success {
-                    eprintln!("Worker: Failed to update any brightness devices.");
+                    error!("Failed to set brightness on any connected monitor");
                 };
                 SCREEN_ADJUSTING.fetch_sub(1, Ordering::SeqCst);
-                println!("Set brightness: {}", target);
+                debug!(level = target, "Screen brightness updated");
             });
         }
     }

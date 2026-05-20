@@ -2,6 +2,7 @@ use crate::razer::device_handle::DeviceHandle;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
+use tracing::trace;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -433,9 +434,10 @@ fn normalize_to_midpoint(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
     ((nr * 255.0) as u8, (ng * 255.0) as u8, (nb * 255.0) as u8)
 }
 
+#[cfg(debug_assertions)]
 fn print_color_preview(r: u8, g: u8, b: u8) {
-    println!(
-        "\x1b[48;2;{};{};{}m    \x1b[0m RGB: {}, {}, {}",
-        r, g, b, r, g, b
-    );
+    trace!(r = r, g = g, b = b, "Ambient color sample");
 }
+
+#[cfg(not(debug_assertions))]
+fn print_color_preview(_r: u8, _g: u8, _b: u8) {}

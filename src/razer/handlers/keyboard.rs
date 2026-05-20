@@ -57,7 +57,8 @@ impl<'a> KeyboardHandler<'a> {
     }
 
     pub fn get_keyboard_brightness(&self) -> u8 {
-        let brightness = command(self.device, 0x0383, &[1, 5, 0], Some(2));
+        // unwrap_or(0): returns 0 on hardware/protocol failure
+        let brightness = command(self.device, 0x0383, &[1, 5, 0], Some(2)).unwrap_or(0);
         app().send(OsdEvent::KeyboardBrightness(brightness).into());
         brightness
     }
@@ -100,7 +101,8 @@ impl<'a> KeyboardHandler<'a> {
         }
         let _ = command(self.device, 0x030a, &args, None);
 
-        self.app_config.get().rgb_effect.set(&rgb_effect);
+        // value comes from hardware readback; mismatch is non-fatal
+        let _ = self.app_config.get().rgb_effect.set(&rgb_effect);
         if rgb_effect != RGBEffect::Ambient {
             let effect = self.get_rgb_effect();
             app().send(OsdEvent::RGBEffect(effect).into());
@@ -109,7 +111,10 @@ impl<'a> KeyboardHandler<'a> {
     }
 
     pub fn get_rgb_effect(&self) -> RGBEffect {
-        command(self.device, 0x038a, &[0], Some(0)).into()
+        // unwrap_or(0): returns RGBEffect 0 on hardware/protocol failure
+        command(self.device, 0x038a, &[0], Some(0))
+            .unwrap_or(0)
+            .into()
     }
 
     pub fn toggle_under_glow(&mut self) {
@@ -128,8 +133,9 @@ impl<'a> KeyboardHandler<'a> {
     }
 
     pub fn get_under_glow_brightness(&self) -> u8 {
-        let brightness = command(self.device, 0x0383, &[1, 38, 0], Some(2));
-        let active = command(self.device, 0x0380, &[1, 38, 0], Some(2));
+        // unwrap_or(0): returns 0 on hardware/protocol failure
+        let brightness = command(self.device, 0x0383, &[1, 38, 0], Some(2)).unwrap_or(0);
+        let active = command(self.device, 0x0380, &[1, 38, 0], Some(2)).unwrap_or(0);
         brightness * active
     }
 
@@ -147,13 +153,13 @@ impl<'a> KeyboardHandler<'a> {
 
     pub fn set_lid_logo(&mut self, mode: LidLogoMode) {
         if mode == LidLogoMode::Off {
-            command(self.device, 0x0300, &[1, 4, 0], None);
+            let _ = command(self.device, 0x0300, &[1, 4, 0], None);
         } else {
-            command(self.device, 0x0300, &[1, 4, 1], None);
+            let _ = command(self.device, 0x0300, &[1, 4, 1], None);
             if mode == LidLogoMode::On {
-                command(self.device, 0x0302, &[1, 4, 0], None);
+                let _ = command(self.device, 0x0302, &[1, 4, 0], None);
             } else {
-                command(self.device, 0x0302, &[1, 4, 1], None);
+                let _ = command(self.device, 0x0302, &[1, 4, 1], None);
             }
         }
         app().send(OsdEvent::LidLogo(mode).into());

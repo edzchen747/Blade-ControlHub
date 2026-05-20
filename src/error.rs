@@ -1,45 +1,42 @@
-use std::fmt;
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum AppError {
+    // ── Hardware ────────────────────────────────────────────────────────
+    #[error("Hardware device did not respond within the timeout period")]
     HardwareTimeout,
-    HardwareResponseInvalid,
+
+    #[error("Hardware command {command:#06x} failed after {attempts} attempts")]
+    Protocol { command: u16, attempts: u8 },
+
+    // ── HID / Input ─────────────────────────────────────────────────────
+    #[error("Failed to initialise HID API: {0}")]
+    HidApi(String),
+
+    #[error("No Razer HID interfaces were accessible (all locked by OS or another process)")]
+    NoInterfacesAccessible,
+
+    // ── Config ──────────────────────────────────────────────────────────
+    #[error("Failed to parse configuration: {0}")]
     ConfigParse(String),
-    ConfigSerialize(String),
-    AudioEndpointUnavailable,
+
+    #[error("Invalid internal state: {0}")]
+    Internal(String),
+
+    // ── System / OS ─────────────────────────────────────────────────────
+    #[error("No compatible display device found")]
     DisplayNotFound,
-    DeviceNotFound,
+
+    #[error("Internal message channel disconnected")]
     ChannelDisconnected,
-}
 
-impl fmt::Display for AppError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            AppError::HardwareTimeout => write!(f, "Hardware device did not respond in time"),
-            AppError::HardwareResponseInvalid => {
-                write!(f, "Hardware returned an unexpected response")
-            }
-            AppError::ConfigParse(msg) => write!(f, "Failed to parse config: {}", msg),
-            AppError::ConfigSerialize(msg) => write!(f, "Failed to serialize config: {}", msg),
-            AppError::AudioEndpointUnavailable => write!(f, "Audio endpoint is not available"),
-            AppError::DisplayNotFound => write!(f, "No compatible display device found"),
-            AppError::DeviceNotFound => write!(f, "No compatible Razer device found"),
-            AppError::ChannelDisconnected => write!(f, "Internal message channel disconnected"),
-        }
-    }
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
 }
-
-impl std::error::Error for AppError {}
 
 impl From<serde_json::Error> for AppError {
     fn from(err: serde_json::Error) -> Self {
         AppError::ConfigParse(err.to_string())
-    }
-}
-
-impl From<anyhow::Error> for AppError {
-    fn from(_err: anyhow::Error) -> Self {
-        AppError::HardwareTimeout
     }
 }
 

@@ -1,0 +1,61 @@
+/// Tray icon rasterization and performance mode color mapping.
+///
+/// Handles SVG-to-icon conversion and dynamic color switching
+/// based on the current performance mode.
+use crate::razer::enums::PerfMode;
+use crate::ui::theme::{DEFAULT_ICON_COLOR, TRAY_ICON_SCALE_FACTOR, TRAY_ICON_SIZE};
+use tracing::debug;
+
+use resvg::{tiny_skia, usvg};
+use tray_icon::Icon;
+
+/// Renders the tray icon SVG with the given hex color and returns an `Icon`.
+pub fn load_tray_icon(hex_color: &str) -> Icon {
+    let mut pixmap = tiny_skia::Pixmap::new(TRAY_ICON_SIZE, TRAY_ICON_SIZE).unwrap();
+
+    let coloured_svg = include_str!("../../assets/icon.svg")
+        .replace("#FFFFFF", hex_color)
+        .replace("#ffffff", &hex_color.to_lowercase());
+
+    let opt = usvg::Options::default();
+    let tree = usvg::Tree::from_str(&coloured_svg, &opt).expect("Failed to parse SVG");
+
+    let svg_size = tree.size();
+    let base_scale =
+        (TRAY_ICON_SIZE as f32 / svg_size.width()).min(TRAY_ICON_SIZE as f32 / svg_size.height());
+    let final_scale = base_scale * TRAY_ICON_SCALE_FACTOR;
+
+    let tx = (TRAY_ICON_SIZE as f32 - (svg_size.width() * final_scale)) / 2.0;
+    let ty = (TRAY_ICON_SIZE as f32 - (svg_size.height() * final_scale)) / 2.0;
+
+    let transform =
+        tiny_skia::Transform::from_scale(final_scale, final_scale).post_translate(tx, ty);
+
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+
+    let rgba = pixmap.take();
+    Icon::from_rgba(rgba, TRAY_ICON_SIZE, TRAY_ICON_SIZE).expect("Failed to create tray icon")
+}
+
+/// Updates the tray icon color to reflect the current performance mode.
+pub fn set_perf_mode_icon(tray_icon: &mut tray_icon::TrayIcon, perf_mode: PerfMode) {
+    debug!(mode = ?perf_mode, "Switching tray icon colour");
+    let hex = perf_mode_color(perf_mode);
+    let new_icon = load_tray_icon(hex);
+    tray_icon
+        .set_icon(Some(new_icon))
+        .expect("Failed to update icon");
+}
+
+/// Maps a `PerfMode` to its corresponding tray icon hex color.
+fn perf_mode_color(mode: PerfMode) -> &'static str {
+    match mode {
+        PerfMode::Silent => "#00C853",
+        PerfMode::Quiet => "#00E5FF",
+        PerfMode::Balanced => "#FFD600",
+        PerfMode::Performance => "#FF5D00",
+        PerfMode::Turbo => "#D50000",
+        PerfMode::Custom => "#A200FF",
+        PerfMode::Unknown => DEFAULT_ICON_COLOR,
+    }
+}

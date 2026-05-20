@@ -1,4 +1,5 @@
 use rdev::Key;
+use tracing::warn;
 use winreg::RegKey;
 use winreg::enums::*;
 
@@ -15,12 +16,12 @@ pub fn get_trackpad_state() -> bool {
         match key.get_value::<u32, _>("Enabled") {
             Ok(enabled) => enabled != 0,
             Err(err) => {
-                println!("{}", err);
+                warn!(error = %err, "Failed to read trackpad Enabled value");
                 true
             }
         }
     } else {
-        println!("Could not find PrecisionTouchPad registry key.");
+        warn!("Could not find PrecisionTouchPad registry key.");
         true
     }
 }

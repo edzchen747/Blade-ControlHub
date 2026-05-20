@@ -1,6 +1,7 @@
 use std::sync::atomic::Ordering;
 
 use rdev::{Event, EventType, Key, grab};
+use tracing::{error, info};
 
 use crate::win::input::{
     key_map::{ALT_PRESSED, KEY_MAP},
@@ -12,9 +13,9 @@ pub struct KeyHook {}
 impl KeyHook {
     pub fn start() {
         std::thread::spawn(|| {
-            println!("\n--- KeyHook grab thread started. ---");
+            info!("Keyboard grab thread started");
             if let Err(e) = grab(key_event_handler) {
-                eprintln!("Keyboard grab failed: {:?}", e);
+                error!(error = ?e, "Keyboard grab failed");
             }
         });
     }

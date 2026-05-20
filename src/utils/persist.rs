@@ -5,6 +5,8 @@ use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use tracing::{debug, error};
+
 pub static PERSIST_ENABLED: AtomicBool = AtomicBool::new(true);
 
 /// A debounced file writer that batches rapid writes into a single disk commit.
@@ -81,9 +83,9 @@ impl PersistBuffer {
             Ok(mut file) => {
                 let _ = file.write_all(content.as_bytes());
                 let _ = file.flush();
-                println!("Disk write completed: {}", path);
+                debug!(path = path, "Config persisted to disk");
             }
-            Err(e) => eprintln!("Failed to write config to {}: {}", path, e),
+            Err(e) => error!(path = path, error = %e, "Failed to write config"),
         }
     }
 

@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
+use tracing::info;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -93,10 +94,7 @@ fn sync_power_state() {
                     device().initialize(false);
                 });
             }
-            println!(
-                "Power Event received: {}",
-                if plugged_in { "AC" } else { "Battery" }
-            );
+            info!(plugged_in, "Power state changed");
         }
     }
 }

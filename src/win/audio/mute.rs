@@ -1,5 +1,6 @@
 use super::{AudioType, get_endpoint};
 use crate::ui::{app::app, app_events::OsdEvent};
+use tracing::warn;
 
 /// Returns whether the given audio endpoint is currently muted.
 pub fn is_audio_muted(io: AudioType) -> bool {
@@ -20,18 +21,17 @@ pub fn toggle_audio_mute(io: AudioType) {
     if let Some(volume) = get_endpoint(io) {
         unsafe {
             if let Ok(current_mute) = volume.GetMute() {
-                current_mute.as_bool();
                 if let Err(err) = volume.SetMute(!current_mute, std::ptr::null()) {
-                    println!("Error setting {:?} endpoint mute: {:?}", io, err);
+                    warn!(endpoint = ?io, error = ?err, "Failed to set endpoint mute");
                 }
                 if io == AudioType::Mic {
                     app().send(OsdEvent::MicMute(bool::from(!current_mute)).into());
                 }
             } else {
-                println!("Error getting {:?} endpoint mute", io);
+                warn!(endpoint = ?io, "Failed to read endpoint mute state");
             }
         };
     } else {
-        println!("Audio {:?} interface not available", io);
+        warn!(endpoint = ?io, "Audio interface not available");
     };
 }

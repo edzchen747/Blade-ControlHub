@@ -1,6 +1,7 @@
 use crate::razer::config::AppConfig;
 
 use super::constants::CONFIG_PATH;
+use tracing::{info, warn};
 
 /// Loads the application config from disk, falling back to defaults on error.
 ///
@@ -8,7 +9,7 @@ use super::constants::CONFIG_PATH;
 /// on all fields, so missing or unknown keys are gracefully ignored.
 pub fn load_config() -> AppConfig {
     let Ok(contents) = std::fs::read_to_string(CONFIG_PATH) else {
-        println!("Config not found, using defaults.");
+        info!("Config file not found, using application defaults");
         return AppConfig::default();
     };
 
@@ -18,11 +19,11 @@ pub fn load_config() -> AppConfig {
 
     let mut app_config: AppConfig = match serde_json::from_str(&contents) {
         Ok(config) => {
-            println!("Config loaded successfully.");
+            info!("Config loaded successfully");
             config
         }
         Err(e) => {
-            println!("Failed to parse config: {}. Using defaults.", e);
+            warn!(error = %e, "Config parse failed, reverting to defaults");
             AppConfig::default()
         }
     };
