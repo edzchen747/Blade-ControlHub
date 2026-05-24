@@ -1,7 +1,7 @@
 use crate::razer::device_handle::device;
 use crate::win::audio::{self, AudioType};
-use crate::win::input::scancode;
 use crate::win::input::trackpad::toggle_trackpad;
+use crate::win::input::{KeyType, razer_key, vkey};
 
 use once_cell::sync::Lazy;
 use rdev::{EventType, Key, simulate};
@@ -77,10 +77,10 @@ impl<'a> KeyEventAction<'a> {
     }
 }
 
-pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| {
+pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
     HashMap::from([
         (
-            scancode::Key::B,
+            vkey::Key::B.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     device().cycle_battery_limit();
@@ -89,7 +89,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::P,
+            vkey::Key::P.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     device().cycle_perf_mode();
@@ -98,7 +98,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::R,
+            vkey::Key::R.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     device().cycle_refresh_rate();
@@ -107,7 +107,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::T,
+            vkey::Key::T.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     toggle_trackpad();
@@ -116,7 +116,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::V,
+            vkey::Key::V.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     device().toggle_vc();
@@ -125,7 +125,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::F1,
+            vkey::Key::F1.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::Unknown(173)]).trigger();
@@ -138,7 +138,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::F2,
+            vkey::Key::F2.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::Unknown(174)]).trigger();
@@ -151,7 +151,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::F3,
+            vkey::Key::F3.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::Unknown(175)]).trigger();
@@ -164,7 +164,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::F4,
+            vkey::Key::F4.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::MetaLeft, Key::KeyP]).trigger();
@@ -177,7 +177,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::F5,
+            vkey::Key::F5.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::Unknown(177)]).trigger();
@@ -190,7 +190,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::F6,
+            vkey::Key::F6.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::Unknown(179)]).trigger();
@@ -203,7 +203,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::F7,
+            vkey::Key::F7.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::Unknown(176)]).trigger();
@@ -216,7 +216,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::F8,
+            vkey::Key::F8.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     device().adjust_screen_brightness(-10);
@@ -229,7 +229,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::F9,
+            vkey::Key::F9.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     device().adjust_screen_brightness(10);
@@ -242,7 +242,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::F10,
+            vkey::Key::F10.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     device().keyboard_light_down();
@@ -255,7 +255,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::F11,
+            vkey::Key::F11.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     device().keyboard_light_up();
@@ -268,7 +268,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::F12,
+            vkey::Key::F12.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::PrintScreen]).trigger();
@@ -281,7 +281,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::Mic,
+            razer_key::Key::Mic.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     audio::toggle_audio_mute(AudioType::Mic);
@@ -290,7 +290,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::Trackpad,
+            razer_key::Key::Trackpad.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     toggle_trackpad();
@@ -299,7 +299,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::Perf,
+            razer_key::Key::Perf.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     device().cycle_perf_mode();
@@ -308,7 +308,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::CoPilot,
+            razer_key::Key::CoPilot.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     device().cycle_rgb_mode();
@@ -317,7 +317,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::Home,
+            razer_key::Key::Home.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::Unknown(36)]).trigger();
@@ -326,7 +326,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::Up,
+            razer_key::Key::Up.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::Unknown(38)]).trigger();
@@ -335,7 +335,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::PgUp,
+            razer_key::Key::PgUp.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::Unknown(33)]).trigger();
@@ -344,7 +344,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::Left,
+            razer_key::Key::Left.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::Unknown(37)]).trigger();
@@ -353,7 +353,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::Right,
+            razer_key::Key::Right.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::Unknown(39)]).trigger();
@@ -362,7 +362,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::End,
+            razer_key::Key::End.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::Unknown(35)]).trigger();
@@ -371,7 +371,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::Down,
+            razer_key::Key::Down.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::Unknown(40)]).trigger();
@@ -380,7 +380,7 @@ pub static KEY_MAP: Lazy<HashMap<scancode::Key, KeyEventAction>> = Lazy::new(|| 
             ),
         ),
         (
-            scancode::Key::PgDn,
+            razer_key::Key::PgDn.into(),
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::Unknown(34)]).trigger();

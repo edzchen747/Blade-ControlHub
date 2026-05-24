@@ -19,44 +19,25 @@ macro_rules! define_keymap {
 
 define_keymap! {
     // Letters with Fn functions
-    B = 0x05,
-    P = 0x13,
-    R = 0x15,
-    T = 0x17,
-    V = 0x19,
+    B = 0x42,
+    P = 0x50,
+    R = 0x52,
+    T = 0x54,
+    V = 0x56,
 
     // Function Keys
-    F1 = 0x3a,
-    F2 = 0x3b,
-    F3 = 0x3c,
-    F4 = 0x3d,
-    F5 = 0x3e,
-    F6 = 0x3f,
-    F7 = 0x40,
-    F8 = 0x41,
-    F9 = 0x42,
-    F10 = 0x43,
-    F11 = 0x44,
-    F12 = 0x45,
-
-    // Dedicated Keys
-    Mic      = 0xd4,
-    Trackpad = 0xdd,
-    Perf     = 0xd3,
-    M1       = 0x24,
-    M2       = 0x25,
-    M3       = 0x26,
-    M4       = 0x27,
-    Game     = 0x03,
-    CoPilot  = 0xd2,
-    Home     = 0xd5,
-    Up       = 0xd6,
-    PgUp     = 0xd7,
-    Left     = 0xd8,
-    Right    = 0xd9,
-    End      = 0xda,
-    Down     = 0xdb,
-    PgDn     = 0xdc
+    F1 = 0x70,
+    F2 = 0x71,
+    F3 = 0x72,
+    F4 = 0x73,
+    F5 = 0x74,
+    F6 = 0x75,
+    F7 = 0x76,
+    F8 = 0x77,
+    F9 = 0x78,
+    F10 = 0x79,
+    F11 = 0x7a,
+    F12 = 0x7b
 }
 
 impl From<rdev::Key> for Key {

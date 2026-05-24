@@ -1,11 +1,10 @@
-use std::sync::atomic::Ordering;
-
 use rdev::{Event, EventType, Key, grab};
+use std::sync::atomic::Ordering;
 use tracing::{error, info};
 
 use crate::win::input::{
     key_map::{ALT_PRESSED, KEY_MAP},
-    scancode,
+    vkey,
 };
 
 pub struct KeyHook {}
@@ -27,12 +26,12 @@ fn key_event_handler(event: Event) -> Option<Event> {
             ALT_PRESSED.store(true, Ordering::SeqCst);
         }
 
-        let key = scancode::Key::from(rdev_key);
-        if key == scancode::Key::Unknown {
+        let key = vkey::Key::from(rdev_key);
+        if key == vkey::Key::Unknown {
             return Some(event);
         }
 
-        if let Some(event_action) = KEY_MAP.get(&key)
+        if let Some(event_action) = KEY_MAP.get(&key.into())
             && event_action.execute()
         {
             return None;

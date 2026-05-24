@@ -3,7 +3,7 @@
 /// Handles context menu item definitions, menu click event routing,
 /// and the background thread that listens for tray icon clicks.
 use crate::ui::app::app;
-use crate::ui::app_events::{AppEvent, OsdEvent};
+use crate::ui::app_events::AppEvent;
 use crate::utils::reload::restart_app;
 use crate::win::system::cli_utils::cycle_gpu;
 use crate::win::system::startup::Startup;

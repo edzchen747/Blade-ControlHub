@@ -616,6 +616,7 @@ dependencies = [
  "librazer",
  "once_cell",
  "pollster",
+ "raw-window-handle 0.6.2",
  "rdev",
  "resvg 0.42.0",
  "serde",

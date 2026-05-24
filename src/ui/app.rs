@@ -12,7 +12,6 @@ use crate::ui::settings_store::SettingsStore;
 use crate::ui::theme::OSD_WINDOW_SIZE;
 use crate::ui::tray;
 use crate::utils::oncelock_ext::OnceLockExt;
-use crate::win::system::cli_utils::cycle_gpu;
 
 // ── Global State ────────────────────────────────────────────────────────────
 
@@ -131,6 +130,12 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let is_focused = ctx.input(|i| i.viewport().focused.unwrap_or(false));
+        if is_focused {
+            unsafe {
+                unfocus();
+            }
+        }
         self.settings.run(ctx);
 
         let trigger_osd = self.handle_app_events(ctx);
@@ -207,6 +212,7 @@ fn native_options() -> NativeOptions {
             .with_decorations(false)
             .with_transparent(true)
             .with_always_on_top()
+            .with_active(false)
             .with_inner_size([OSD_WINDOW_SIZE.x, OSD_WINDOW_SIZE.y])
             .with_taskbar(false),
 
@@ -214,5 +220,25 @@ fn native_options() -> NativeOptions {
         vsync: true,
         hardware_acceleration: eframe::HardwareAcceleration::Required,
         ..Default::default()
+    }
+}
+
+use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
+/// Force desktop to be focused if focus is transfered to OSD
+use windows::Win32::UI::Shell::IShellDispatch4;
+use windows::core::GUID;
+
+// Define the Shell CLSID manually if it is not available via Shell::CLSID
+const CLSID_SHELL: GUID = GUID::from_u128(0x13709620_C279_11CE_A49E_444553540000);
+
+unsafe fn unfocus() {
+    // 1. Instantiate as an IDispatch or the specific interface directly
+    // CoCreateInstance returns the requested interface pointer.
+    unsafe {
+        let dispatch: IShellDispatch4 =
+            CoCreateInstance(&CLSID_SHELL, None, CLSCTX_INPROC_SERVER).unwrap();
+
+        // 2. Call the method directly on the interface
+        dispatch.ToggleDesktop().unwrap();
     }
 }

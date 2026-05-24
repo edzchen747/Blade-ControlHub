@@ -27,9 +27,6 @@ pub enum AppError {
     #[error("No compatible display device found")]
     DisplayNotFound,
 
-    #[error("Internal message channel disconnected")]
-    ChannelDisconnected,
-
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 }

@@ -6,7 +6,7 @@ use crate::{
     ui::{app::app, app_events::AppEvent},
     win::input::{
         key_map::{FN_PRESSED, KEY_MAP},
-        scancode,
+        razer_key,
     },
 };
 use hidapi::{HidApi, HidDevice};
@@ -84,8 +84,8 @@ impl HidApiListener {
                         0x00 => FN_PRESSED.store(false, Ordering::SeqCst),
                         _ => {
                             app().send(AppEvent::RazerKeyCode(buf[1]));
-                            let key = scancode::Key::from(buf[1]);
-                            if let Some(action) = KEY_MAP.get(&key) {
+                            let key = razer_key::Key::from(buf[1]);
+                            if let Some(action) = KEY_MAP.get(&key.into()) {
                                 let _ = action.execute();
                             } else {
                                 warn!(keycode = buf[1], "Unmapped Razer keycode received");
@@ -93,6 +93,7 @@ impl HidApiListener {
                         }
                     }
                 } else {
+                    info!("Something else {:?}", buf[2]);
                     break;
                 }
             }
