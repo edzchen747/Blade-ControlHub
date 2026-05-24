@@ -2,6 +2,7 @@ use crate::razer::device_handle::DeviceHandle;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
+#[cfg(debug_assertions)]
 use tracing::trace;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::UI::WindowsAndMessaging::*;

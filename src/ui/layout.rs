@@ -51,6 +51,10 @@ pub const FADE_IN_SPEED: f32 = 255.0;
 /// Fade-out speed multiplier (alpha units per second).
 pub const FADE_OUT_SPEED: f32 = 2.0;
 
+/// Total animation time OSD displayed time + fading animation duration (ms)
+/// Use 800ms instead of 1000ms as when the OSD is 80% faded we treat the animation as complete
+pub const TOTAL_ANIM_TIME_MS: f32 = OSD_DISPLAY_DURATION_MS as f32 + 800.0 / FADE_OUT_SPEED;
+
 /// Epsilon threshold for fade animation completion.
 pub const FADE_EPSILON: f32 = 0.001;
 

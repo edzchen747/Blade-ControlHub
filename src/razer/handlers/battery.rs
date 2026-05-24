@@ -3,7 +3,7 @@ use librazer::device::Device;
 use crate::{
     config::persist_config,
     razer::{config::AppConfig, enums::BatteryLimit, protocol::command},
-    ui::{app::app, app_events::OsdEvent},
+    ui::{app::app, app_events::OsdEvent, theme::TOTAL_ANIM_TIME_MS},
     utils::persist::PersistBuffer,
 };
 use std::time::{Duration, Instant};
@@ -49,7 +49,8 @@ impl<'a> BatteryHandler<'a> {
         let index = self.app_config.battery_limit.index;
         let length = self.app_config.battery_limit.items.len() - 1;
         app().send(OsdEvent::BatteryLimit(current_limit as u8, index as u8, length as u8).into());
-        *self.battery_cycle_timeout = Instant::now() + Duration::from_millis(1500);
+        *self.battery_cycle_timeout =
+            Instant::now() + Duration::from_millis(TOTAL_ANIM_TIME_MS as u64);
     }
 
     // ── Internal helpers ────────────────────────────────────────────────

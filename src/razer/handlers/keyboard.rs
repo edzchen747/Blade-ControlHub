@@ -168,13 +168,16 @@ impl<'a> KeyboardHandler<'a> {
 
     // ── Key Modes ───────────────────────────────────────────────────────
 
+    pub fn keyboard_control(&self, state: bool) {
+        let arg = if state { 3 } else { 0 };
+        let _ = command(self.device, 0x0004, &[arg, 0], None);
+    }
+
     pub fn enable_multimedia_keys(&self) {
-        let _ = command(self.device, 0x0004, &[3, 0], None);
         let _ = command(self.device, 0x0206, &[0, 1], None);
     }
 
     pub fn restore_fn_keys(&self) {
-        let _ = command(self.device, 0x0004, &[0, 0], None);
         let _ = command(self.device, 0x0206, &[0, 0], None);
     }
 

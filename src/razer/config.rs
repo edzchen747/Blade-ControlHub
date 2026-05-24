@@ -1,5 +1,6 @@
 use crate::error::{AppError, AppResult};
 use crate::razer::enums::*;
+use crate::win::input::key_map::SHIFT_PRESSED;
 use crate::win::system::power::IS_PLUGGED_IN;
 use std::sync::atomic::Ordering;
 
@@ -29,7 +30,9 @@ impl<T: Clone + PartialEq> CycleState<T> {
         if self.items.is_empty() {
             return self.items[0].clone(); // unreachable in practice; debug_assert fires in dev
         }
-        self.index = (self.index + 1) % self.items.len();
+        let reverse = SHIFT_PRESSED.load(Ordering::SeqCst);
+        let shift = if reverse { self.items.len() - 1 } else { 1 };
+        self.index = (self.index + shift) % self.items.len();
         self.items[self.index].clone()
     }
 

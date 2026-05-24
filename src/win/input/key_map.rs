@@ -12,6 +12,7 @@ use std::time::Duration;
 
 pub static FN_PRESSED: AtomicBool = AtomicBool::new(false);
 pub static ALT_PRESSED: AtomicBool = AtomicBool::new(false);
+pub static SHIFT_PRESSED: AtomicBool = AtomicBool::new(false);
 pub static DEFAULT_MULTIMEDIA_KEYS: AtomicBool = AtomicBool::new(true);
 
 pub struct KeyCombo([Option<Key>; 4]);

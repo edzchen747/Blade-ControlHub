@@ -1,6 +1,8 @@
 use std::collections::BTreeSet;
+use std::sync::atomic::Ordering;
 
 use crate::error::{AppError, AppResult};
+use crate::win::input::key_map::SHIFT_PRESSED;
 use tracing::info;
 use windows::Win32::Graphics::Gdi::{
     CDS_UPDATEREGISTRY, DEVMODEW, DISP_CHANGE_SUCCESSFUL, DISPLAY_DEVICE_ATTACHED_TO_DESKTOP,
@@ -138,13 +140,28 @@ impl DisplayManager {
 
         let current = self.get_current_rate();
 
-        // Find the first rate in the sorted list that is higher than our current rate
-        let next_rate = match supported.iter().find(|&&rate| rate > current) {
-            Some(&higher_rate) => higher_rate,
-            None => supported
-                .first()
+        // Find the first rate in the sorted list that is higher/lower than current rate
+        let reverse = SHIFT_PRESSED.load(Ordering::SeqCst);
+        let found_rate = if reverse {
+            supported
+                .iter()
+                .rev()
+                .find(|&&rate| rate < current)
                 .copied()
-                .ok_or(AppError::DisplayNotFound)?,
+        } else {
+            supported.iter().find(|&&rate| rate > current).copied()
+        };
+
+        let next_rate = match found_rate {
+            Some(rate) => rate,
+            None => {
+                let fallback = if reverse {
+                    supported.last()
+                } else {
+                    supported.first()
+                };
+                fallback.copied().ok_or(AppError::DisplayNotFound)?
+            }
         };
 
         match self.set_refresh_rate(next_rate) {

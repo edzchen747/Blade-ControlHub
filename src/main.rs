@@ -10,36 +10,16 @@ mod ui;
 mod utils;
 mod win;
 
-use crate::{error::AppResult, razer::device_handle::device};
+use crate::{
+    error::AppResult,
+    razer::device_handle::device,
+    utils::log_file::{init_log_file_writer, set_cwd},
+};
 use tracing::info;
-use tracing_subscriber::EnvFilter;
 
 fn main() -> AppResult<()> {
-    let builder = tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug")),
-        )
-        .with_target(false)
-        .compact();
-
-    let _guard;
-
-    if cfg!(debug_assertions) {
-        builder.init();
-    } else {
-        let file_appender = tracing_appender::rolling::never(".", "app.log");
-
-        let (file_writer, g) = tracing_appender::non_blocking(file_appender);
-        _guard = Some(g);
-
-        builder.with_writer(file_writer).init();
-    }
-
-    let exe_path = std::env::current_exe().map_err(crate::error::AppError::Io)?;
-    let exe_dir = exe_path.parent().ok_or_else(|| {
-        crate::error::AppError::Internal("Executable has no parent directory".to_string())
-    })?;
-    std::env::set_current_dir(exe_dir).map_err(crate::error::AppError::Io)?;
+    set_cwd();
+    init_log_file_writer();
 
     utils::reload::close_running_instances();
     start_razer_service()?;

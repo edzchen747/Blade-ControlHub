@@ -3,7 +3,7 @@ use librazer::device::Device;
 use crate::{
     config::persist_config,
     razer::config::AppConfig,
-    ui::{app::app, app_events::OsdEvent},
+    ui::{app::app, app_events::OsdEvent, theme::TOTAL_ANIM_TIME_MS},
     utils::persist::PersistBuffer,
     win::display::refresh_rate::DisplayManager,
 };
@@ -50,7 +50,8 @@ impl<'a> DisplayHandler<'a> {
         app().send(OsdEvent::RefreshRate(current, level as u8, supported.len() as u8).into());
         self.app_config.get().screen_refresh = current;
         self.persist_config();
-        *self.refresh_cycle_timeout = Instant::now() + Duration::from_millis(1500);
+        *self.refresh_cycle_timeout =
+            Instant::now() + Duration::from_millis(TOTAL_ANIM_TIME_MS as u64);
         current
     }
 

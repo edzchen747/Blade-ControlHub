@@ -1,3 +1,4 @@
+pub mod log_file;
 pub mod oncelock_ext;
 pub mod persist;
 pub mod reload;

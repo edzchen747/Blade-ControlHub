@@ -1,4 +1,7 @@
-use crate::error::{AppError, AppResult};
+use crate::{
+    error::{AppError, AppResult},
+    utils::reload::restart_app,
+};
 use librazer::{device::Device, packet::Packet};
 use std::{thread, time::Duration};
 use tracing::{debug, warn};
@@ -14,6 +17,7 @@ pub fn command(
     args: &[u8],
     result_idx: Option<usize>,
 ) -> AppResult<u8> {
+    let mut errors: Vec<anyhow::Error> = vec![];
     for attempt in 1..=3 {
         let report = Packet::new(command, args);
         match device.send(report) {
@@ -27,9 +31,18 @@ pub fn command(
                     continue;
                 }
             }
-            Err(err) => warn!(command = command, error = ?err, "HID send failed, retrying"),
+            Err(err) => {
+                warn!(command = command, error = ?err, "HID send failed, retrying");
+                errors.push(err)
+            }
         };
         thread::sleep(Duration::from_millis(100 * attempt));
+    }
+    if let Some(code) = get_first_os_error(&errors) {
+        match code {
+            1167 => restart_app(1), // The device is not connected
+            _ => (),
+        }
     }
     Err(AppError::Protocol {
         command,
@@ -50,4 +63,15 @@ fn response_valid(response: &Packet, args: &[u8], idx: Option<usize>) -> bool {
         .take(args.len())
         .filter(|&(i, _)| i != skip_idx)
         .all(|(i, &byte)| byte == args[i])
+}
+
+fn get_first_os_error(errors: &[anyhow::Error]) -> Option<i32> {
+    errors.iter().find_map(|err| {
+        let os_error = err.source().and_then(|e| {
+            e.downcast_ref::<std::io::Error>()
+                .map(|io_err| io_err.raw_os_error())
+        });
+
+        os_error.flatten()
+    })
 }

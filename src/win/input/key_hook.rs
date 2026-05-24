@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering;
 use tracing::{error, info};
 
 use crate::win::input::{
-    key_map::{ALT_PRESSED, KEY_MAP},
+    key_map::{ALT_PRESSED, KEY_MAP, SHIFT_PRESSED},
     vkey,
 };
 
@@ -26,6 +26,10 @@ fn key_event_handler(event: Event) -> Option<Event> {
             ALT_PRESSED.store(true, Ordering::SeqCst);
         }
 
+        if rdev_key == Key::ShiftLeft || rdev_key == Key::ShiftRight {
+            SHIFT_PRESSED.store(true, Ordering::SeqCst);
+        }
+
         let key = vkey::Key::from(rdev_key);
         if key == vkey::Key::Unknown {
             return Some(event);
@@ -37,10 +41,14 @@ fn key_event_handler(event: Event) -> Option<Event> {
             return None;
         }
     }
-    if let EventType::KeyRelease(key) = event.event_type
-        && key == Key::Alt
-    {
-        ALT_PRESSED.store(false, Ordering::SeqCst);
+    if let EventType::KeyRelease(key) = event.event_type {
+        if key == Key::Alt {
+            ALT_PRESSED.store(false, Ordering::SeqCst);
+        }
+
+        if key == Key::ShiftLeft || key == Key::ShiftRight {
+            SHIFT_PRESSED.store(false, Ordering::SeqCst);
+        }
     }
     Some(event)
 }

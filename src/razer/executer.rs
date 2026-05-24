@@ -124,6 +124,7 @@ impl<'a> Executer<'a> {
         let mut state = self.app_config.read();
         self.brightness_worker
             .set_screen_brightness(state.screen_lvl);
+        self.kb().keyboard_control(true);
         self.kb().enable_multimedia_keys();
         self.kb().set_rgb_effect(state.rgb_effect.value());
         self.kb().enable_under_glow(state.vc_lvl);
@@ -145,8 +146,8 @@ impl<'a> Executer<'a> {
         }
         PersistBuffer::enable();
     }
-    fn sleep(&self) {
-        let _ = command(self.device, 0x0004, &[0, 0], None);
+    fn sleep(&mut self) {
+        self.kb().keyboard_control(false);
         let _ = command(self.device, 0x030a, &[5, 0], None);
         AmbientEffect::stop();
         let _ = command(self.device, 0x0303, &[1, 5, 0], None);
@@ -154,6 +155,7 @@ impl<'a> Executer<'a> {
         let _ = command(self.device, 0x0303, &[1, 38, 0], None);
         let _ = command(self.device, 0x0d02, &[1, 0, 6, 0], None);
     }
+
     fn shutdown(&mut self) -> bool {
         self.kb().restore_fn_keys();
         self.kb().set_rgb_effect(RGBEffect::Cycle);
