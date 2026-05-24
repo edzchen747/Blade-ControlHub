@@ -9,6 +9,7 @@ use egui::Context;
 use resvg::{tiny_skia, usvg};
 
 use crate::razer::config::AppConfig;
+use crate::ui::app::app;
 use crate::ui::custom_key_map::CustomKeyMap;
 use crate::ui::theme::{
     SETTINGS_ICON_COLOR, SETTINGS_ICON_SIZE, SETTINGS_PADDING_RATIO, SETTINGS_WINDOW_SIZE,
@@ -109,7 +110,7 @@ impl Settings {
 
     pub fn ui(&mut self, ctx: &Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Settings");
+            ui.heading(format!("{}", get_model_name()));
             ui.separator();
 
             ui.horizontal(|ui| {
@@ -162,4 +163,8 @@ pub fn load_settings_icon() -> egui::IconData {
         width: size,
         height: size,
     }
+}
+
+fn get_model_name() -> String {
+    app().device.get_model_name().unwrap_or_default()
 }

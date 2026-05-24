@@ -100,6 +100,9 @@ impl<'a> Executer<'a> {
             DeviceCmd::GetPID(tx) => {
                 let _ = tx.send(self.device.info.pid);
             }
+            DeviceCmd::GetModelName(tx) => {
+                let _ = tx.send(self.device.info.name.to_string());
+            }
             DeviceCmd::GetPerfMode(tx) => {
                 let _ = tx.send(self.perf().get_perf_mode());
             }
@@ -117,43 +120,61 @@ impl<'a> Executer<'a> {
             }
         }
     }
+
     #[instrument(skip(self), fields(notify_startup))]
     fn initialize(&mut self, notify_startup: bool) {
+        // Suppress disk flushes and UI notifications during init
         PersistBuffer::disable();
         app().send(OsdEvent::EnableOSD(false).into());
+
         let mut state = self.app_config.read();
+
+        // --- Screen Brightness ---
         self.brightness_worker
             .set_screen_brightness(state.screen_lvl);
+
+        // --- Keyboard Configuration ---
         self.kb().keyboard_control(true);
         self.kb().enable_multimedia_keys();
         self.kb().set_rgb_effect(state.rgb_effect.value());
         self.kb().enable_under_glow(state.vc_lvl);
         self.kb().set_keyboard_brightness(state.key_lvl);
+
+        // --- System Performance & Power ---
         self.perf().set_perf_mode(state.perf_mode.value());
         let limit = self.app_config.battery_limit.value();
         self.battery().set_battery_limit(limit);
+
+        // --- Function / Multimedia Key Mapping ---
         if self.app_config.default_multimedia_keys {
             self.kb().enable_multimedia_keys();
         } else {
             self.kb().restore_fn_keys();
         }
+
+        // Restore UI notifications and disk writes
         app().send(OsdEvent::EnableOSD(true).into());
         if notify_startup {
             app().send(OsdEvent::Startup.into());
         }
+        PersistBuffer::enable();
+
+        // --- Display Refresh Rate ---
         if state.screen_refresh != 0 {
             self.display().set_refresh_rate(state.screen_refresh);
+        } else {
+            self.display().get_refresh_rate(true);
         }
-        PersistBuffer::enable();
     }
+
     fn sleep(&mut self) {
         self.kb().keyboard_control(false);
-        let _ = command(self.device, 0x030a, &[5, 0], None);
+        let _ = command(self.device, 0x030a, &[5, 0], None); // reset keyboard effect
         AmbientEffect::stop();
-        let _ = command(self.device, 0x0303, &[1, 5, 0], None);
-        let _ = command(self.device, 0x0300, &[1, 38, 0], None);
-        let _ = command(self.device, 0x0303, &[1, 38, 0], None);
-        let _ = command(self.device, 0x0d02, &[1, 0, 6, 0], None);
+        let _ = command(self.device, 0x0303, &[1, 5, 0], None); // turn off keyboard light
+        let _ = command(self.device, 0x0300, &[1, 38, 0], None); // set underglow brightness to 0
+        let _ = command(self.device, 0x0303, &[1, 38, 0], None); // turn off underglow brightness
+        let _ = command(self.device, 0x0d02, &[1, 0, 6, 0], None); // reset perf mode
     }
 
     fn shutdown(&mut self) -> bool {

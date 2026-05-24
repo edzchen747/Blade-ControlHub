@@ -32,7 +32,7 @@ pub fn device() -> DeviceHandle {
                     return;
                 }
             };
-            let mut app_config = config::load_config();
+            let mut app_config = config::load_config(format!("0x{:04x}", device.info.pid));
             let persist_buffer = PersistBuffer::new(CONFIG_PATH.to_string());
             let mut executer = match Executer::new(&device, &mut app_config, persist_buffer, rx) {
                 Ok(e) => e,
@@ -70,6 +70,7 @@ pub enum DeviceCmd {
     SleepDevice,
     AdjustKeyboardLight(bool),
     GetPID(mpsc::Sender<u16>),
+    GetModelName(mpsc::Sender<String>),
     #[allow(dead_code)]
     GetPerfMode(mpsc::Sender<PerfMode>),
     GetDefaultMultimediaKeys(mpsc::Sender<bool>),
@@ -102,6 +103,10 @@ impl DeviceHandle {
 
     pub fn get_pid(&self) -> AppResult<u16> {
         self.query(DeviceCmd::GetPID)
+    }
+
+    pub fn get_model_name(&self) -> AppResult<String> {
+        self.query(DeviceCmd::GetModelName)
     }
 
     #[allow(dead_code)]

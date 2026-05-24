@@ -99,6 +99,7 @@ fn default_perf_mode() -> CycleState<PerfMode> {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(default)]
 pub struct AppConfig {
+    model_pid: String,
     power_state: DeviceState,
     battery_state: DeviceState,
     pub battery_limit: CycleState<BatteryLimit>,
@@ -108,6 +109,7 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
+            model_pid: String::default(),
             power_state: DeviceState::default(),
             battery_state: DeviceState::default(),
             battery_limit: CycleState {
@@ -147,5 +149,9 @@ impl AppConfig {
         self.power_state.perf_mode.items = PERF_MODES.to_vec();
         self.battery_state.rgb_effect.items = RGB_EFFECTS.to_vec();
         self.battery_state.perf_mode.items = PERF_MODES.to_vec();
+    }
+
+    pub fn set_pid(&mut self, pid: String) {
+        self.model_pid = pid;
     }
 }

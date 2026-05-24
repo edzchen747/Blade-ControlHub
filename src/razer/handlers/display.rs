@@ -40,14 +40,16 @@ impl<'a> DisplayHandler<'a> {
 
     // ── Display ─────────────────────────────────────────────────────────
 
-    pub fn get_refresh_rate(&mut self) -> u32 {
+    pub fn get_refresh_rate(&mut self, silent: bool) -> u32 {
         let current = self.display_manager.get_current_rate();
         let supported = self.display_manager.get_supported_rates();
         let level = 1 + supported
             .iter()
             .position(|&rate| rate == current)
             .unwrap_or(0);
-        app().send(OsdEvent::RefreshRate(current, level as u8, supported.len() as u8).into());
+        if !silent {
+            app().send(OsdEvent::RefreshRate(current, level as u8, supported.len() as u8).into());
+        }
         self.app_config.get().screen_refresh = current;
         self.persist_config();
         *self.refresh_cycle_timeout =
@@ -59,7 +61,7 @@ impl<'a> DisplayHandler<'a> {
         if Instant::now() < *self.refresh_cycle_timeout {
             let _ = self.display_manager.cycle_refresh_rate();
         }
-        self.get_refresh_rate();
+        self.get_refresh_rate(false);
     }
 
     pub fn set_refresh_rate(&mut self, refresh_rate: u32) {
@@ -68,7 +70,7 @@ impl<'a> DisplayHandler<'a> {
             && self.display_manager.get_current_rate() != refresh_rate
         {
             let _ = self.display_manager.set_refresh_rate(refresh_rate);
-            self.get_refresh_rate();
+            self.get_refresh_rate(false);
         }
     }
 

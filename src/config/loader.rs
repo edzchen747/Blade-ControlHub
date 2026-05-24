@@ -7,7 +7,7 @@ use tracing::{info, warn};
 ///
 /// Automatically handles backwards compatibility by using `#[serde(default)]`
 /// on all fields, so missing or unknown keys are gracefully ignored.
-pub fn load_config() -> AppConfig {
+pub fn load_config(pid: String) -> AppConfig {
     let Ok(contents) = std::fs::read_to_string(CONFIG_PATH) else {
         info!("Config file not found, using application defaults");
         return AppConfig::default();
@@ -30,6 +30,7 @@ pub fn load_config() -> AppConfig {
 
     // Override saved cycle items in case new updates bring more options
     app_config.refresh_cycle_items();
+    app_config.set_pid(pid);
 
     app_config
 }
