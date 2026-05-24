@@ -16,7 +16,7 @@ A lightweight, native Windows application for Razer Blade laptops that provides 
 
 
 ### Razer Device Controls
-| Category | Controls |
+| Category | Controls (SHIFT to cycle backwards) |
 |---|---|
 | **Performance Mode** | Silent, Quiet, Balanced, Performance, Turbo, Custom |
 | **RGB Lighting** | Cycle, Wave, Breathe, Ambient, Starlight, Reactive |
