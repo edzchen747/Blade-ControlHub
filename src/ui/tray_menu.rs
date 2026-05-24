@@ -5,6 +5,7 @@
 use crate::ui::app::app;
 use crate::ui::app_events::{AppEvent, OsdEvent};
 use crate::utils::reload::restart_app;
+use crate::win::system::cli_utils::cycle_gpu;
 use crate::win::system::startup::Startup;
 use tracing::debug;
 
@@ -28,12 +29,10 @@ pub fn build_tray_menu() -> Menu {
     let quit_item = MenuItem::with_id("quit", "Quit", true, None);
     let restart_item = MenuItem::with_id("restart", "Restart", true, None);
     let settings_item = MenuItem::with_id("settings_window", "Settings", true, None);
+    let close_gpu_apps_item =
+        MenuItem::with_id("close_gpu_apps", "Close apps running on dGPU", true, None);
 
     let startup_detected = Startup::is_registered();
-    let default_multimedia_keys = app()
-        .device
-        .get_default_multimedia_keys()
-        .unwrap_or_default();
     let startup_item = CheckMenuItem::with_id(
         "startup_toggle",
         "Start with Windows",
@@ -41,20 +40,14 @@ pub fn build_tray_menu() -> Menu {
         startup_detected,
         None,
     );
-    let default_keys_item = CheckMenuItem::with_id(
-        "default_multimedia_keys",
-        "Default Multimedia Keys",
-        true,
-        default_multimedia_keys,
-        None,
-    );
+
     STARTUP_STATE.store(startup_detected, Ordering::SeqCst);
 
     tray_menu.append(&quit_item).unwrap();
     tray_menu.append(&restart_item).unwrap();
     tray_menu.append(&settings_item).unwrap();
     tray_menu.append(&startup_item).unwrap();
-    tray_menu.append(&default_keys_item).unwrap();
+    tray_menu.append(&close_gpu_apps_item).unwrap();
 
     tray_menu
 }
@@ -80,12 +73,8 @@ pub fn setup_menu_event_handler() {
                 Startup::unregister();
             }
         }
-        "default_multimedia_keys" => {
-            let new_default = app()
-                .device
-                .toggle_default_multimedia_keys()
-                .unwrap_or_default();
-            app().send(OsdEvent::ToggleDefaultMultimediaKeys(new_default).into())
+        "close_gpu_apps" => {
+            cycle_gpu();
         }
         _ => {}
     }));

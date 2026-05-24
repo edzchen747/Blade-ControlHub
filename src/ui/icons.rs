@@ -21,6 +21,7 @@ pub enum OsdIconId {
     RefreshRate,
     BatteryLimit(bool),
     FunctionKey,
+    GPU,
 }
 
 // ── Strike-through Overlay ──────────────────────────────────────────────────
@@ -103,6 +104,10 @@ impl OsdIconId {
             Self::FunctionKey => (
                 "bytes://function_key.svg",
                 Cow::Borrowed(include_bytes!("../../assets/function_key.svg")),
+            ),
+            Self::GPU => (
+                "bytes://gpu.svg",
+                Cow::Borrowed(include_bytes!("../../assets/gpu.svg")),
             ),
         }
     }

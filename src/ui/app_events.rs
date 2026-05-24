@@ -31,6 +31,7 @@ pub enum OsdEvent {
     RefreshRate(u32, u8, u8),
     BatteryLimit(u8, u8, u8),
     ToggleDefaultMultimediaKeys(bool),
+    CloseGPUApps(bool),
 }
 
 #[derive(PartialEq)]

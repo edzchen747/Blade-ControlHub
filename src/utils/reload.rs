@@ -7,7 +7,14 @@ use tracing::error;
 pub fn restart_app(code: i32) -> ! {
     match std::env::current_exe() {
         Ok(current_exe) => {
-            if let Err(e) = std::process::Command::new(&current_exe).spawn() {
+            let mut cmd = std::process::Command::new(&current_exe);
+
+            // Do not show startup OSD with code 1 restart
+            if code == 1 {
+                cmd.arg("--silent");
+            }
+
+            if let Err(e) = cmd.spawn() {
                 error!(error = %e, "Failed to spawn restart process");
             }
         }

@@ -12,6 +12,7 @@ use crate::ui::settings_store::SettingsStore;
 use crate::ui::theme::OSD_WINDOW_SIZE;
 use crate::ui::tray;
 use crate::utils::oncelock_ext::OnceLockExt;
+use crate::win::system::cli_utils::cycle_gpu;
 
 // ── Global State ────────────────────────────────────────────────────────────
 

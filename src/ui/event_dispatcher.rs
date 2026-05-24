@@ -126,6 +126,19 @@ impl EventDispatcher {
                     current_level: *is_multimedia as u8,
                 })
             }
+            AppEvent::OsdEvent(OsdEvent::CloseGPUApps(finished)) => {
+                let text = if *finished {
+                    "Done".to_string()
+                } else {
+                    "Closing apps...".to_string()
+                };
+                Some(OsdResponse {
+                    text,
+                    icon_id: Some(OsdIconId::GPU),
+                    total_levels: 0,
+                    current_level: 0,
+                })
+            }
             AppEvent::RazerKeyCode(_)
             | AppEvent::OpenSettings
             | AppEvent::ToggleSettings

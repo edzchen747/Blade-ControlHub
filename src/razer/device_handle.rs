@@ -4,8 +4,9 @@ use crate::razer::config::AppConfig;
 use crate::razer::enums::{LidLogoMode, PerfMode};
 use crate::razer::executer::Executer;
 use crate::utils::persist::PersistBuffer;
+use crate::utils::reload::restart_app;
 use crate::win::audio::AudioType;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 use librazer::device::Device;
 use std::sync::OnceLock;
@@ -42,11 +43,23 @@ pub fn device() -> DeviceHandle {
             };
             executer.process_commands();
         });
+        monitor_device_channel();
 
         tx
     });
 
     DeviceHandle { sender: tx.clone() }
+}
+
+fn monitor_device_channel() {
+    std::thread::spawn(|| {
+        info!("Started channel monitor thread");
+        std::thread::sleep(std::time::Duration::from_secs(20));
+        loop {
+            let _ = device().get_pid();
+            std::thread::sleep(std::time::Duration::from_mins(2));
+        }
+    });
 }
 
 // ── Device Commands ─────────────────────────────────────────────────────────
@@ -96,6 +109,7 @@ impl DeviceHandle {
         self.query(DeviceCmd::GetPerfMode)
     }
 
+    #[allow(dead_code)]
     pub fn get_default_multimedia_keys(&self) -> AppResult<bool> {
         self.query(DeviceCmd::GetDefaultMultimediaKeys)
     }
@@ -180,7 +194,8 @@ impl DeviceHandle {
     /// Sends a command and logs an error if the device thread has exited.
     fn send(&self, cmd: DeviceCmd) {
         if self.sender.send(cmd).is_err() {
-            warn!("Device worker thread has exited; command dropped");
+            warn!("Device executer unresponsive; restarting app");
+            restart_app(1);
         }
     }
 
@@ -192,9 +207,10 @@ impl DeviceHandle {
         let (resp_tx, resp_rx) = mpsc::channel::<T>();
         let cmd = make_query(resp_tx);
 
-        self.sender
-            .send(cmd)
-            .map_err(|_| AppError::ChannelDisconnected)?;
+        if self.sender.send(cmd).is_err() {
+            warn!("Device executer unresponsive; restarting app");
+            restart_app(1);
+        }
 
         resp_rx
             .recv_timeout(Duration::from_secs(5))
