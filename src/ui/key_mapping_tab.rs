@@ -36,32 +36,36 @@ pub fn show(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Setti
     }
 }
 
-fn multimedia_key_tab(_ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
-    _ui.label("Remap F1 - F12 Keys when default behaviour is set to multimedia");
-    _ui.add_space(SETTINGS_CONTENT_TOP_SPACING);
-    default_func_key_switcher(_ui, ctx, settings);
+fn multimedia_key_tab(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
+    ui.label("Remap F1 - F12 Keys when default behaviour is set to multimedia");
+    ui.add_space(SETTINGS_CONTENT_TOP_SPACING);
+    default_func_key_switcher(ui, ctx, settings);
 }
 
 fn razer_special_key_tab(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
-    if let Some(idx) = settings.custom_key_map.listening_idx {
+    ui.label("Remap Speical Razer Keys (e.g. M1, M2, Mic Mute, Trackpad, Performance)");
+    ui.add_space(SETTINGS_CONTENT_TOP_SPACING);
+    if let Some(idx) = settings.custom_key_map.get_listening_idx() {
         ctx.request_repaint_after(time::Duration::from_millis(SETTINGS_KEY_LISTEN_INTERVAL_MS));
         if let Some(key_code) = settings.custom_key_map.special_key {
             settings.custom_key_map.reset_key_code(key_code);
             if let Some(row) = settings.custom_key_map.razer_keys.get_mut(idx) {
                 row.key_code = key_code;
-                settings.custom_key_map.listening_idx = None;
+                settings.custom_key_map.set_listening_idx(None);
                 settings.custom_key_map.special_key = None;
             }
         }
 
         // Allow cancelling with Escape
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-            settings.custom_key_map.listening_idx = None;
+            settings.custom_key_map.set_listening_idx(None);
         }
     }
 
     egui::ScrollArea::vertical().show(ui, |ui| {
         let mut row_to_remove = None;
+        let mut new_listening_idx: Option<usize> = None;
+        let current_listening_idx = settings.custom_key_map.get_listening_idx();
 
         for (idx, row) in settings.custom_key_map.razer_keys.iter_mut().enumerate() {
             ui.horizontal(|ui| {
@@ -71,7 +75,7 @@ fn razer_special_key_tab(ui: &mut eframe::egui::Ui, ctx: &egui::Context, setting
                         .hint_text("Key label")
                         .desired_width(SETTINGS_TEXT_EDIT_WIDTH),
                 );
-                let is_this_row_listening = settings.custom_key_map.listening_idx == Some(idx);
+                let is_this_row_listening = current_listening_idx == Some(idx);
                 let btn_label = if is_this_row_listening {
                     "Press key...".into()
                 } else {
@@ -89,7 +93,7 @@ fn razer_special_key_tab(ui: &mut eframe::egui::Ui, ctx: &egui::Context, setting
                     )
                     .clicked()
                 {
-                    settings.custom_key_map.listening_idx = Some(idx);
+                    new_listening_idx = Some(idx);
                 }
                 ui.label("➡");
                 ui.add(
@@ -107,11 +111,14 @@ fn razer_special_key_tab(ui: &mut eframe::egui::Ui, ctx: &egui::Context, setting
         if let Some(idx) = row_to_remove {
             settings.custom_key_map.razer_keys.remove(idx);
         }
+        if new_listening_idx.is_some() {
+            settings.custom_key_map.set_listening_idx(new_listening_idx);
+        }
 
         ui.add_space(SETTINGS_CONTENT_TOP_SPACING);
         ui.separator();
 
-        let can_add = settings.custom_key_map.listening_idx.is_none()
+        let can_add = settings.custom_key_map.get_listening_idx().is_none()
             && settings
                 .custom_key_map
                 .razer_keys

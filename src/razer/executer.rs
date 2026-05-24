@@ -158,6 +158,7 @@ impl<'a> Executer<'a> {
 
     fn shutdown(&mut self) -> bool {
         self.kb().restore_fn_keys();
+        self.kb().keyboard_control(false);
         self.kb().set_rgb_effect(RGBEffect::Cycle);
         true
     }

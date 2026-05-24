@@ -28,11 +28,11 @@ impl KeyCombo {
     pub fn trigger(&self) {
         for key in self {
             let _ = simulate(&EventType::KeyPress(*key));
-            thread::sleep(Duration::from_millis(20));
+            thread::sleep(Duration::from_millis(10));
         }
         for key in self.into_iter().rev() {
             let _ = simulate(&EventType::KeyRelease(*key));
-            thread::sleep(Duration::from_millis(20));
+            thread::sleep(Duration::from_millis(10));
         }
     }
 }

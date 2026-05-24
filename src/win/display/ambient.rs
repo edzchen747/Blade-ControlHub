@@ -1,5 +1,5 @@
 use crate::razer::device_handle::DeviceHandle;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 #[cfg(debug_assertions)]
@@ -7,7 +7,6 @@ use tracing::trace;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-static AMBIENT_EFFECT: AtomicBool = AtomicBool::new(false);
 const FPS: u64 = 15;
 const CYCLE_SPEED: Duration = Duration::from_secs(3);
 const LERP_BRIGHT_FACTOR: f32 = 0.35;
@@ -18,14 +17,13 @@ const HORIZONTAL_SCAN_LINES: i32 = 8;
 const VERTICAL_SCAN_LINES: i32 = 13;
 const TOTAL_SCAN_LINES: i32 = HORIZONTAL_SCAN_LINES + VERTICAL_SCAN_LINES;
 
+pub static THREAD_GENERATION: AtomicU32 = AtomicU32::new(0);
+
 pub struct AmbientEffect {}
 
 impl AmbientEffect {
     pub fn start(device_handle: DeviceHandle) {
-        if AMBIENT_EFFECT.load(Ordering::SeqCst) {
-            return;
-        }
-        AMBIENT_EFFECT.store(true, Ordering::SeqCst);
+        let current_generation = THREAD_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
 
         thread::spawn(move || unsafe {
             let mut ctx = ScreenCaptureContext::init();
@@ -33,7 +31,7 @@ impl AmbientEffect {
             let mut scan_data = vec![0u8; (ctx.max_dim * TOTAL_SCAN_LINES * 4) as usize];
             let mut frame_count: u32 = 0;
 
-            while AMBIENT_EFFECT.load(Ordering::SeqCst) {
+            while THREAD_GENERATION.load(Ordering::SeqCst) == current_generation {
                 let start = Instant::now();
                 frame_count = frame_count.wrapping_add(1);
 
@@ -51,7 +49,7 @@ impl AmbientEffect {
     }
 
     pub fn stop() {
-        AMBIENT_EFFECT.store(false, Ordering::SeqCst);
+        THREAD_GENERATION.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -253,10 +251,11 @@ impl ColorEngine {
                 sample_count += 1;
 
                 let (_, s, v) = rgb_to_hsv(r, g, b);
+                if v > 0.15 {
+                    black_screen = false;
+                }
                 if v < 0.15 || s < 0.15 {
                     continue;
-                } else if v > 0.15 {
-                    black_screen = false;
                 }
 
                 let perceived_luminance =
@@ -315,8 +314,9 @@ impl ColorEngine {
             };
             self.smooth_rgb = lerp_color(self.smooth_rgb, (tr, tg, tb), factor);
         } else {
+            // If no colours, set keyboard light to black (2) or grey (130)
             let v = 2 + !analysis.black_screen as u8 * 128;
-            self.smooth_rgb = lerp_color(self.smooth_rgb, (v, v, v), LERP_DARK_FACTOR);
+            self.smooth_rgb = lerp_color(self.smooth_rgb, (v, v, v), LERP_BRIGHT_FACTOR);
         }
     }
 
@@ -438,6 +438,10 @@ fn normalize_to_midpoint(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
 #[cfg(debug_assertions)]
 fn print_color_preview(r: u8, g: u8, b: u8) {
     trace!(r = r, g = g, b = b, "Ambient color sample");
+    // println!(
+    //     "\x1b[48;2;{};{};{}m    \x1b[0m RGB: {}, {}, {}",
+    //     r, g, b, r, g, b
+    // );
 }
 
 #[cfg(not(debug_assertions))]

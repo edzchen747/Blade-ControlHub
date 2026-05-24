@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
 /// Data structures for custom key mapping state.
 ///
 /// Extracted from `Settings` to provide a clean, testable domain model
@@ -17,13 +19,15 @@ pub struct RazerKeyMap {
     pub action: String,
 }
 
+pub static KEYMAP_LISTENING: AtomicBool = AtomicBool::new(false);
+
 /// The custom key mapping state, holding both function key and Razer special key rows.
 #[derive(Default)]
 pub struct CustomKeyMap {
     #[allow(dead_code)]
     pub func_keys: Vec<FuncKeyMap>,
     pub razer_keys: Vec<RazerKeyMap>,
-    pub listening_idx: Option<usize>,
+    listening_idx: Option<usize>,
     pub special_key: Option<u8>,
 }
 
@@ -44,5 +48,14 @@ impl CustomKeyMap {
                 row.key_code = 0;
             }
         }
+    }
+
+    pub fn set_listening_idx(&mut self, idx: Option<usize>) {
+        self.listening_idx = idx;
+        KEYMAP_LISTENING.store(idx.is_some(), Ordering::SeqCst);
+    }
+
+    pub fn get_listening_idx(&self) -> Option<usize> {
+        self.listening_idx
     }
 }

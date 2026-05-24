@@ -52,16 +52,6 @@ impl SettingsStore {
         self.inner.lock().unwrap().show = false;
     }
 
-    /// Checks if a key-listening slot is active in the custom key map.
-    pub fn is_listening_for_key(&self) -> bool {
-        self.inner
-            .lock()
-            .unwrap()
-            .custom_key_map
-            .listening_idx
-            .is_some()
-    }
-
     /// Sets a captured Razer key code in the currently listening slot.
     pub fn set_razer_key_code(&self, key_code: u8) {
         self.inner.lock().unwrap().custom_key_map.special_key = Some(key_code);

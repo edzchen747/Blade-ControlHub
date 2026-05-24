@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering;
 use crate::{
     config,
     error::{AppError, AppResult},
-    ui::{app::app, app_events::AppEvent},
+    ui::{app::app, app_events::AppEvent, custom_key_map::KEYMAP_LISTENING},
     win::input::{
         key_map::{FN_PRESSED, KEY_MAP},
         razer_key,
@@ -83,12 +83,15 @@ impl HidApiListener {
                         0x0a => FN_PRESSED.store(true, Ordering::SeqCst),
                         0x00 => FN_PRESSED.store(false, Ordering::SeqCst),
                         _ => {
-                            app().send(AppEvent::RazerKeyCode(buf[1]));
                             let key = razer_key::Key::from(buf[1]);
-                            if let Some(action) = KEY_MAP.get(&key.into()) {
-                                let _ = action.execute();
+                            if !KEYMAP_LISTENING.load(Ordering::SeqCst) {
+                                if let Some(action) = KEY_MAP.get(&key.into()) {
+                                    let _ = action.execute();
+                                } else {
+                                    warn!(keycode = buf[1], "Unmapped Razer keycode received");
+                                }
                             } else {
-                                warn!(keycode = buf[1], "Unmapped Razer keycode received");
+                                app().send(AppEvent::RazerKeyCode(buf[1]));
                             }
                         }
                     }

@@ -169,6 +169,8 @@ impl<'a> KeyboardHandler<'a> {
     // ── Key Modes ───────────────────────────────────────────────────────
 
     pub fn keyboard_control(&self, state: bool) {
+        // Use Chroma-RGB, prevents Dynamic Lighting interfering
+        let _ = command(self.device, 0x0f10, &[1], None);
         let arg = if state { 3 } else { 0 };
         let _ = command(self.device, 0x0004, &[arg, 0], None);
     }
