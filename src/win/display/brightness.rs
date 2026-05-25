@@ -1,11 +1,10 @@
-use brightness::Brightness;
-use futures::stream::StreamExt;
+use std::process::Command;
 use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use crate::ui::app::app;
 use crate::ui::app_events::OsdEvent;
-use tracing::{debug, error};
+use tracing::{debug, warn};
 
 pub static SCREEN_TARGET_LVL: AtomicU8 = AtomicU8::new(100);
 pub static SCREEN_ADJUSTING: AtomicUsize = AtomicUsize::new(0);
@@ -41,14 +40,6 @@ impl BrightnessWorker {
     }
 
     fn worker_loop(rx: Receiver<()>) {
-        let mut monitor = pollster::block_on(async {
-            let mut devices = brightness::brightness_devices();
-            if let Some(Ok(dev)) = devices.next().await {
-                return Some(dev); // Return the first working device found
-            }
-            error!("No monitor brightness device found; brightness control disabled");
-            None
-        });
         let mut last_processed_lvl: u8 = 101;
         // Block on the channel waiting for "pokes"
         while rx.recv().is_ok() {
@@ -65,23 +56,41 @@ impl BrightnessWorker {
                 continue;
             }
             SCREEN_ADJUSTING.fetch_add(1, Ordering::SeqCst);
-            // Run the async logic to update the first successful device
-            pollster::block_on(async {
-                let mut success = false;
+            set_hardware_brightness(target as u32);
+        }
+    }
+}
 
-                if let Some(ref mut dev) = monitor
-                    && dev.set(target as u32).await.is_ok()
-                {
-                    success = true;
-                    last_processed_lvl = target;
-                }
+fn set_hardware_brightness(percentage: u32) -> bool {
+    let script = format!(
+        "$wmi = Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods;\
+         Invoke-CimMethod -InputObject $wmi -MethodName WmiSetBrightness -Arguments @{{Timeout = 0; Brightness = {}}}",
+        percentage
+    );
 
-                if !success {
-                    error!("Failed to set brightness on any connected monitor");
-                };
-                SCREEN_ADJUSTING.fetch_sub(1, Ordering::SeqCst);
-                debug!(level = target, "Screen brightness updated");
-            });
+    let output = Command::new("powershell")
+        .args(&[
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &script,
+        ])
+        .output();
+
+    match output {
+        Ok(out) => {
+            if out.status.success() {
+                true
+            } else {
+                let err_msg = String::from_utf8_lossy(&out.stderr);
+                warn!("OS Pipeline Error: {}", err_msg);
+                false
+            }
+        }
+        Err(e) => {
+            warn!("Failed to execute process payload: {}", e);
+            false
         }
     }
 }
