@@ -16,9 +16,10 @@ use crate::ui::theme::{
     SETTINGS_WINDOW_TITLE,
 };
 
-use super::appearance_tab;
-use super::device_tab;
-use super::key_mapping_tab;
+mod appearance_tab;
+mod device_tab;
+mod key_mapping_tab;
+pub mod store;
 
 pub struct Settings {
     pub show: bool,
@@ -141,7 +142,7 @@ pub fn load_settings_icon() -> egui::IconData {
 
     let opt = usvg::Options::default();
 
-    let coloured_svg = include_str!("../../assets/settings_icon.svg")
+    let coloured_svg = include_str!("../../../assets/settings_icon.svg")
         .replace("#FFFFFF", SETTINGS_ICON_COLOR)
         .replace("#ffffff", &SETTINGS_ICON_COLOR.to_lowercase());
     let tree = usvg::Tree::from_str(&coloured_svg, &opt).expect("Failed to parse SVG");

@@ -3,7 +3,7 @@
 /// Renders the device settings panel, including the default function key behavior switcher.
 use eframe::egui;
 
-use super::settings::Settings;
+use super::Settings;
 use crate::ui::app::app;
 use crate::ui::app_events::OsdEvent;
 

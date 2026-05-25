@@ -11,8 +11,8 @@ use crate::ui::theme::{
     SETTINGS_KEY_LISTEN_INTERVAL_MS, SETTINGS_ROW_SPACING, SETTINGS_TEXT_EDIT_WIDTH,
 };
 
+use super::Settings;
 use super::device_tab::default_func_key_switcher;
-use super::settings::Settings;
 
 pub fn show(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
     ui.horizontal(|ui| {

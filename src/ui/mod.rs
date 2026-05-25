@@ -7,7 +7,7 @@
 //   app            — Tauri window orchestration
 //   tray           — system tray icon + menu
 //   osd            — on-screen display animations
-//   settings       — settings window UI
+//   settings       — settings window UI (includes tabs, store)
 //   event_dispatcher — cross-thread event routing
 //   theme          — colors, typography, timing constants
 //   layout         — viewport dimensions and spacing
@@ -15,23 +15,18 @@
 //   custom_key_map — key mapping data types
 //
 // Internal modules (not exposed):
-//   appearance_tab, device_tab, key_mapping_tab — settings sub-tabs
 //   tray_icon_module, tray_menu                 — tray sub-modules
 // ───────────────────────────────────────────────────────────────────────────────
 
 pub mod app;
 pub mod app_events;
-mod appearance_tab;
 pub mod custom_key_map;
-mod device_tab;
 pub mod event_dispatcher;
 pub mod icons;
-mod key_mapping_tab;
 pub mod layout;
 pub mod osd;
 pub mod osd_animation;
 pub mod settings;
-pub mod settings_store;
 pub mod theme;
 pub mod tray;
 mod tray_icon_module;
@@ -66,7 +61,7 @@ pub mod prelude {
     pub use crate::ui::osd::Osd;
 
     // Settings persistence
-    pub use crate::ui::settings_store::SettingsStore;
+    pub use crate::ui::settings::store::SettingsStore;
 
     // Theme constants
     pub use crate::ui::theme::*;

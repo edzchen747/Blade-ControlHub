@@ -11,7 +11,7 @@ use crate::ui::app_events::AppEvent;
 use crate::ui::custom_key_map::KEYMAP_LISTENING;
 use crate::ui::event_dispatcher::{EventDispatcher, SideEffect};
 use crate::ui::osd::Osd;
-use crate::ui::settings_store::SettingsStore;
+use crate::ui::settings::store::SettingsStore;
 use crate::ui::theme::OSD_WINDOW_SIZE;
 use crate::ui::tray;
 use crate::utils::oncelock_ext::OnceLockExt;

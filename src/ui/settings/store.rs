@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 
+use super::Settings;
 use crate::razer::config::AppConfig;
-use crate::ui::settings::Settings;
 
 #[derive(Clone)]
 pub struct SettingsStore {
