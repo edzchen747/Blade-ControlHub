@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 use std::sync::atomic::Ordering;
 
+use crate::core::shared_state::SHIFT_PRESSED;
 use crate::error::{AppError, AppResult};
-use crate::win::input::key_map::SHIFT_PRESSED;
 use tracing::info;
 use windows::Win32::Graphics::Gdi::{
     CDS_UPDATEREGISTRY, DEVMODEW, DISP_CHANGE_SUCCESSFUL, DISPLAY_DEVICE_ATTACHED_TO_DESKTOP,

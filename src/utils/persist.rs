@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 
 use tracing::{debug, error};
 
-pub static PERSIST_ENABLED: AtomicBool = AtomicBool::new(true);
+// Module-local - accessed only within this module via enable()/disable() methods
+static PERSIST_ENABLED: AtomicBool = AtomicBool::new(true);
 
 /// A debounced file writer that batches rapid writes into a single disk commit.
 ///

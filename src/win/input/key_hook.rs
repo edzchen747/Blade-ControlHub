@@ -2,10 +2,8 @@ use rdev::{Event, EventType, Key, grab};
 use std::sync::atomic::Ordering;
 use tracing::{error, info};
 
-use crate::win::input::{
-    key_map::{ALT_PRESSED, KEY_MAP, SHIFT_PRESSED},
-    vkey,
-};
+use crate::core::shared_state::{ALT_PRESSED, SHIFT_PRESSED};
+use crate::win::input::{key_map::KEY_MAP, vkey};
 
 pub struct KeyHook {}
 

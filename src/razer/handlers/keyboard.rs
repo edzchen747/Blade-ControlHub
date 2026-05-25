@@ -2,6 +2,7 @@ use librazer::{command::custom_command, device::Device};
 
 use crate::{
     config::persist_config,
+    core::shared_state::DEFAULT_MULTIMEDIA_KEYS,
     razer::{
         config::AppConfig,
         device_handle::device,
@@ -10,7 +11,7 @@ use crate::{
     },
     ui::{app::app, app_events::OsdEvent},
     utils::persist::PersistBuffer,
-    win::{display::ambient::AmbientEffect, input::key_map::DEFAULT_MULTIMEDIA_KEYS},
+    win::display::ambient::AmbientEffect,
 };
 use std::sync::atomic::Ordering;
 

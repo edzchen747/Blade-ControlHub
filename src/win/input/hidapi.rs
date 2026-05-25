@@ -2,12 +2,10 @@ use std::sync::atomic::Ordering;
 
 use crate::{
     config,
+    core::shared_state::{FN_PRESSED, KEYMAP_LISTENING},
     error::{AppError, AppResult},
-    ui::{app::app, app_events::AppEvent, custom_key_map::KEYMAP_LISTENING},
-    win::input::{
-        key_map::{FN_PRESSED, KEY_MAP},
-        razer_key,
-    },
+    ui::{app::app, app_events::AppEvent},
+    win::input::{key_map::KEY_MAP, razer_key},
 };
 use hidapi::{HidApi, HidDevice};
 use tracing::{info, warn};

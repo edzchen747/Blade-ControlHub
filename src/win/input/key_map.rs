@@ -1,3 +1,6 @@
+use std::sync::atomic::Ordering;
+
+use crate::core::shared_state::{ALT_PRESSED, DEFAULT_MULTIMEDIA_KEYS, FN_PRESSED};
 use crate::razer::device_handle::device;
 use crate::win::audio::{self, AudioType};
 use crate::win::input::trackpad::toggle_trackpad;
@@ -6,14 +9,9 @@ use crate::win::input::{KeyType, razer_key, vkey};
 use once_cell::sync::Lazy;
 use rdev::{EventType, Key, simulate};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::thread;
 use std::time::Duration;
-
-pub static FN_PRESSED: AtomicBool = AtomicBool::new(false);
-pub static ALT_PRESSED: AtomicBool = AtomicBool::new(false);
-pub static SHIFT_PRESSED: AtomicBool = AtomicBool::new(false);
-pub static DEFAULT_MULTIMEDIA_KEYS: AtomicBool = AtomicBool::new(false);
 
 pub struct KeyCombo([Option<Key>; 4]);
 

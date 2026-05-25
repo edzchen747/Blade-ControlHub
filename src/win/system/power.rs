@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 use tracing::info;
@@ -9,9 +9,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     RegisterClassA, WM_POWERBROADCAST, WNDCLASSA,
 };
 
+use crate::core::shared_state::IS_PLUGGED_IN;
 use crate::razer::device_handle::device;
-
-pub static IS_PLUGGED_IN: AtomicBool = AtomicBool::new(false);
 
 pub struct PowerMonitor {}
 

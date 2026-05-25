@@ -1,7 +1,6 @@
+use crate::core::shared_state::{IS_PLUGGED_IN, SHIFT_PRESSED};
 use crate::error::{AppError, AppResult};
 use crate::razer::enums::*;
-use crate::win::input::key_map::SHIFT_PRESSED;
-use crate::win::system::power::IS_PLUGGED_IN;
 use std::sync::atomic::Ordering;
 
 use serde::{Deserialize, Serialize};

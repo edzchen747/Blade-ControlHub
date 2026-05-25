@@ -1,14 +1,12 @@
 use std::os::windows::process::CommandExt;
 use std::process::Command;
-use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
+use crate::core::shared_state::{SCREEN_ADJUSTING, SCREEN_TARGET_LVL};
 use crate::ui::app::app;
 use crate::ui::app_events::OsdEvent;
 use tracing::{debug, warn};
-
-pub static SCREEN_TARGET_LVL: AtomicU8 = AtomicU8::new(100);
-pub static SCREEN_ADJUSTING: AtomicUsize = AtomicUsize::new(0);
 
 pub struct BrightnessWorker {
     tx: Sender<()>,

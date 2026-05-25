@@ -1,6 +1,6 @@
+use crate::core::shared_state::SCREEN_TARGET_LVL;
 use crate::razer::config::AppConfig;
 use crate::utils::persist::PersistBuffer;
-use crate::win::display::brightness::SCREEN_TARGET_LVL;
 
 use std::sync::atomic::Ordering;
 use tracing::error;

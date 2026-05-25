@@ -1,6 +1,7 @@
 use std::sync::atomic::Ordering;
 
-use crate::{razer::config::AppConfig, win::input::key_map::DEFAULT_MULTIMEDIA_KEYS};
+use crate::core::shared_state::DEFAULT_MULTIMEDIA_KEYS;
+use crate::razer::config::AppConfig;
 
 use super::constants::CONFIG_PATH;
 use tracing::{info, warn};

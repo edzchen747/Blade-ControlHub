@@ -1,11 +1,9 @@
 use crate::{
+    core::shared_state::{SCREEN_ADJUSTING, SCREEN_TARGET_LVL},
     razer::device_handle::device,
     win::{
         audio::{self, AudioType},
-        display::{
-            brightness::{SCREEN_ADJUSTING, SCREEN_TARGET_LVL},
-            screen_query::get_screen_brightness,
-        },
+        display::screen_query::get_screen_brightness,
     },
 };
 use std::sync::atomic::Ordering;

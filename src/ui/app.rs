@@ -6,9 +6,9 @@ use eframe::{NativeOptions, egui};
 use rdev::Key;
 use tray_icon::TrayIcon;
 
+use crate::core::shared_state::KEYMAP_LISTENING;
 use crate::razer::device_handle::{DeviceHandle, device};
 use crate::ui::app_events::AppEvent;
-use crate::ui::custom_key_map::KEYMAP_LISTENING;
 use crate::ui::event_dispatcher::{EventDispatcher, SideEffect};
 use crate::ui::osd::Osd;
 use crate::ui::settings::store::SettingsStore;

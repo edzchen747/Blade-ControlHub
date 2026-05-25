@@ -1,9 +1,10 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 
 /// Data structures for custom key mapping state.
 ///
 /// Extracted from `Settings` to provide a clean, testable domain model
 /// that can be shared across UI components without coupling to egui.
+use crate::core::shared_state::KEYMAP_LISTENING;
 
 #[derive(Default, Clone)]
 #[allow(dead_code)]
@@ -18,8 +19,6 @@ pub struct RazerKeyMap {
     pub name: String,
     pub action: String,
 }
-
-pub static KEYMAP_LISTENING: AtomicBool = AtomicBool::new(false);
 
 /// The custom key mapping state, holding both function key and Razer special key rows.
 #[derive(Default)]
