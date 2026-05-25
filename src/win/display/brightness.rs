@@ -1,3 +1,4 @@
+use std::os::windows::process::CommandExt;
 use std::process::Command;
 use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -69,14 +70,20 @@ fn set_hardware_brightness(percentage: u32) -> bool {
         percentage
     );
 
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
     let output = Command::new("powershell")
         .args(&[
             "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
             "-ExecutionPolicy",
             "Bypass",
             "-Command",
             &script,
         ])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
 
     match output {
