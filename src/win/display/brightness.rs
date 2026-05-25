@@ -57,6 +57,7 @@ impl BrightnessWorker {
             }
             SCREEN_ADJUSTING.fetch_add(1, Ordering::SeqCst);
             set_hardware_brightness(target as u32);
+            last_processed_lvl = target;
         }
     }
 }

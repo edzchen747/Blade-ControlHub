@@ -1,4 +1,6 @@
-use crate::razer::config::AppConfig;
+use std::sync::atomic::Ordering;
+
+use crate::{razer::config::AppConfig, win::input::key_map::DEFAULT_MULTIMEDIA_KEYS};
 
 use super::constants::CONFIG_PATH;
 use tracing::{info, warn};
@@ -31,6 +33,8 @@ pub fn load_config(pid: String) -> AppConfig {
     // Override saved cycle items in case new updates bring more options
     app_config.refresh_cycle_items();
     app_config.set_pid(pid);
+
+    DEFAULT_MULTIMEDIA_KEYS.store(app_config.default_multimedia_keys, Ordering::SeqCst);
 
     app_config
 }

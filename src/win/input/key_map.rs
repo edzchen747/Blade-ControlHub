@@ -13,7 +13,7 @@ use std::time::Duration;
 pub static FN_PRESSED: AtomicBool = AtomicBool::new(false);
 pub static ALT_PRESSED: AtomicBool = AtomicBool::new(false);
 pub static SHIFT_PRESSED: AtomicBool = AtomicBool::new(false);
-pub static DEFAULT_MULTIMEDIA_KEYS: AtomicBool = AtomicBool::new(true);
+pub static DEFAULT_MULTIMEDIA_KEYS: AtomicBool = AtomicBool::new(false);
 
 pub struct KeyCombo([Option<Key>; 4]);
 
@@ -49,13 +49,17 @@ impl<'a> IntoIterator for &'a KeyCombo {
 pub enum Source<'a> {
     IsTrue(&'a AtomicBool),
     IsFalse(&'a AtomicBool),
+    IsXOR(&'a AtomicBool, &'a AtomicBool),
 }
 
 impl<'a> Source<'a> {
     fn eval(&self) -> bool {
         match self {
-            Source::IsTrue(atomic) => atomic.load(Ordering::SeqCst),
-            Source::IsFalse(atomic) => !atomic.load(Ordering::SeqCst),
+            Self::IsTrue(atomic) => atomic.load(Ordering::SeqCst),
+            Self::IsFalse(atomic) => !atomic.load(Ordering::SeqCst),
+            Self::IsXOR(atomic1, atomic2) => {
+                atomic1.load(Ordering::SeqCst) ^ atomic2.load(Ordering::SeqCst)
+            }
         }
     }
 }
@@ -132,8 +136,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     KeyCombo::new(&[Key::Unknown(173)]).trigger();
                 }),
                 vec![
-                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
-                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),
@@ -145,8 +148,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     KeyCombo::new(&[Key::Unknown(174)]).trigger();
                 }),
                 vec![
-                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
-                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),
@@ -158,8 +160,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     KeyCombo::new(&[Key::Unknown(175)]).trigger();
                 }),
                 vec![
-                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
-                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),
@@ -171,8 +172,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     KeyCombo::new(&[Key::MetaLeft, Key::KeyP]).trigger();
                 }),
                 vec![
-                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
-                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),
@@ -184,8 +184,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     KeyCombo::new(&[Key::Unknown(177)]).trigger();
                 }),
                 vec![
-                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
-                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),
@@ -197,8 +196,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     KeyCombo::new(&[Key::Unknown(179)]).trigger();
                 }),
                 vec![
-                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
-                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),
@@ -210,8 +208,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     KeyCombo::new(&[Key::Unknown(176)]).trigger();
                 }),
                 vec![
-                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
-                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),
@@ -223,8 +220,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     device().adjust_screen_brightness(-10);
                 }),
                 vec![
-                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
-                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),
@@ -236,8 +232,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     device().adjust_screen_brightness(10);
                 }),
                 vec![
-                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
-                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),
@@ -249,8 +244,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     device().keyboard_light_down();
                 }),
                 vec![
-                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
-                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),
@@ -262,8 +256,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     device().keyboard_light_up();
                 }),
                 vec![
-                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
-                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),
@@ -275,8 +268,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     KeyCombo::new(&[Key::PrintScreen]).trigger();
                 }),
                 vec![
-                    Source::IsTrue(&DEFAULT_MULTIMEDIA_KEYS),
-                    Source::IsFalse(&FN_PRESSED),
+                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),
