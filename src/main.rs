@@ -36,6 +36,7 @@ fn start_razer_service() -> AppResult<()> {
     win::system::power::PowerMonitor::start();
     win::system::standby::StandbyMonitor::start();
     win::external_events::ExternalChangeMonitor::start();
+    win::system::display_gpu::GpuDisplayMonitor::start();
     info!("Razer service started");
     let notify_startup = !std::env::args().any(|arg| arg == "--silent");
     device().initialize(notify_startup);
