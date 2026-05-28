@@ -1,11 +1,14 @@
 use crate::config::{self, CONFIG_PATH};
+use crate::core::shared_state::DEVICE_PIDS;
 use crate::error::{AppError, AppResult};
 use crate::razer::config::AppConfig;
 use crate::razer::enums::{LidLogoMode, PerfMode};
 use crate::razer::executer::Executer;
+use crate::razer::protocol::command;
 use crate::utils::persist::PersistBuffer;
 use crate::utils::reload::restart_app;
 use crate::win::audio::AudioType;
+use librazer::descriptor::Descriptor;
 use tracing::{error, info, warn};
 
 use librazer::device::Device;
@@ -13,6 +16,8 @@ use std::sync::OnceLock;
 use std::sync::mpsc::{self, Sender};
 use std::thread;
 use std::time::Duration;
+
+static MODEL: OnceLock<String> = OnceLock::new();
 
 // ── Global Singleton ────────────────────────────────────────────────────────
 
@@ -25,13 +30,7 @@ pub fn device() -> DeviceHandle {
         let (tx, rx) = mpsc::channel::<DeviceCmd>();
 
         thread::spawn(move || {
-            let device = match Device::detect() {
-                Ok(d) => d,
-                Err(e) => {
-                    error!(error = ?e, "No compatible Razer device found; worker thread exiting");
-                    return;
-                }
-            };
+            let device = get_razer_device();
             let mut app_config = config::load_config(format!("0x{:04x}", device.info.pid));
             let persist_buffer = PersistBuffer::new(CONFIG_PATH.to_string());
             let mut executer = match Executer::new(&device, &mut app_config, persist_buffer, rx) {
@@ -60,6 +59,43 @@ fn monitor_device_channel() {
             std::thread::sleep(std::time::Duration::from_mins(2));
         }
     });
+}
+
+fn get_razer_device() -> Device {
+    match Device::detect() {
+        Ok(d) => d,
+        Err(e) => {
+            if let Ok(mut razer_enums) = Device::enumerate() {
+                razer_enums.0.sort();
+                let (device_pids, device_model) = razer_enums;
+                let model = MODEL.get_or_init(|| format!("Razer Blade {}", device_model));
+                DEVICE_PIDS
+                    .set(device_pids.clone())
+                    .expect("Fatal internal error: failed to set device pids");
+
+                // Loop through all detected Razer PIDs and return the first that responds
+                for pid in &device_pids {
+                    let custom_descriptor = Descriptor {
+                        model_number_prefix: &model,
+                        name: &model,
+                        pid: *pid,
+                        features: &[],
+                    };
+                    let device = Device::new(custom_descriptor)
+                        .expect("Fatal internal error: failed to initialize custom descriptor");
+                    // Command to check performance mode
+                    if command(&device, 0x0d82, &[0, 0, 0, 0], Some(2)).is_ok() {
+                        return device;
+                    }
+                }
+                error!(error = ?e, "No compatible Razer device found; worker thread exiting");
+                std::process::exit(1);
+            } else {
+                error!(error = ?e, "No compatible Razer device found; worker thread exiting");
+                std::process::exit(1);
+            }
+        }
+    }
 }
 
 // ── Device Commands ─────────────────────────────────────────────────────────

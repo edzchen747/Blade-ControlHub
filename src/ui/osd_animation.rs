@@ -26,6 +26,7 @@ pub struct OsdAnimation {
     is_centered: bool,
     fade_alpha: f32,
     last_update: Instant,
+    pub is_onscreen: bool,
 }
 
 impl OsdAnimation {
@@ -36,6 +37,7 @@ impl OsdAnimation {
             is_centered: false,
             fade_alpha: 0.0,
             last_update: Instant::now(),
+            is_onscreen: true,
         }
     }
 

@@ -28,9 +28,7 @@ fn main() -> AppResult<()> {
 }
 
 fn start_razer_service() -> AppResult<()> {
-    // Returns 0 if the device thread has not yet started or has exited;
-    // a PID of 0 causes the HID listener to skip product-ID filtering.
-    let device_pid = razer::device_handle::device().get_pid().unwrap_or(0);
+    let device_pid = razer::device_handle::device().get_pid().unwrap();
     info!("Detected device with PID: 0x{:04x}", device_pid);
     win::input::start_keyboard_hooks(device_pid)?;
     win::system::power::PowerMonitor::start();

@@ -42,7 +42,28 @@ impl Osd {
             return;
         }
 
+        let previous_state = self.animation.state();
         self.animation.advance(ctx);
+        let current_state = self.animation.state();
+        // Move OSD window off screen and shrink - prevents stuttering in games
+        if previous_state != current_state {
+            match current_state {
+                OsdState::Hidden => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(
+                        -3000.0, -3000.0,
+                    )));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(1.0, 1.0)));
+                }
+                OsdState::FadingIn => {
+                    self.animation.is_onscreen = false;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(
+                        layout::OSD_WINDOW_SIZE,
+                    ));
+                }
+                _ => {}
+            }
+        }
+
         self.animation.center_viewport_if_needed(ctx);
         self.render_osd(ctx);
     }
