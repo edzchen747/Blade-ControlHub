@@ -103,7 +103,7 @@ fn get_razer_device() -> Device {
 /// Commands that can be sent to the background device thread.
 pub enum DeviceCmd {
     InitializeDevice(bool),
-    SleepDevice,
+    SleepDevice(mpsc::Sender<bool>),
     AdjustKeyboardLight(bool),
     GetPID(mpsc::Sender<u16>),
     GetModelName(mpsc::Sender<String>),
@@ -167,14 +167,14 @@ impl DeviceHandle {
         self.query(DeviceCmd::Shutdown)
     }
 
+    pub fn sleep(&self) -> AppResult<bool> {
+        self.query(DeviceCmd::SleepDevice)
+    }
+
     // ── Fire-and-forget commands ────────────────────────────────────
 
     pub fn initialize(&self, notify_startup: bool) {
         self.send(DeviceCmd::InitializeDevice(notify_startup));
-    }
-
-    pub fn sleep(&self) {
-        self.send(DeviceCmd::SleepDevice);
     }
 
     pub fn keyboard_light_up(&self) {
@@ -266,15 +266,15 @@ impl crate::core::traits::DeviceController for DeviceHandle {
         DeviceHandle::initialize(self, notify_startup);
     }
 
-    fn sleep(&self) {
-        DeviceHandle::sleep(self);
+    fn sleep(&self) -> AppResult<bool> {
+        DeviceHandle::sleep(self)
     }
 
-    fn shutdown(&self) -> crate::error::AppResult<bool> {
+    fn shutdown(&self) -> AppResult<bool> {
         DeviceHandle::shutdown(self)
     }
 
-    fn get_pid(&self) -> crate::error::AppResult<u16> {
+    fn get_pid(&self) -> AppResult<u16> {
         DeviceHandle::get_pid(self)
     }
 
@@ -310,7 +310,7 @@ impl crate::core::traits::DeviceController for DeviceHandle {
         DeviceHandle::adjust_screen_brightness(self, change);
     }
 
-    fn set_lid_logo(&self, mode: crate::razer::enums::LidLogoMode) {
+    fn set_lid_logo(&self, mode: LidLogoMode) {
         DeviceHandle::set_lid_logo(self, mode);
     }
 

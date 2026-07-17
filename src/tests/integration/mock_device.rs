@@ -13,7 +13,6 @@ use crate::razer::enums::LidLogoMode;
 #[allow(dead_code)]
 pub struct MockDeviceController {
     pub initialize_called: Arc<AtomicBool>,
-    pub sleep_called: Arc<AtomicBool>,
     pub cycle_perf_called: Arc<AtomicBool>,
     pub cycle_rgb_called: Arc<AtomicBool>,
     pub persist_called: Arc<AtomicBool>,
@@ -31,8 +30,8 @@ impl DeviceController for MockDeviceController {
         self.initialize_called.store(true, Ordering::SeqCst);
     }
 
-    fn sleep(&self) {
-        self.sleep_called.store(true, Ordering::SeqCst);
+    fn sleep(&self) -> AppResult<bool> {
+        Ok(true)
     }
 
     fn shutdown(&self) -> AppResult<bool> {

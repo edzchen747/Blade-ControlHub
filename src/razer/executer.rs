@@ -1,3 +1,4 @@
+use crate::config::persist_config;
 use crate::error::AppError;
 use crate::razer::config::AppConfig;
 use crate::razer::device_handle::DeviceCmd;
@@ -78,8 +79,10 @@ impl<'a> Executer<'a> {
     }
     fn dispatch(&mut self, cmd: DeviceCmd) {
         match cmd {
-            DeviceCmd::InitializeDevice(n) => self.initialize(n),
-            DeviceCmd::SleepDevice => self.sleep(),
+            DeviceCmd::InitializeDevice(notif) => self.initialize(notif),
+            DeviceCmd::SleepDevice(tx) => {
+                let _ = tx.send(self.sleep());
+            }
             DeviceCmd::Shutdown(tx) => {
                 let _ = tx.send(self.shutdown());
             }
@@ -91,6 +94,7 @@ impl<'a> Executer<'a> {
             DeviceCmd::CyclePerfMode => self.perf().cycle_perf_mode(),
             DeviceCmd::AdjustScreenBrightness(change) => {
                 self.brightness_worker.adjust_screen_brightness(change);
+                self.persist_config();
             }
             DeviceCmd::CycleRefreshRate => self.display().cycle_refresh_rate(),
             DeviceCmd::SetMuteIndicator(io, muted) => {
@@ -165,16 +169,19 @@ impl<'a> Executer<'a> {
         } else {
             self.display().get_refresh_rate(true);
         }
+        self.kb().init_keyboard_width();
+        self.persist_config();
     }
 
-    fn sleep(&mut self) {
+    fn sleep(&mut self) -> bool {
         self.kb().keyboard_control(false);
         let _ = command(self.device, 0x030a, &[5, 0], None); // reset keyboard effect
-        AmbientEffect::stop();
         let _ = command(self.device, 0x0303, &[1, 5, 0], None); // turn off keyboard light
         let _ = command(self.device, 0x0300, &[1, 38, 0], None); // set underglow brightness to 0
         let _ = command(self.device, 0x0303, &[1, 38, 0], None); // turn off underglow brightness
         let _ = command(self.device, 0x0d02, &[1, 0, 6, 0], None); // reset perf mode
+        AmbientEffect::stop();
+        true
     }
 
     fn shutdown(&mut self) -> bool {
@@ -182,5 +189,11 @@ impl<'a> Executer<'a> {
         self.kb().keyboard_control(false);
         self.kb().set_rgb_effect(RGBEffect::Cycle);
         true
+    }
+
+    // ── Internal helpers ────────────────────────────────────────────────
+
+    fn persist_config(&mut self) {
+        persist_config(self.app_config, &self.persist_buffer);
     }
 }

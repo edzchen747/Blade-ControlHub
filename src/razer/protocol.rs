@@ -3,7 +3,6 @@ use crate::{
     utils::reload::restart_app,
 };
 use librazer::{device::Device, packet::Packet};
-use std::{thread, time::Duration};
 use tracing::{debug, warn};
 
 /// Sends a HID command to the device with automatic retry logic (up to 3 attempts).
@@ -18,7 +17,7 @@ pub fn command(
     result_idx: Option<usize>,
 ) -> AppResult<u8> {
     let mut errors: Vec<anyhow::Error> = vec![];
-    for attempt in 1..=3 {
+    for _attempt in 1..=3 {
         let report = Packet::new(command, args);
         match device.send(report) {
             Ok(response) => {
@@ -36,7 +35,6 @@ pub fn command(
                 errors.push(err)
             }
         };
-        thread::sleep(Duration::from_millis(100 * attempt));
     }
     if let Some(code) = get_first_os_error(&errors) {
         match code {

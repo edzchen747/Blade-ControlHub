@@ -103,6 +103,7 @@ pub struct AppConfig {
     battery_state: DeviceState,
     pub battery_limit: CycleState<BatteryLimit>,
     pub default_multimedia_keys: bool,
+    pub keyboard_width: u8,
 }
 
 impl Default for AppConfig {
@@ -116,6 +117,7 @@ impl Default for AppConfig {
                 items: BATTERY_LIMITS.to_vec(),
             },
             default_multimedia_keys: false,
+            keyboard_width: 0,
         }
     }
 }

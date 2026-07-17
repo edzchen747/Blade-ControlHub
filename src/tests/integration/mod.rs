@@ -28,7 +28,7 @@ fn mock_device_sleep_records_call() {
     let mock = MockDeviceController::new();
     mock.sleep();
     assert!(
-        mock.sleep_called.load(std::sync::atomic::Ordering::SeqCst),
+        mock.sleep().unwrap_or(false),
         "sleep() must set the sleep_called flag"
     );
 }

@@ -6,7 +6,7 @@ use crate::razer::enums::LidLogoMode;
 #[expect(dead_code)]
 pub trait DeviceController {
     fn initialize(&self, notify_startup: bool);
-    fn sleep(&self);
+    fn sleep(&self) -> AppResult<bool>;
     fn shutdown(&self) -> AppResult<bool>;
     fn get_pid(&self) -> AppResult<u16>;
     fn cycle_perf_mode(&self);

@@ -141,10 +141,11 @@ impl<'a> KeyboardHandler<'a> {
     }
 
     pub fn set_keyboard_color(&self, r: u8, g: u8, b: u8) {
+        let width = self.app_config.keyboard_width;
         let mut args = vec![
-            255, 0, 0, 18, 0, 0, 0, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b,
-            r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g,
-            b, r, g, b,
+            255, 0, 0, width, 0, 0, 0, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g,
+            b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r,
+            g, b, r, g, b,
         ];
         for row in 0..=6 {
             args[1] = row;
@@ -165,6 +166,21 @@ impl<'a> KeyboardHandler<'a> {
         }
         app().send(OsdEvent::LidLogo(mode).into());
         self.persist_config();
+    }
+
+    pub fn init_keyboard_width(&mut self) {
+        let mut width = 18;
+        loop {
+            if width < 1 {
+                return;
+            }
+            if command(self.device, 0x030b, &[255, 0, 0, width], None).is_ok() {
+                self.app_config.keyboard_width = width;
+                return;
+            } else {
+                width -= 1;
+            }
+        }
     }
 
     // ── Key Modes ───────────────────────────────────────────────────────

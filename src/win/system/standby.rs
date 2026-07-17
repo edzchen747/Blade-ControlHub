@@ -161,7 +161,7 @@ impl StandbyMonitor {
                         if *lock != last_state {
                             match *lock {
                                 StandbyState::Sleep => {
-                                    razer::device_handle::device().sleep();
+                                    let _ = razer::device_handle::device().sleep();
                                     info!(
                                         "System entering sleep; executing hardware shutdown sequence"
                                     );
