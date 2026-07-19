@@ -136,6 +136,11 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if !self.osd_init {
+            self.osd.hide(ctx);
+            self.osd_init = true;
+        }
+
         let is_focused = ctx.input(|i| i.viewport().focused.unwrap_or(false));
         if is_focused {
             unfocus();
