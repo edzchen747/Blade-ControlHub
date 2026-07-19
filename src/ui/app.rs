@@ -41,6 +41,7 @@ struct App {
     tray_icon: TrayIcon,
 
     // OSD
+    osd_init: bool,
     osd: Osd,
     osd_enabled: bool,
 
@@ -61,6 +62,7 @@ impl App {
         Self {
             rx,
             tray_icon: tray::build_tray_icon(),
+            osd_init: false,
             osd: Osd::new(),
             osd_enabled: true,
             settings: SettingsStore::new(),
@@ -134,6 +136,10 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if !self.osd_init {
+            self.osd.hide(ctx);
+        }
+
         let is_focused = ctx.input(|i| i.viewport().focused.unwrap_or(false));
         if is_focused {
             unfocus();

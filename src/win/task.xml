@@ -6,7 +6,7 @@
   <Triggers>
     <LogonTrigger>
       <Enabled>true</Enabled>
-      <Delay>PT5S</Delay> <!-- 5 second delay to ensure Windows Desktop is ready -->
+      <Delay>PT15S</Delay> <!-- 15 second delay to ensure Windows Desktop is ready -->
     </LogonTrigger>
   </Triggers>
   <Principals>
