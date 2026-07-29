@@ -1,8 +1,9 @@
 use librazer::device::Device;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::{
     config::persist_config,
+    error::{AppError, AppResult},
     razer::{config::AppConfig, enums::PerfMode, protocol::command},
     ui::{app::app, app_events::OsdEvent},
     utils::persist::PersistBuffer,
@@ -34,17 +35,37 @@ impl<'a> PerformanceHandler<'a> {
     // ── Performance ─────────────────────────────────────────────────────
 
     pub fn cycle_perf_mode(&mut self) {
-        let new_perf_mode = self.app_config.get().perf_mode.next();
-        self.set_perf_mode(new_perf_mode);
+        let attempts = self.app_config.get().perf_mode.items.len();
+        for _ in 0..attempts {
+            let new_perf_mode = self.app_config.get().perf_mode.next();
+            match self.set_perf_mode(new_perf_mode) {
+                Ok(()) => return,
+                Err(error) => {
+                    warn!(
+                        mode = %new_perf_mode,
+                        %error,
+                        "Performance mode failed; removing it from this launch's cycle list"
+                    );
+                    self.remove_perf_mode_for_cycle_retry(new_perf_mode);
+                }
+            }
+        }
     }
 
-    pub fn set_perf_mode(&mut self, perf_mode: PerfMode) {
+    pub fn set_perf_mode(&mut self, perf_mode: PerfMode) -> AppResult<()> {
         info!(mode = %perf_mode, "Setting performance mode");
-        let _ = command(self.device, 0x0d02, &[1, 0, perf_mode as u8, 0], None);
-        let perf_mode = self.get_perf_mode();
-        // value comes from hardware readback; mismatch is non-fatal
-        let _ = self.app_config.get().perf_mode.set(&perf_mode);
+        command(self.device, 0x0d02, &[1, 0, perf_mode as u8, 0], None)?;
+        let requested_perf_mode = perf_mode;
+        let actual_perf_mode = self.get_perf_mode();
+        if actual_perf_mode != requested_perf_mode {
+            return Err(AppError::Internal(format!(
+                "Performance mode {requested_perf_mode} not supported; hardware stayed on {actual_perf_mode}"
+            )));
+        }
+
+        let _ = self.app_config.get().perf_mode.set(&actual_perf_mode);
         self.persist_config();
+        Ok(())
     }
 
     pub fn get_perf_mode(&self) -> PerfMode {
@@ -57,6 +78,23 @@ impl<'a> PerformanceHandler<'a> {
     }
 
     // ── Internal helpers ────────────────────────────────────────────────
+
+    pub fn remove_perf_mode(&mut self, perf_mode: PerfMode) {
+        if self.app_config.get().perf_mode.remove(&perf_mode) {
+            self.persist_config();
+        }
+    }
+
+    fn remove_perf_mode_for_cycle_retry(&mut self, perf_mode: PerfMode) {
+        if self
+            .app_config
+            .get()
+            .perf_mode
+            .remove_for_cycle_retry(&perf_mode)
+        {
+            self.persist_config();
+        }
+    }
 
     fn persist_config(&mut self) {
         persist_config(self.app_config, self.persist_buffer);

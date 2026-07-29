@@ -4,15 +4,15 @@ use std::ptr::null_mut;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use tracing::warn;
+use tracing::{debug, info, warn};
 use windows_sys::Win32::Foundation::{ERROR_PIPE_CONNECTED, GetLastError};
 use windows_sys::Win32::Security::{
     InitializeSecurityDescriptor, SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR,
     SetSecurityDescriptorDacl,
 };
-use windows_sys::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
+use windows_sys::Win32::Storage::FileSystem::{FlushFileBuffers, PIPE_ACCESS_DUPLEX};
 use windows_sys::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_BYTE,
     PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
@@ -85,15 +85,70 @@ fn run_server(device: DeviceHandle) {
 }
 
 fn handle_client(pipe: &PipeHandle, device: &DeviceHandle) {
+    let started = Instant::now();
     let response = match read_json_frame::<IpcRequest>(pipe) {
-        Ok(request) => dispatch_request(request, device),
-        Err(error) => IpcResponse::Error {
-            message: format!("Failed to read IPC request: {error}"),
-        },
+        Ok(request) => {
+            let request_kind = ipc_request_kind(&request);
+            debug!(request = request_kind, "Received IPC request");
+            let response = dispatch_request(request, device);
+            info!(
+                request = request_kind,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "Handled IPC request"
+            );
+            response
+        }
+        Err(error) => {
+            warn!(
+                %error,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "Failed to read IPC request"
+            );
+            IpcResponse::Error {
+                message: format!("Failed to read IPC request: {error}"),
+            }
+        }
     };
 
-    if let Err(error) = write_json_frame(pipe, &response) {
-        warn!(%error, "Failed to write IPC response");
+    write_ipc_response(pipe, &response, started);
+}
+
+fn write_ipc_response(pipe: &PipeHandle, response: &IpcResponse, started: Instant) {
+    match write_json_frame(pipe, response) {
+        Ok(()) => {
+            let flushed = unsafe { FlushFileBuffers(pipe.raw()) };
+            if flushed == 0 {
+                warn!(
+                    error = %io::Error::last_os_error(),
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    "Failed to flush IPC response"
+                );
+            }
+        }
+        Err(error) => {
+            warn!(
+                %error,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "Failed to write IPC response"
+            );
+        }
+    }
+}
+
+fn ipc_request_kind(request: &IpcRequest) -> &'static str {
+    match request {
+        IpcRequest::GetSettingsState => "GetSettingsState",
+        IpcRequest::SetDefaultMultimediaKeys { .. } => "SetDefaultMultimediaKeys",
+        IpcRequest::SetPerfMode { .. } => "SetPerfMode",
+        IpcRequest::SetRefreshRate { .. } => "SetRefreshRate",
+        IpcRequest::SetKeyboardBrightness { .. } => "SetKeyboardBrightness",
+        IpcRequest::SetRgbEffect { .. } => "SetRgbEffect",
+        IpcRequest::SetUnderGlow { .. } => "SetUnderGlow",
+        IpcRequest::SetBatteryLimit { .. } => "SetBatteryLimit",
+        IpcRequest::SetThemeColor { .. } => "SetThemeColor",
+        IpcRequest::BeginRazerKeyCapture { .. } => "BeginRazerKeyCapture",
+        IpcRequest::CancelRazerKeyCapture => "CancelRazerKeyCapture",
+        IpcRequest::PollCapturedRazerKey { .. } => "PollCapturedRazerKey",
     }
 }
 
@@ -159,7 +214,11 @@ fn poll_captured_razer_key(after_sequence: u64) -> IpcResponse {
 }
 
 fn create_pipe() -> io::Result<PipeHandle> {
-    let pipe_name = wide_null(PIPE_NAME);
+    create_pipe_named(PIPE_NAME)
+}
+
+fn create_pipe_named(name: &str) -> io::Result<PipeHandle> {
+    let pipe_name = wide_null(name);
     let mut pipe_security = PipeSecurity::new()?;
     let handle = unsafe {
         CreateNamedPipeW(
@@ -334,6 +393,13 @@ fn join_server_thread() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ipc::framing::{read_json_frame, write_json_frame};
+    use crate::razer::config::AppConfig;
+    use crate::runtime::settings_state::SettingsState;
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE, OPEN_EXISTING,
+    };
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -431,5 +497,74 @@ mod tests {
         join_server_thread();
 
         assert!(server_thread().is_none());
+    }
+
+    #[test]
+    fn ipc_settings_state_response_survives_server_disconnect() {
+        let _guard = test_lock();
+        let pipe_name = format!(
+            r"\\.\pipe\BladeControlHubTest-{}-{}",
+            std::process::id(),
+            current_unix_ms()
+        );
+        let expected_state = large_settings_state_for_pipe_test();
+        let response = IpcResponse::SettingsState(expected_state.clone());
+        let server_pipe_name = pipe_name.clone();
+
+        let server = thread::spawn(move || {
+            let pipe = create_pipe_named(&server_pipe_name).expect("test pipe must be created");
+            assert!(connect_pipe(&pipe));
+            let request = read_json_frame::<IpcRequest>(&pipe).expect("request must be readable");
+            assert_eq!(request, IpcRequest::GetSettingsState);
+            write_ipc_response(&pipe, &response, Instant::now());
+            unsafe {
+                let _ = DisconnectNamedPipe(pipe.raw());
+            }
+        });
+
+        let pipe = connect_test_pipe(&pipe_name);
+        write_json_frame(&pipe, &IpcRequest::GetSettingsState).expect("request must write");
+        let response = read_json_frame::<IpcResponse>(&pipe).expect("response must read");
+
+        assert_eq!(response, IpcResponse::SettingsState(expected_state));
+        server.join().expect("test IPC server must exit");
+    }
+
+    fn connect_test_pipe(pipe_name: &str) -> PipeHandle {
+        let pipe_name = wide_null(pipe_name);
+        let deadline = Instant::now() + Duration::from_secs(1);
+
+        loop {
+            let handle = unsafe {
+                CreateFileW(
+                    pipe_name.as_ptr(),
+                    FILE_GENERIC_READ | FILE_GENERIC_WRITE,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    null_mut(),
+                    OPEN_EXISTING,
+                    FILE_ATTRIBUTE_NORMAL,
+                    0,
+                )
+            };
+
+            match PipeHandle::new(handle) {
+                Ok(pipe) => return pipe,
+                Err(error) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(10));
+                    if error.kind() == io::ErrorKind::NotFound {
+                        continue;
+                    }
+                }
+                Err(error) => panic!("test client failed to connect to pipe: {error}"),
+            }
+        }
+    }
+
+    fn large_settings_state_for_pipe_test() -> SettingsState {
+        let mut state = SettingsState::from(AppConfig::default());
+        let rates = (0..1_024).map(|idx| 40 + idx).collect::<Vec<_>>();
+        state.ac_profile.supported_refresh_rates = rates.clone();
+        state.battery_profile.supported_refresh_rates = rates;
+        state
     }
 }

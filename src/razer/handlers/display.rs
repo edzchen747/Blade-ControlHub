@@ -66,17 +66,22 @@ impl<'a> DisplayHandler<'a> {
 
     pub fn set_refresh_rate(&mut self, refresh_rate: u32) {
         let supported = self.display_manager.get_supported_rates();
-        if !supported.contains(&refresh_rate) {
-            return;
-        }
-
         if self.display_manager.get_current_rate() != refresh_rate {
             let _ = self.display_manager.set_refresh_rate(refresh_rate);
             self.get_refresh_rate(false);
-        } else {
-            self.app_config.get().screen_refresh = refresh_rate;
-            self.persist_config();
+            return;
         }
+
+        let mut new_refresh_rate = refresh_rate;
+        if !supported.contains(&refresh_rate) {
+            if let Some(closest_refresh_rate) = find_closest(&supported, refresh_rate) {
+                new_refresh_rate = closest_refresh_rate;
+            } else {
+                new_refresh_rate = supported.last().unwrap().clone();
+            }
+        }
+        self.app_config.get().screen_refresh = new_refresh_rate;
+        self.persist_config();
     }
 
     // ── Internal helpers ────────────────────────────────────────────────
@@ -84,4 +89,10 @@ impl<'a> DisplayHandler<'a> {
     fn persist_config(&mut self) {
         persist_config(self.app_config, self.persist_buffer);
     }
+}
+
+fn find_closest(vec: &[u32], query: u32) -> Option<u32> {
+    vec.iter()
+        .min_by_key(|&&x| (x as i64 - query as i64).abs())
+        .copied()
 }

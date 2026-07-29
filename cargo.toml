@@ -14,7 +14,7 @@ default-run = "blade-controlhub"
 # path = "src/main.rs"
 
 [[bin]]
-name = "blade_settings"
+name = "blade-settings"
 path = "src/settings_window.rs"
 
 [dependencies]

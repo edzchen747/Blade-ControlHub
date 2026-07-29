@@ -1,5 +1,6 @@
 use crate::config::ThemeColor;
 use crate::config::persist_config;
+use crate::disable_osd;
 use crate::error::AppError;
 use crate::razer::config::{AppConfig, PowerProfile};
 use crate::razer::device_handle::DeviceCmd;
@@ -17,7 +18,7 @@ use crate::win::display::refresh_rate::DisplayManager;
 use librazer::device::Device;
 use std::sync::mpsc::Receiver;
 use std::time::Instant;
-use tracing::{info, instrument};
+use tracing::{debug, info, instrument};
 
 pub struct Executer<'a> {
     device: &'a Device,
@@ -149,10 +150,22 @@ impl<'a> Executer<'a> {
                 let _ = tx.send(self.app_config.clone());
             }
             DeviceCmd::GetSettingsState(tx) => {
+                let started = Instant::now();
+                debug!("Building settings state snapshot");
+                let rates_started = Instant::now();
                 let supported_refresh_rates = self.display_manager.get_supported_rates();
+                debug!(
+                    elapsed_ms = rates_started.elapsed().as_millis() as u64,
+                    rate_count = supported_refresh_rates.len(),
+                    "Enumerated supported refresh rates for settings state"
+                );
                 let state = crate::runtime::settings_state::SettingsState::from_config(
                     self.app_config.clone(),
                     supported_refresh_rates,
+                );
+                info!(
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    "Built settings state snapshot"
                 );
                 let _ = tx.send(state);
             }
@@ -168,8 +181,23 @@ impl<'a> Executer<'a> {
         profile: PowerProfile,
         mode: PerfMode,
     ) -> crate::error::AppResult<()> {
+        if !self
+            .app_config
+            .profile(profile)
+            .perf_mode
+            .items
+            .contains(&mode)
+        {
+            return Err(crate::error::AppError::Internal(format!(
+                "Unsupported performance mode for {profile:?}: {mode}"
+            )));
+        }
+
         if self.profile_is_active(profile) {
-            self.perf().set_perf_mode(mode);
+            if let Err(error) = self.perf().set_perf_mode(mode) {
+                self.perf().remove_perf_mode(mode);
+                return Err(error);
+            }
         } else {
             self.app_config.profile_mut(profile).perf_mode.set(&mode)?;
             self.persist_config();
@@ -254,9 +282,13 @@ impl<'a> Executer<'a> {
     }
 
     fn set_theme_color(&mut self, color: ThemeColor) -> crate::error::AppResult<()> {
-        self.app_config.theme_color = color;
-        crate::ui::theme::set_runtime_theme_color(color);
-        self.persist_config();
+        disable_osd! {
+            self.app_config.theme_color = color;
+            let rgb_effect = self.app_config.get().rgb_effect.value();
+            self.kb().set_rgb_effect(rgb_effect);
+            crate::ui::theme::set_runtime_theme_color(color);
+            self.persist_config();
+        };
         Ok(())
     }
 
@@ -266,37 +298,34 @@ impl<'a> Executer<'a> {
 
     #[instrument(skip(self), fields(notify_startup))]
     fn initialize(&mut self, notify_startup: bool) {
-        // Suppress disk flushes and UI notifications during init
         PersistBuffer::disable();
-        app(OsdEvent::EnableOSD(false).into());
-
         let mut state = self.app_config.read();
 
-        // --- Screen Brightness ---
-        self.brightness_worker
-            .set_screen_brightness(state.screen_lvl);
+        disable_osd! {
+            // --- Screen Brightness ---
+            self.brightness_worker
+                .set_screen_brightness(state.screen_lvl);
 
-        // --- Keyboard Configuration ---
-        self.kb().keyboard_control(true);
-        self.kb().enable_multimedia_keys();
-        self.kb().set_rgb_effect(state.rgb_effect.value());
-        self.kb().enable_under_glow(state.vc_lvl);
-        self.kb().set_keyboard_brightness(state.key_lvl);
-
-        // --- System Performance & Power ---
-        self.perf().set_perf_mode(state.perf_mode.value());
-        let limit = self.app_config.battery_limit.value();
-        self.battery().set_battery_limit(limit);
-
-        // --- Function / Multimedia Key Mapping ---
-        if self.app_config.default_multimedia_keys {
+            // --- Keyboard Configuration ---
+            self.kb().keyboard_control(true);
             self.kb().enable_multimedia_keys();
-        } else {
-            self.kb().restore_fn_keys();
-        }
+            self.kb().set_rgb_effect(state.rgb_effect.value());
+            self.kb().enable_under_glow(state.vc_lvl);
+            self.kb().set_keyboard_brightness(state.key_lvl);
 
-        // Restore UI notifications and disk writes
-        app(OsdEvent::EnableOSD(true).into());
+            // --- System Performance & Power ---
+            let _ = self.perf().set_perf_mode(state.perf_mode.value());
+            let limit = self.app_config.battery_limit.value();
+            self.battery().set_battery_limit(limit);
+
+            // --- Function / Multimedia Key Mapping ---
+            if self.app_config.default_multimedia_keys {
+                self.kb().enable_multimedia_keys();
+            } else {
+                self.kb().restore_fn_keys();
+            }
+        };
+
         if notify_startup {
             app(OsdEvent::Startup.into());
         }
@@ -327,7 +356,7 @@ impl<'a> Executer<'a> {
         AmbientEffect::stop();
         self.kb().restore_fn_keys();
         self.kb().keyboard_control(false);
-        self.kb().set_rgb_effect(RGBEffect::Cycle);
+        let _ = command(self.device, 0x030a, &[RGBEffect::Cycle as u8, 0], None);
         true
     }
 

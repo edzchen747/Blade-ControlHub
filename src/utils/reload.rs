@@ -97,6 +97,6 @@ mod tests {
         assert!(is_app_process_name("blade-controlhub"));
         assert!(is_app_process_name("blade-controlhub.exe"));
         assert!(is_app_process_name("BLADE-CONTROLHUB.EXE"));
-        assert!(!is_app_process_name("blade_settings"));
+        assert!(!is_app_process_name("blade-settings"));
     }
 }

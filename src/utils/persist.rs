@@ -1,5 +1,6 @@
-use std::fs::File;
-use std::io::Write;
+use std::fs::{self, File};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread::{self, JoinHandle};
@@ -55,16 +56,34 @@ impl PersistBuffer {
     }
 
     fn perform_commit(path: &str, content: &str) {
-        match File::create(path) {
+        let target_path = Path::new(path);
+        let temp_path = temp_commit_path(target_path);
+
+        match File::create(&temp_path) {
             Ok(mut file) => {
                 if let Err(error) = file.write_all(content.as_bytes()) {
                     error!(path = path, %error, "Failed to write config content");
+                    let _ = fs::remove_file(&temp_path);
                     return;
                 }
                 if let Err(error) = file.flush() {
                     error!(path = path, %error, "Failed to flush config file");
+                    let _ = fs::remove_file(&temp_path);
                     return;
                 }
+                if let Err(error) = file.sync_all() {
+                    error!(path = path, %error, "Failed to sync config file");
+                    let _ = fs::remove_file(&temp_path);
+                    return;
+                }
+                drop(file);
+
+                if let Err(error) = replace_file(&temp_path, target_path) {
+                    error!(path = path, %error, "Failed to replace config file");
+                    let _ = fs::remove_file(&temp_path);
+                    return;
+                }
+
                 debug!(path = path, "Config persisted to disk");
             }
             Err(e) => error!(path = path, error = %e, "Failed to write config"),
@@ -130,6 +149,53 @@ impl PersistBuffer {
     }
 }
 
+fn temp_commit_path(target_path: &Path) -> PathBuf {
+    let file_name = target_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| format!("{name}.tmp"))
+        .unwrap_or_else(|| "config.json.tmp".to_string());
+    target_path.with_file_name(file_name)
+}
+
+#[cfg(target_os = "windows")]
+fn replace_file(temp_path: &Path, target_path: &Path) -> io::Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+
+    let temp = wide_null_path(temp_path);
+    let target = wide_null_path(target_path);
+    let replaced = unsafe {
+        MoveFileExW(
+            temp.as_ptr(),
+            target.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+
+    if replaced == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn wide_null_path(path: &Path) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+
+    path.as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn replace_file(temp_path: &Path, target_path: &Path) -> io::Result<()> {
+    fs::rename(temp_path, target_path)
+}
+
 impl Drop for PersistBuffer {
     fn drop(&mut self) {
         drop(self.tx.take());
@@ -188,5 +254,22 @@ mod tests {
         let _ = fs::remove_file(path);
 
         assert_eq!(saved, "new");
+    }
+
+    #[test]
+    fn commit_replaces_existing_file_content() {
+        PersistBuffer::enable();
+        let path = temp_config_path("commit-replaces-existing-file-content");
+        fs::write(&path, "existing").expect("seed config must write");
+        let buffer = PersistBuffer::new(path.to_string_lossy().into_owned());
+
+        buffer.write("{\"screen_lvl\":80}".to_string());
+        drop(buffer);
+
+        let saved = fs::read_to_string(&path).expect("config must still exist after commit");
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(temp_commit_path(&path));
+
+        assert_eq!(saved, "{\"screen_lvl\":80}");
     }
 }

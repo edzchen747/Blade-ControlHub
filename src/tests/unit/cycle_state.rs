@@ -1,6 +1,8 @@
 //! Tests for `CycleState<T>` generic cyclic iterator.
 
+use crate::core::shared_state::SHIFT_PRESSED;
 use crate::razer::config::CycleState;
+use std::sync::atomic::Ordering;
 
 // ── Basic initialization ────────────────────────────────────────────────────
 
@@ -219,4 +221,38 @@ fn cycle_state_value_after_next_reflects_new_item() {
     cs.next();
     assert_eq!(cs.value(), 200);
     assert_eq!(cs.value(), 200); // calling value() twice does not advance
+}
+
+#[test]
+fn cycle_state_remove_deletes_value_and_keeps_valid_index() {
+    let mut cs = CycleState::new(vec![10u8, 20, 30]);
+    cs.set(&30).unwrap();
+
+    assert!(cs.remove(&20));
+
+    assert_eq!(cs.items, vec![10, 30]);
+    assert_eq!(cs.value(), 30);
+}
+
+#[test]
+fn cycle_state_remove_for_cycle_retry_tries_next_forward_item() {
+    SHIFT_PRESSED.store(false, Ordering::SeqCst);
+    let mut cs = CycleState::new(vec![10u8, 20, 30]);
+
+    assert_eq!(cs.next(), 20);
+    assert!(cs.remove_for_cycle_retry(&20));
+
+    assert_eq!(cs.next(), 30);
+}
+
+#[test]
+fn cycle_state_remove_for_cycle_retry_tries_next_reverse_item() {
+    SHIFT_PRESSED.store(true, Ordering::SeqCst);
+    let mut cs = CycleState::new(vec![10u8, 20, 30]);
+
+    assert_eq!(cs.next(), 30);
+    assert!(cs.remove_for_cycle_retry(&30));
+    assert_eq!(cs.next(), 20);
+
+    SHIFT_PRESSED.store(false, Ordering::SeqCst);
 }

@@ -2,6 +2,7 @@
 
 use blade_controlhub::config::ThemeColor;
 use blade_controlhub::ipc::client;
+use blade_controlhub::razer::enums::PerfMode;
 use blade_controlhub::runtime::settings_state::SettingsState;
 use blade_controlhub::ui::settings::Settings;
 use blade_controlhub::ui::settings::SettingsCommand;
@@ -10,6 +11,7 @@ use blade_controlhub::ui::theme::{
     SETTINGS_KEY_LISTEN_INTERVAL_MS, SETTINGS_LOADING_ICON_COLOR, SETTINGS_PADDING_RATIO,
     SETTINGS_WINDOW_SIZE, SETTINGS_WINDOW_TITLE,
 };
+use blade_controlhub::utils::log_file::{init_log_file_writer_for_child, set_cwd};
 use eframe::egui;
 use std::sync::{
     Arc,
@@ -18,10 +20,10 @@ use std::sync::{
 };
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tracing::warn;
+use tracing::{debug, info, warn};
 
 const SETTINGS_FRAME_INTERVAL: Duration = Duration::from_millis(16);
-const SETTINGS_STATE_RETRY_INTERVAL: Duration = Duration::from_millis(500);
+const SETTINGS_STATE_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
 
 struct SettingsApp {
     settings: SettingsStore,
@@ -85,6 +87,8 @@ impl SettingsApp {
                 SettingsCommand::SetPerfMode(profile, mode) => {
                     if let Err(error) = client::set_perf_mode(profile, mode) {
                         warn!(%error, "Failed to update performance mode");
+                        self.handle_failed_perf_mode_update(mode, ctx);
+                        command_sent = true;
                     } else {
                         command_sent = true;
                     }
@@ -142,8 +146,8 @@ impl SettingsApp {
 
         if command_sent || self.should_refresh_state() {
             self.refresh_settings_state(ctx);
-        } else if let Some(retry_after) = self.next_state_retry_after() {
-            ctx.request_repaint_after(retry_after);
+        } else if let Some(refresh_after) = self.next_state_refresh_after() {
+            ctx.request_repaint_after(refresh_after);
         }
     }
 
@@ -227,21 +231,15 @@ impl SettingsApp {
     }
 
     fn should_refresh_state(&self) -> bool {
-        !self.state_loaded
-            && self
-                .last_state_refresh
-                .is_none_or(|last_refresh| last_refresh.elapsed() >= SETTINGS_STATE_RETRY_INTERVAL)
+        self.last_state_refresh
+            .is_none_or(|last_refresh| last_refresh.elapsed() >= SETTINGS_STATE_REFRESH_INTERVAL)
     }
 
-    fn next_state_retry_after(&self) -> Option<Duration> {
-        if self.state_loaded {
-            return None;
-        }
-
+    fn next_state_refresh_after(&self) -> Option<Duration> {
         Some(
             self.last_state_refresh
                 .map(|last_refresh| {
-                    SETTINGS_STATE_RETRY_INTERVAL.saturating_sub(last_refresh.elapsed())
+                    SETTINGS_STATE_REFRESH_INTERVAL.saturating_sub(last_refresh.elapsed())
                 })
                 .unwrap_or(Duration::ZERO),
         )
@@ -253,9 +251,17 @@ impl SettingsApp {
             self.settings.update_state(state);
             self.state_loaded = true;
             ctx.request_repaint();
-        } else if let Some(retry_after) = self.next_state_retry_after() {
-            ctx.request_repaint_after(retry_after);
+        } else if let Some(refresh_after) = self.next_state_refresh_after() {
+            ctx.request_repaint_after(refresh_after);
         }
+    }
+
+    fn handle_failed_perf_mode_update(&mut self, mode: PerfMode, ctx: &egui::Context) {
+        self.settings.with_settings(|settings| {
+            settings.flash_unsupported_perf_mode(mode);
+        });
+        ctx.request_repaint();
+        ctx.request_repaint_after(Settings::unsupported_perf_mode_notice_duration());
     }
 
     fn pace_frame(&mut self) {
@@ -483,22 +489,52 @@ fn windows_icon_masks_and_bgra(
 }
 
 fn try_load_settings_state() -> Option<SettingsState> {
+    let started = Instant::now();
+    debug!("Loading settings state from Blade ControlHub runtime");
     match client::get_settings_state() {
-        Ok(state) => Some(state),
+        Ok(state) => {
+            info!(
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "Loaded settings state from Blade ControlHub runtime"
+            );
+            Some(state)
+        }
         Err(error) => {
-            warn!(%error, "Failed to load settings state from Blade ControlHub runtime");
+            warn!(
+                %error,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "Failed to load settings state from Blade ControlHub runtime"
+            );
             None
         }
     }
 }
 
 fn main() -> eframe::Result<()> {
+    let process_started = Instant::now();
+    if let Err(error) = set_cwd() {
+        eprintln!("Failed to set settings window working directory: {error}");
+    }
+    init_log_file_writer_for_child("Start Settings Window Session");
+    info!("Settings window process started");
+
     let initial_state = try_load_settings_state();
+    info!(
+        state_loaded = initial_state.is_some(),
+        elapsed_ms = process_started.elapsed().as_millis() as u64,
+        "Settings window initial state load completed"
+    );
+
+    let icon_started = Instant::now();
     let icon_data = Settings::load_settings_icon(
         initial_state
             .as_ref()
             .map(|state| state.theme_color)
             .unwrap_or(SETTINGS_LOADING_ICON_COLOR),
+    );
+    debug!(
+        elapsed_ms = icon_started.elapsed().as_millis() as u64,
+        "Loaded settings window icon"
     );
     let window_size = SETTINGS_WINDOW_SIZE;
 
@@ -512,17 +548,45 @@ fn main() -> eframe::Result<()> {
         .with_resizable(false)
         .with_maximize_button(false);
 
+    let monitor_started = Instant::now();
     if let Some(monitor) = pre_resolve_monitor_dimensions() {
+        debug!(
+            elapsed_ms = monitor_started.elapsed().as_millis() as u64,
+            "Resolved settings window spawn position"
+        );
         viewport = viewport.with_position(settings_spawn_position(monitor, window_size));
+    } else {
+        debug!(
+            elapsed_ms = monitor_started.elapsed().as_millis() as u64,
+            "Settings window spawn position was not pre-resolved"
+        );
     }
 
     native_options.viewport = viewport;
 
-    eframe::run_native(
+    info!(
+        elapsed_ms = process_started.elapsed().as_millis() as u64,
+        "Starting settings native window"
+    );
+    let result = eframe::run_native(
         SETTINGS_WINDOW_TITLE,
         native_options,
         Box::new(move |_cc| Box::new(SettingsApp::new(initial_state))),
-    )
+    );
+
+    match &result {
+        Ok(()) => info!(
+            elapsed_ms = process_started.elapsed().as_millis() as u64,
+            "Settings native window exited"
+        ),
+        Err(error) => warn!(
+            error = ?error,
+            elapsed_ms = process_started.elapsed().as_millis() as u64,
+            "Settings native window failed"
+        ),
+    }
+
+    result
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -602,6 +666,35 @@ mod tests {
         assert!(
             app.settings
                 .with_settings(|settings| settings.state.is_none() && settings.show)
+        );
+    }
+
+    #[test]
+    fn settings_app_refreshes_state_periodically_after_initial_load() {
+        let mut app = SettingsApp::new(Some(SettingsState::default()));
+        app.last_state_refresh = Some(Instant::now() - SETTINGS_STATE_REFRESH_INTERVAL);
+
+        assert!(app.should_refresh_state());
+    }
+
+    #[test]
+    fn settings_app_schedules_next_periodic_state_refresh_after_initial_load() {
+        let app = SettingsApp::new(Some(SettingsState::default()));
+
+        assert!(app.next_state_refresh_after().is_some());
+    }
+
+    #[test]
+    fn failed_perf_mode_update_flashes_unsupported_notice() {
+        let mut app = SettingsApp::new(Some(SettingsState::default()));
+        let ctx = egui::Context::default();
+
+        app.handle_failed_perf_mode_update(PerfMode::Performance, &ctx);
+
+        assert_eq!(
+            app.settings
+                .with_settings(|settings| settings.unsupported_perf_mode_message()),
+            Some("\"Performance\" mode not supported on device".to_string())
         );
     }
 

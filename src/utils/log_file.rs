@@ -17,7 +17,17 @@ pub fn set_cwd() -> crate::error::AppResult<()> {
 }
 
 pub fn init_log_file_writer() {
-    truncate_log_file();
+    init_log_file_writer_with_options("Start New Session", true);
+}
+
+pub fn init_log_file_writer_for_child(session_label: &str) {
+    init_log_file_writer_with_options(session_label, false);
+}
+
+fn init_log_file_writer_with_options(session_label: &str, truncate_existing: bool) {
+    if truncate_existing {
+        truncate_log_file();
+    }
 
     let builder = tracing_subscriber::fmt()
         .with_env_filter(
@@ -37,7 +47,7 @@ pub fn init_log_file_writer() {
         let _ = builder.with_writer(file_writer).try_init();
     }
 
-    info!("── Start New Session ───────────────────────────────────────────────────────");
+    info!("── {session_label} ───────────────────────────────────────────────────────");
 }
 
 pub fn truncate_log_file() {

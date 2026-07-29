@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::ThemeColor;
 use crate::razer::{
     config::{AppConfig, DeviceState, PowerProfile},
-    enums::{BATTERY_LIMITS, BatteryLimit, PerfMode, RGBEffect},
+    enums::{BatteryLimit, PerfMode, RGBEffect},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,16 +97,7 @@ impl Default for DeviceProfileState {
 
 impl Default for SettingsState {
     fn default() -> Self {
-        Self {
-            model_name: String::default(),
-            current_profile: PowerProfile::Ac,
-            ac_profile: DeviceProfileState::default(),
-            battery_profile: DeviceProfileState::default(),
-            battery_limit: BatteryLimit::Off,
-            battery_limits: BATTERY_LIMITS.to_vec(),
-            default_multimedia_keys: false,
-            theme_color: ThemeColor::default(),
-        }
+        AppConfig::default().into()
     }
 }
 

@@ -4,7 +4,7 @@
 use eframe::egui;
 
 use crate::razer::{
-    config::PowerProfile,
+    config::{PowerProfile, allowed_perf_modes},
     enums::{PerfMode, RGBEffect},
 };
 use crate::runtime::settings_state::DeviceProfileState;
@@ -56,10 +56,11 @@ fn performance_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut Se
         .as_ref()
         .map(|state| state.perf_mode)
         .unwrap_or(PerfMode::Unknown);
+    let unsupported_message = settings.unsupported_perf_mode_message();
 
     section_with_header(
         ui,
-        |ui| performance_header(ui, perf_mode),
+        |ui| performance_header(ui, perf_mode, unsupported_message.as_deref()),
         |ui| {
             let Some(profile_state) = profile_state else {
                 ui.label("Waiting for runtime state...");
@@ -67,11 +68,16 @@ fn performance_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut Se
             };
 
             ui.horizontal_wrapped(|ui| {
-                for mode in profile_state.perf_modes {
+                for mode in allowed_perf_modes(profile) {
+                    let mode = *mode;
                     let selected = mode == profile_state.perf_mode;
-                    if ui.selectable_label(selected, mode.to_string()).clicked() && !selected {
-                        set_perf_mode(settings, profile, mode);
-                        ctx.request_repaint_of(egui::ViewportId::ROOT);
+                    let available = profile_state.perf_modes.contains(&mode);
+                    if available {
+                        if ui.selectable_label(selected, mode.to_string()).clicked() && !selected {
+                            handle_perf_mode_click(settings, ctx, profile, &profile_state, mode);
+                        }
+                    } else if unsupported_perf_mode_button(ui, profile, mode).clicked() {
+                        handle_perf_mode_click(settings, ctx, profile, &profile_state, mode);
                     }
                 }
             });
@@ -184,13 +190,30 @@ fn section_with_header(
         });
 }
 
-fn performance_header(ui: &mut egui::Ui, perf_mode: PerfMode) {
+fn performance_header(ui: &mut egui::Ui, perf_mode: PerfMode, unsupported_message: Option<&str>) {
     ui.horizontal(|ui| {
         ui.label("Performance");
+        if let Some(message) = unsupported_message {
+            ui.label(egui::RichText::new(message).color(ui.visuals().warn_fg_color));
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(egui::RichText::new("⏺").color(perf_mode_color32(perf_mode)));
         });
     });
+}
+
+fn unsupported_perf_mode_button(
+    ui: &mut egui::Ui,
+    profile: PowerProfile,
+    mode: PerfMode,
+) -> egui::Response {
+    let disabled_response =
+        ui.add_enabled(false, egui::SelectableLabel::new(false, mode.to_string()));
+    ui.interact(
+        disabled_response.rect,
+        ui.make_persistent_id(format!("unsupported-perf-mode-{profile:?}-{mode:?}")),
+        egui::Sense::click(),
+    )
 }
 
 fn selected_profile_state(settings: &Settings) -> Option<DeviceProfileState> {
@@ -198,6 +221,47 @@ fn selected_profile_state(settings: &Settings) -> Option<DeviceProfileState> {
         .state
         .as_ref()
         .map(|state| state.profile(settings.selected_profile).clone())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PerfModeClickAction {
+    None,
+    Set,
+    UnsupportedNotice,
+}
+
+fn perf_mode_click_action(
+    profile_state: &DeviceProfileState,
+    mode: PerfMode,
+) -> PerfModeClickAction {
+    if !profile_state.perf_modes.contains(&mode) {
+        PerfModeClickAction::UnsupportedNotice
+    } else if mode == profile_state.perf_mode {
+        PerfModeClickAction::None
+    } else {
+        PerfModeClickAction::Set
+    }
+}
+
+fn handle_perf_mode_click(
+    settings: &mut Settings,
+    ctx: &egui::Context,
+    profile: PowerProfile,
+    profile_state: &DeviceProfileState,
+    mode: PerfMode,
+) {
+    match perf_mode_click_action(profile_state, mode) {
+        PerfModeClickAction::None => {}
+        PerfModeClickAction::Set => {
+            set_perf_mode(settings, profile, mode);
+            ctx.request_repaint_of(egui::ViewportId::ROOT);
+        }
+        PerfModeClickAction::UnsupportedNotice => {
+            settings.flash_unsupported_perf_mode(mode);
+            ctx.request_repaint_of(egui::ViewportId::ROOT);
+            ctx.request_repaint_after(Settings::unsupported_perf_mode_notice_duration());
+        }
+    }
 }
 
 fn set_perf_mode(settings: &mut Settings, profile: PowerProfile, mode: PerfMode) {
@@ -243,7 +307,7 @@ fn set_under_glow(settings: &mut Settings, profile: PowerProfile, enabled: bool)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::razer::config::AppConfig;
+    use crate::razer::config::{AppConfig, PowerProfile};
     use crate::runtime::settings_state::SettingsState;
 
     #[test]
@@ -335,6 +399,67 @@ mod tests {
         assert_eq!(
             settings.drain_commands(),
             vec![SettingsCommand::SetUnderGlow(PowerProfile::Battery, false)]
+        );
+    }
+
+    #[test]
+    fn perf_mode_click_action_sets_available_unselected_mode() {
+        let mut state = SettingsState::from(AppConfig::default());
+        state.ac_profile.perf_mode = PerfMode::Silent;
+
+        assert_eq!(
+            perf_mode_click_action(&state.ac_profile, PerfMode::Balanced),
+            PerfModeClickAction::Set
+        );
+    }
+
+    #[test]
+    fn perf_mode_click_action_ignores_selected_mode() {
+        let state = SettingsState::from(AppConfig::default());
+
+        assert_eq!(
+            perf_mode_click_action(&state.ac_profile, PerfMode::Balanced),
+            PerfModeClickAction::None
+        );
+    }
+
+    #[test]
+    fn perf_mode_click_action_reports_pruned_mode_as_unsupported() {
+        let mut state = SettingsState::from(AppConfig::default());
+        state
+            .ac_profile
+            .perf_modes
+            .retain(|mode| *mode != PerfMode::Performance);
+
+        assert_eq!(
+            perf_mode_click_action(&state.ac_profile, PerfMode::Performance),
+            PerfModeClickAction::UnsupportedNotice
+        );
+    }
+
+    #[test]
+    fn unsupported_perf_mode_click_flashes_notice_without_queuing_command() {
+        let mut settings = Settings::new();
+        let mut state = SettingsState::from(AppConfig::default());
+        state
+            .ac_profile
+            .perf_modes
+            .retain(|mode| *mode != PerfMode::Performance);
+        settings.show(state.clone());
+        let ctx = egui::Context::default();
+
+        handle_perf_mode_click(
+            &mut settings,
+            &ctx,
+            PowerProfile::Ac,
+            &state.ac_profile,
+            PerfMode::Performance,
+        );
+
+        assert!(settings.drain_commands().is_empty());
+        assert_eq!(
+            settings.unsupported_perf_mode_message(),
+            Some("\"Performance\" mode not supported".to_string())
         );
     }
 }

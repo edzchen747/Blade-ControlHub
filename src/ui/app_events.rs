@@ -31,7 +31,7 @@ impl OsdEvent {
     pub fn as_params(&self) -> Option<OsdParams> {
         match self {
             OsdEvent::Startup => Some(OsdParams {
-                label: "Razer\nControlHub".to_string(),
+                label: "ControlHub".to_string(),
                 icon: Some(OsdIcon::RazerControlHub),
                 total_steps: 0,
                 active_steps: 0,
@@ -152,7 +152,7 @@ mod tests {
     fn startup_event_maps_to_canonical_controlhub_osd() {
         let params = OsdEvent::Startup.as_params().expect("startup has OSD");
 
-        assert_eq!(params.label, "Razer\nControlHub");
+        assert_eq!(params.label, "ControlHub");
         assert_eq!(params.icon, Some(OsdIcon::RazerControlHub));
         assert_eq!(params.total_steps, 0);
         assert_eq!(params.active_steps, 0);

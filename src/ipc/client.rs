@@ -2,6 +2,7 @@ use std::io;
 use std::ptr::null_mut;
 use std::thread;
 use std::time::{Duration, Instant};
+use tracing::{debug, info, warn};
 
 use windows_sys::Win32::Foundation::ERROR_PIPE_BUSY;
 use windows_sys::Win32::Storage::FileSystem::{
@@ -85,12 +86,77 @@ pub fn poll_captured_razer_key(after_sequence: u64) -> AppResult<Option<RazerKey
 }
 
 pub fn send_request(request: IpcRequest) -> AppResult<IpcResponse> {
-    let pipe = connect()?;
-    write_json_frame(&pipe, &request)?;
-    let response = read_json_frame(&pipe)?;
+    let started = Instant::now();
+    let request_kind = ipc_request_kind(&request);
+    debug!(request = request_kind, "Sending IPC request");
+
+    let connect_started = Instant::now();
+    let pipe = match connect() {
+        Ok(pipe) => {
+            debug!(
+                request = request_kind,
+                elapsed_ms = connect_started.elapsed().as_millis() as u64,
+                "Connected IPC pipe"
+            );
+            pipe
+        }
+        Err(error) => {
+            warn!(
+                request = request_kind,
+                elapsed_ms = connect_started.elapsed().as_millis() as u64,
+                "Failed to connect IPC pipe"
+            );
+            return Err(error.into());
+        }
+    };
+
+    if let Err(error) = write_json_frame(&pipe, &request) {
+        warn!(
+            request = request_kind,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "Failed to write IPC request"
+        );
+        return Err(error.into());
+    }
+
+    let response = match read_json_frame(&pipe) {
+        Ok(response) => response,
+        Err(error) => {
+            warn!(
+                request = request_kind,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "Failed to read IPC response"
+            );
+            return Err(error.into());
+        }
+    };
+
+    info!(
+        request = request_kind,
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "Completed IPC request"
+    );
+
     match response {
         IpcResponse::Error { message } => Err(AppError::Internal(message)),
         response => Ok(response),
+    }
+}
+
+fn ipc_request_kind(request: &IpcRequest) -> &'static str {
+    match request {
+        IpcRequest::GetSettingsState => "GetSettingsState",
+        IpcRequest::SetDefaultMultimediaKeys { .. } => "SetDefaultMultimediaKeys",
+        IpcRequest::SetPerfMode { .. } => "SetPerfMode",
+        IpcRequest::SetRefreshRate { .. } => "SetRefreshRate",
+        IpcRequest::SetKeyboardBrightness { .. } => "SetKeyboardBrightness",
+        IpcRequest::SetRgbEffect { .. } => "SetRgbEffect",
+        IpcRequest::SetUnderGlow { .. } => "SetUnderGlow",
+        IpcRequest::SetBatteryLimit { .. } => "SetBatteryLimit",
+        IpcRequest::SetThemeColor { .. } => "SetThemeColor",
+        IpcRequest::BeginRazerKeyCapture { .. } => "BeginRazerKeyCapture",
+        IpcRequest::CancelRazerKeyCapture => "CancelRazerKeyCapture",
+        IpcRequest::PollCapturedRazerKey { .. } => "PollCapturedRazerKey",
     }
 }
 

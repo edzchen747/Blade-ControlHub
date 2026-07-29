@@ -1,9 +1,10 @@
 use std::path::PathBuf;
 use std::process::{Child, Command, ExitStatus};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
+use std::time::Instant;
 
 use crate::razer::device_handle::{DeviceHandle, device, stop_device_channel_monitor};
-use crate::ui::app_events::AppEvent::{self, OsdEvent};
+use crate::ui::app_events::{AppEvent, OsdEvent};
 use crate::ui::event_dispatcher::{EventDispatcher, SideEffect};
 use crate::ui::osd_controller::OsdController;
 use crate::ui::settings::store::SettingsStore;
@@ -15,7 +16,7 @@ use crate::win::input::stop_keyboard_hooks;
 use crate::win::system::display_gpu::GpuDisplayMonitor;
 use crate::win::system::power::PowerMonitor;
 use crate::win::system::standby::StandbyMonitor;
-use tracing::warn;
+use tracing::{debug, info, warn};
 
 // ── Global Context ───────────────────────────────────────────────────────────
 
@@ -102,7 +103,7 @@ pub fn app(event: AppEvent) {
 
     // 3. Process standalone On-Screen Display Overlay parameters via static invocation
     let osd_params = match event {
-        OsdEvent(osd_event) => osd_event.as_params(),
+        AppEvent::OsdEvent(osd_event) => osd_event.as_params(),
         _ => None,
     };
     if let Some(osd_params) = osd_params {
@@ -111,6 +112,39 @@ pub fn app(event: AppEvent) {
             OsdController::show(osd_params);
         }
     }
+}
+
+pub fn set_osd_enabled(enabled: bool) {
+    app(OsdEvent::EnableOSD(enabled).into());
+}
+
+pub struct OsdDisableGuard;
+
+impl OsdDisableGuard {
+    pub fn new() -> Self {
+        set_osd_enabled(false);
+        Self
+    }
+}
+
+impl Default for OsdDisableGuard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for OsdDisableGuard {
+    fn drop(&mut self) {
+        set_osd_enabled(true);
+    }
+}
+
+#[macro_export]
+macro_rules! disable_osd {
+    ($($body:tt)*) => {{
+        let _osd_disable_guard = $crate::ui::app::OsdDisableGuard::new();
+        { $($body)* }
+    }};
 }
 
 pub fn init() {
@@ -183,7 +217,26 @@ fn shutdown_runtime(ctx: &AppContext, reason: &str) {
 }
 
 fn open_or_toggle_settings(ctx: &AppContext) {
-    let settings_state = ctx.device.get_settings_state().unwrap_or_default();
+    let total_started = Instant::now();
+    let state_started = Instant::now();
+    debug!("Loading settings state before launching settings window");
+    let settings_state = match ctx.device.get_settings_state() {
+        Ok(state) => {
+            info!(
+                elapsed_ms = state_started.elapsed().as_millis() as u64,
+                "Loaded settings state before launching settings window"
+            );
+            state
+        }
+        Err(error) => {
+            warn!(
+                %error,
+                elapsed_ms = state_started.elapsed().as_millis() as u64,
+                "Failed to load settings state before launching settings window; using defaults"
+            );
+            Default::default()
+        }
+    };
 
     {
         let core = core(ctx);
@@ -192,6 +245,10 @@ fn open_or_toggle_settings(ctx: &AppContext) {
 
     let mut active_ui_process = active_ui_process();
     if close_running_settings_process_if_present(&mut active_ui_process) {
+        info!(
+            elapsed_ms = total_started.elapsed().as_millis() as u64,
+            "Closed running settings window process"
+        );
         return;
     }
 
@@ -203,9 +260,29 @@ fn open_or_toggle_settings(ctx: &AppContext) {
         }
     };
 
-    match Command::new(settings_exe).spawn() {
-        Ok(child) => *active_ui_process = Some(child),
-        Err(error) => warn!(%error, "Failed to launch settings window"),
+    let spawn_started = Instant::now();
+    info!(
+        path = ?settings_exe,
+        elapsed_ms = total_started.elapsed().as_millis() as u64,
+        "Launching settings window process"
+    );
+    match Command::new(&settings_exe).spawn() {
+        Ok(child) => {
+            info!(
+                pid = child.id(),
+                spawn_elapsed_ms = spawn_started.elapsed().as_millis() as u64,
+                total_elapsed_ms = total_started.elapsed().as_millis() as u64,
+                "Settings window process spawned"
+            );
+            *active_ui_process = Some(child);
+        }
+        Err(error) => warn!(
+            %error,
+            path = ?settings_exe,
+            spawn_elapsed_ms = spawn_started.elapsed().as_millis() as u64,
+            total_elapsed_ms = total_started.elapsed().as_millis() as u64,
+            "Failed to launch settings window"
+        ),
     }
 }
 
@@ -271,7 +348,7 @@ fn settings_executable_path() -> std::io::Result<PathBuf> {
 }
 
 fn settings_executable_path_from(current_exe: PathBuf) -> PathBuf {
-    let file_name = format!("blade_settings{}", std::env::consts::EXE_SUFFIX);
+    let file_name = format!("blade-settings{}", std::env::consts::EXE_SUFFIX);
     current_exe.with_file_name(file_name)
 }
 
@@ -289,7 +366,7 @@ mod tests {
         assert_eq!(
             path,
             Path::new(r"C:\Tools\Blade\target\debug")
-                .join(format!("blade_settings{}", std::env::consts::EXE_SUFFIX))
+                .join(format!("blade-settings{}", std::env::consts::EXE_SUFFIX))
         );
     }
 }

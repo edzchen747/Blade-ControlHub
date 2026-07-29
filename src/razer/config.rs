@@ -72,6 +72,53 @@ impl<T: Clone + PartialEq + Default> CycleState<T> {
         }
     }
 
+    pub fn remove(&mut self, value: &T) -> bool {
+        let Some(pos) = self.items.iter().position(|x| x == value) else {
+            return false;
+        };
+
+        self.items.remove(pos);
+        if self.items.is_empty() {
+            self.index = 0;
+        } else if pos < self.index {
+            self.index -= 1;
+        } else if self.index >= self.items.len() {
+            self.index = 0;
+        }
+
+        true
+    }
+
+    pub fn remove_for_cycle_retry(&mut self, value: &T) -> bool {
+        let Some(pos) = self.items.iter().position(|x| x == value) else {
+            return false;
+        };
+        let reverse = SHIFT_PRESSED.load(Ordering::SeqCst);
+
+        self.items.remove(pos);
+        if self.items.is_empty() {
+            self.index = 0;
+            return true;
+        }
+
+        let next_candidate_pos = if reverse {
+            pos.checked_sub(1).unwrap_or_else(|| self.items.len() - 1)
+        } else if pos >= self.items.len() {
+            0
+        } else {
+            pos
+        };
+        self.index = if reverse {
+            (next_candidate_pos + 1) % self.items.len()
+        } else {
+            next_candidate_pos
+                .checked_sub(1)
+                .unwrap_or_else(|| self.items.len() - 1)
+        };
+
+        true
+    }
+
     fn normalized_index(&self) -> usize {
         if self.index < self.items.len() {
             self.index
@@ -110,6 +157,22 @@ impl Default for DeviceState {
     }
 }
 
+impl DeviceState {
+    fn for_profile(profile: PowerProfile) -> Self {
+        let mut perf_mode = CycleState::new(allowed_perf_modes(profile).to_vec());
+        let default_mode = match profile {
+            PowerProfile::Ac => PerfMode::Balanced,
+            PowerProfile::Battery => PerfMode::Silent,
+        };
+        let _ = perf_mode.set(&default_mode);
+
+        Self {
+            perf_mode,
+            ..Self::default()
+        }
+    }
+}
+
 fn default_rgb_effect() -> CycleState<RGBEffect> {
     CycleState::new(RGB_EFFECTS.to_vec())
 }
@@ -142,8 +205,8 @@ impl Default for AppConfig {
         Self {
             model_pid: String::default(),
             model_name: String::default(),
-            power_state: DeviceState::default(),
-            battery_state: DeviceState::default(),
+            power_state: DeviceState::for_profile(PowerProfile::Ac),
+            battery_state: DeviceState::for_profile(PowerProfile::Battery),
             battery_limit: CycleState {
                 index: 0,
                 items: BATTERY_LIMITS.to_vec(),
@@ -152,6 +215,25 @@ impl Default for AppConfig {
             theme_color: ThemeColor::default(),
             keyboard_width: 0,
         }
+    }
+}
+
+pub fn allowed_perf_modes(profile: PowerProfile) -> &'static [PerfMode] {
+    match profile {
+        PowerProfile::Ac => &[
+            PerfMode::Silent,
+            PerfMode::Quiet,
+            PerfMode::Balanced,
+            PerfMode::Performance,
+            PerfMode::Turbo,
+            PerfMode::Custom,
+        ],
+        PowerProfile::Battery => &[
+            PerfMode::BatterySaver,
+            PerfMode::Silent,
+            PerfMode::Quiet,
+            PerfMode::Balanced,
+        ],
     }
 }
 
@@ -194,14 +276,22 @@ impl AppConfig {
     /// they are available even when loading an older config file.
     pub fn refresh_cycle_items(&mut self) {
         self.power_state.rgb_effect.items = RGB_EFFECTS.to_vec();
-        self.power_state.perf_mode.items = PERF_MODES.to_vec();
+        refresh_perf_mode_items(&mut self.power_state, PowerProfile::Ac);
         self.battery_state.rgb_effect.items = RGB_EFFECTS.to_vec();
-        self.battery_state.perf_mode.items = PERF_MODES.to_vec();
+        refresh_perf_mode_items(&mut self.battery_state, PowerProfile::Battery);
     }
 
     pub fn set_device_model(&mut self, pid: String, name: String) {
         self.model_pid = pid;
         self.model_name = name;
+    }
+}
+
+fn refresh_perf_mode_items(state: &mut DeviceState, profile: PowerProfile) {
+    let current_mode = state.perf_mode.value();
+    state.perf_mode.items = allowed_perf_modes(profile).to_vec();
+    if state.perf_mode.set(&current_mode).is_err() {
+        let _ = state.perf_mode.set(&PerfMode::Balanced);
     }
 }
 
@@ -238,7 +328,7 @@ mod tests {
     }
 
     #[test]
-    fn default_perf_mode_remains_balanced() {
+    fn default_perf_mode_is_profile_specific() {
         let mut config = AppConfig::default();
 
         assert_eq!(
@@ -247,7 +337,63 @@ mod tests {
         );
         assert_eq!(
             config.profile_mut(PowerProfile::Battery).perf_mode.value(),
+            PerfMode::Silent
+        );
+    }
+
+    #[test]
+    fn refresh_cycle_items_uses_profile_specific_perf_modes() {
+        let config = AppConfig::default();
+
+        assert_eq!(
+            config.profile(PowerProfile::Ac).perf_mode.items,
+            allowed_perf_modes(PowerProfile::Ac).to_vec()
+        );
+        assert_eq!(
+            config.profile(PowerProfile::Battery).perf_mode.items,
+            allowed_perf_modes(PowerProfile::Battery).to_vec()
+        );
+    }
+
+    #[test]
+    fn refresh_cycle_items_preserves_allowed_perf_mode_by_value() {
+        let mut config = AppConfig::default();
+        config
+            .profile_mut(PowerProfile::Ac)
+            .perf_mode
+            .set(&PerfMode::Turbo)
+            .expect("turbo is allowed on AC");
+
+        config.refresh_cycle_items();
+
+        assert_eq!(
+            config.profile_mut(PowerProfile::Ac).perf_mode.value(),
+            PerfMode::Turbo
+        );
+    }
+
+    #[test]
+    fn refresh_cycle_items_falls_back_to_balanced_when_mode_is_disallowed() {
+        let mut config = AppConfig::default();
+        config.power_state.perf_mode.items = PERF_MODES.to_vec();
+        config
+            .power_state
+            .perf_mode
+            .set(&PerfMode::BatterySaver)
+            .expect("test list contains battery saver");
+
+        config.refresh_cycle_items();
+
+        assert_eq!(
+            config.profile_mut(PowerProfile::Ac).perf_mode.value(),
             PerfMode::Balanced
+        );
+        assert!(
+            !config
+                .profile(PowerProfile::Ac)
+                .perf_mode
+                .items
+                .contains(&PerfMode::BatterySaver)
         );
     }
 }

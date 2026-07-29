@@ -98,8 +98,14 @@ impl<'a> KeyboardHandler<'a> {
         }
 
         let mut args = vec![rgb_effect as u8, 0];
+
         if rgb_effect == RGBEffect::Reactive {
-            args = vec![rgb_effect as u8, 0, 32, 255, 255, 255];
+            args = vec![rgb_effect as u8, 0, 32];
+            args.extend([
+                self.app_config.theme_color.r,
+                self.app_config.theme_color.g,
+                self.app_config.theme_color.b,
+            ]);
         }
         let _ = command(self.device, 0x030a, &args, None);
 

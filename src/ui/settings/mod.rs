@@ -2,7 +2,7 @@ use eframe::egui::{self};
 use egui::Context;
 use resvg::{tiny_skia, usvg};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::warn;
 
 use crate::config::ThemeColor;
@@ -21,6 +21,8 @@ mod device_tab;
 mod key_mapping_tab;
 mod settings_tab;
 pub mod store;
+
+const UNSUPPORTED_PERF_MODE_NOTICE_DURATION: Duration = Duration::from_millis(2000);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SettingsCommand {
@@ -46,6 +48,12 @@ pub struct Settings {
     pub custom_key_map: CustomKeyMap,
     applied_icon_color: Option<ThemeColor>,
     pending_commands: Vec<SettingsCommand>,
+    unsupported_perf_mode_notice: Option<UnsupportedPerfModeNotice>,
+}
+
+struct UnsupportedPerfModeNotice {
+    mode: PerfMode,
+    shown_at: Instant,
 }
 
 impl Settings {
@@ -60,6 +68,7 @@ impl Settings {
             custom_key_map: CustomKeyMap::new(),
             applied_icon_color: None,
             pending_commands: Vec::new(),
+            unsupported_perf_mode_notice: None,
         }
     }
 
@@ -106,6 +115,27 @@ impl Settings {
             row.key_code = key_code;
             self.custom_key_map.set_listening_idx(None);
         }
+    }
+
+    pub fn flash_unsupported_perf_mode(&mut self, mode: PerfMode) {
+        self.unsupported_perf_mode_notice = Some(UnsupportedPerfModeNotice {
+            mode,
+            shown_at: Instant::now(),
+        });
+    }
+
+    pub fn unsupported_perf_mode_message(&mut self) -> Option<String> {
+        let notice = self.unsupported_perf_mode_notice.as_ref()?;
+        if notice.shown_at.elapsed() >= UNSUPPORTED_PERF_MODE_NOTICE_DURATION {
+            self.unsupported_perf_mode_notice = None;
+            return None;
+        }
+
+        Some(format!("\"{}\" mode not supported", notice.mode))
+    }
+
+    pub fn unsupported_perf_mode_notice_duration() -> Duration {
+        UNSUPPORTED_PERF_MODE_NOTICE_DURATION
     }
 
     // Note: The redundant pub fn run(...) has been removed entirely!
@@ -163,10 +193,10 @@ impl Settings {
         let opt = usvg::Options::default();
         let hex_color = color.to_hex_string();
 
-        let coloured_svg = include_str!("../../../assets/settings_icon.svg")
+        let colored_svg = include_str!("../../../assets/settings_icon.svg")
             .replace("#FFFFFF", &hex_color)
             .replace("#ffffff", &hex_color.to_lowercase());
-        let tree = match usvg::Tree::from_str(&coloured_svg, &opt) {
+        let tree = match usvg::Tree::from_str(&colored_svg, &opt) {
             Ok(tree) => tree,
             Err(error) => {
                 warn!(
@@ -277,6 +307,7 @@ impl Default for Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::razer::config::AppConfig;
 
     #[test]
     fn settings_icon_renderer_honors_requested_native_size() {
@@ -301,5 +332,62 @@ mod tests {
             red_pixels > 0,
             "settings icon should contain red themed pixels"
         );
+    }
+
+    #[test]
+    fn unsupported_perf_mode_notice_mentions_selected_mode() {
+        let mut settings = Settings::new();
+
+        settings.flash_unsupported_perf_mode(PerfMode::Performance);
+
+        assert_eq!(
+            settings.unsupported_perf_mode_message(),
+            Some("\"Performance\" mode not supported".to_string())
+        );
+    }
+
+    #[test]
+    fn unsupported_perf_mode_notice_expires() {
+        let mut settings = Settings::new();
+        settings.unsupported_perf_mode_notice = Some(UnsupportedPerfModeNotice {
+            mode: PerfMode::Turbo,
+            shown_at: Instant::now() - UNSUPPORTED_PERF_MODE_NOTICE_DURATION,
+        });
+
+        assert_eq!(settings.unsupported_perf_mode_message(), None);
+        assert!(settings.unsupported_perf_mode_notice.is_none());
+    }
+
+    #[test]
+    fn update_state_reflects_runtime_perf_mode_changes() {
+        let mut settings = Settings::new();
+        let mut initial = SettingsState::from(AppConfig::default());
+        initial.ac_profile.perf_mode = PerfMode::Silent;
+        settings.show(initial);
+
+        let mut refreshed = SettingsState::from(AppConfig::default());
+        refreshed.ac_profile.perf_mode = PerfMode::Turbo;
+        settings.update_state(refreshed);
+
+        assert_eq!(
+            settings
+                .state
+                .as_ref()
+                .expect("settings state should be present")
+                .ac_profile
+                .perf_mode,
+            PerfMode::Turbo
+        );
+    }
+
+    #[test]
+    fn update_state_preserves_user_selected_profile_after_runtime_refresh() {
+        let mut settings = Settings::new();
+        settings.show(SettingsState::from(AppConfig::default()));
+        settings.selected_profile = PowerProfile::Battery;
+
+        settings.update_state(SettingsState::from(AppConfig::default()));
+
+        assert_eq!(settings.selected_profile, PowerProfile::Battery);
     }
 }

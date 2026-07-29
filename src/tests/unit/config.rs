@@ -1,8 +1,8 @@
 //! Tests for `AppConfig` default values, JSON deserialization/serialization,
 //! and `refresh_cycle_items()`.
 
-use crate::razer::config::AppConfig;
-use crate::razer::enums::BatteryLimit;
+use crate::razer::config::{AppConfig, PowerProfile, allowed_perf_modes};
+use crate::razer::enums::{BatteryLimit, PerfMode};
 
 // ── Default values ───────────────────────────────────────────────────────────
 
@@ -25,6 +25,34 @@ fn app_config_default_battery_limit_value_is_off() {
 fn app_config_default_multimedia_keys_is_false() {
     let config = AppConfig::default();
     assert!(!config.default_multimedia_keys);
+}
+
+#[test]
+fn app_config_default_perf_cycle_lists_are_profile_specific() {
+    let config = AppConfig::default();
+
+    assert_eq!(
+        config.profile(PowerProfile::Ac).perf_mode.items,
+        allowed_perf_modes(PowerProfile::Ac).to_vec()
+    );
+    assert_eq!(
+        config.profile(PowerProfile::Battery).perf_mode.items,
+        allowed_perf_modes(PowerProfile::Battery).to_vec()
+    );
+}
+
+#[test]
+fn app_config_default_perf_cycle_modes_are_profile_specific() {
+    let mut config = AppConfig::default();
+
+    assert_eq!(
+        config.profile_mut(PowerProfile::Ac).perf_mode.value(),
+        PerfMode::Balanced
+    );
+    assert_eq!(
+        config.profile_mut(PowerProfile::Battery).perf_mode.value(),
+        PerfMode::Silent
+    );
 }
 
 // ── JSON Deserialization (mirrors load_config behaviour) ──────────────────────

@@ -459,7 +459,7 @@ impl ColorEngine {
             };
             self.smooth_rgb = lerp_color(self.smooth_rgb, (tr, tg, tb), factor);
         } else {
-            // If no colours, set keyboard light to black (2) or grey (130)
+            // If no colors, set keyboard light to black (2) or grey (130)
             let v = 2 + !analysis.black_screen as u8 * 128;
             self.smooth_rgb = lerp_color(self.smooth_rgb, (v, v, v), LERP_BRIGHT_FACTOR);
         }
