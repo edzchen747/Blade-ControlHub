@@ -24,13 +24,10 @@ pub mod custom_key_map;
 pub mod event_dispatcher;
 pub mod icons;
 pub mod layout;
-pub mod osd;
-pub mod osd_animation;
+pub mod osd_controller;
 pub mod settings;
 pub mod theme;
 pub mod tray;
-mod tray_icon_module;
-mod tray_menu;
 
 /// Re-exports for external consumers.
 /// Use `ui::prelude::*` to import all public UI types.
@@ -40,10 +37,10 @@ mod tray_menu;
 #[allow(unused_imports)]
 pub mod prelude {
     // App orchestration
-    pub use crate::ui::app::{AppContext, AppHandle, app};
+    pub use crate::ui::app::{AppContext, app};
 
     // Event types
-    pub use crate::ui::app_events::{AppEvent, OsdEvent, OsdResponse};
+    pub use crate::ui::app_events::{AppEvent, OsdEvent};
 
     // Key mapping domain model
     pub use crate::ui::custom_key_map::{CustomKeyMap, FuncKeyMap, RazerKeyMap};
@@ -52,13 +49,13 @@ pub mod prelude {
     pub use crate::ui::event_dispatcher::EventDispatcher;
 
     // Icon registry
-    pub use crate::ui::icons::OsdIconId;
+    pub use crate::ui::icons::OsdIcon;
 
     // Layout constants
     pub use crate::ui::layout::*;
 
     // On-screen display
-    pub use crate::ui::osd::Osd;
+    pub use crate::ui::osd_controller::OsdController;
 
     // Settings persistence
     pub use crate::ui::settings::store::SettingsStore;
@@ -67,5 +64,5 @@ pub mod prelude {
     pub use crate::ui::theme::*;
 
     // Tray
-    pub use crate::ui::tray::{build_tray_icon, set_perf_mode_icon};
+    pub use crate::ui::tray::TrayManager;
 }

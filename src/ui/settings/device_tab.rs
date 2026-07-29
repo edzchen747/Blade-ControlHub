@@ -4,6 +4,7 @@
 use eframe::egui;
 
 use super::Settings;
+use crate::razer::device_handle::device;
 use crate::ui::app::app;
 use crate::ui::app_events::OsdEvent;
 
@@ -28,11 +29,10 @@ pub(super) fn default_func_key_switcher(
                 .changed();
         }
         if changed {
-            let mode = app()
-                .device
+            let mode = device()
                 .toggle_default_multimedia_keys()
                 .unwrap_or_default();
-            app().send(OsdEvent::ToggleDefaultMultimediaKeys(mode).into());
+            app(OsdEvent::ToggleDefaultMultimediaKeys(mode).into());
             ctx.request_repaint_of(egui::ViewportId::ROOT);
         }
     });

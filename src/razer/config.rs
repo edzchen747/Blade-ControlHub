@@ -99,6 +99,7 @@ fn default_perf_mode() -> CycleState<PerfMode> {
 #[serde(default)]
 pub struct AppConfig {
     model_pid: String,
+    pub model_name: String,
     power_state: DeviceState,
     battery_state: DeviceState,
     pub battery_limit: CycleState<BatteryLimit>,
@@ -110,6 +111,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             model_pid: String::default(),
+            model_name: String::default(),
             power_state: DeviceState::default(),
             battery_state: DeviceState::default(),
             battery_limit: CycleState {

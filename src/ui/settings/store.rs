@@ -13,7 +13,7 @@ use crate::razer::config::AppConfig;
 
 #[derive(Clone)]
 pub struct SettingsStore {
-    inner: Arc<Mutex<Settings>>,
+    pub inner: Arc<Mutex<Settings>>,
 }
 
 impl SettingsStore {
@@ -55,10 +55,5 @@ impl SettingsStore {
     /// Sets a captured Razer key code in the currently listening slot.
     pub fn set_razer_key_code(&self, key_code: u8) {
         self.inner.lock().unwrap().custom_key_map.special_key = Some(key_code);
-    }
-
-    /// Runs the settings viewport. This is called from the main app `update()`.
-    pub fn run(&self, ctx: &egui::Context) {
-        Settings::run(ctx, self.inner.clone());
     }
 }

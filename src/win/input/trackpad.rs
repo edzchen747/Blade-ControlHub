@@ -28,5 +28,5 @@ pub fn get_trackpad_state() -> bool {
 
 pub fn toggle_trackpad() {
     KeyCombo::new(&[Key::MetaLeft, Key::ControlLeft, Key::Unknown(135)]).trigger();
-    app().send(OsdEvent::Trackpad(get_trackpad_state()).into());
+    app(OsdEvent::Trackpad(get_trackpad_state()).into());
 }

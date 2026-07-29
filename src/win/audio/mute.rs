@@ -25,7 +25,7 @@ pub fn toggle_audio_mute(io: AudioType) {
                     warn!(endpoint = ?io, error = ?err, "Failed to set endpoint mute");
                 }
                 if io == AudioType::Mic {
-                    app().send(OsdEvent::MicMute(bool::from(!current_mute)).into());
+                    app(OsdEvent::MicMute(bool::from(!current_mute)).into());
                 }
             } else {
                 warn!(endpoint = ?io, "Failed to read endpoint mute state");

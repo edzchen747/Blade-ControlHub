@@ -13,7 +13,7 @@ pub fn cycle_gpu() {
 
         const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-        app().send(OsdEvent::CloseGPUApps(false).into());
+        app(OsdEvent::CloseGPUApps(false).into());
         let _ = Command::new("powershell")
             .args([
                 "-NoProfile",
@@ -24,6 +24,6 @@ pub fn cycle_gpu() {
             ])
             .creation_flags(CREATE_NO_WINDOW)
             .output();
-        app().send(OsdEvent::CloseGPUApps(true).into());
+        app(OsdEvent::CloseGPUApps(true).into());
     });
 }

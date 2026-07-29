@@ -48,7 +48,7 @@ impl<'a> BatteryHandler<'a> {
         let current_limit = self.app_config.battery_limit.value();
         let index = self.app_config.battery_limit.index;
         let length = self.app_config.battery_limit.items.len() - 1;
-        app().send(OsdEvent::BatteryLimit(current_limit as u8, index as u8, length as u8).into());
+        app(OsdEvent::BatteryLimit(current_limit as u8, index as u8, length as u8).into());
         *self.battery_cycle_timeout =
             Instant::now() + Duration::from_millis(TOTAL_ANIM_TIME_MS as u64);
     }

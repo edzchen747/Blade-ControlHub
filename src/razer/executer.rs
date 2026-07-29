@@ -9,6 +9,8 @@ use crate::razer::handlers::{
 use crate::razer::protocol::command;
 use crate::ui::app::app;
 use crate::ui::app_events::OsdEvent;
+use crate::ui::icons::OsdIcon;
+use crate::ui::osd_controller::{OsdController, OsdParams};
 use crate::utils::persist::PersistBuffer;
 use crate::win::display::ambient::AmbientEffect;
 use crate::win::display::brightness::BrightnessWorker;
@@ -129,7 +131,7 @@ impl<'a> Executer<'a> {
     fn initialize(&mut self, notify_startup: bool) {
         // Suppress disk flushes and UI notifications during init
         PersistBuffer::disable();
-        app().send(OsdEvent::EnableOSD(false).into());
+        app(OsdEvent::EnableOSD(false).into());
 
         let mut state = self.app_config.read();
 
@@ -157,9 +159,15 @@ impl<'a> Executer<'a> {
         }
 
         // Restore UI notifications and disk writes
-        app().send(OsdEvent::EnableOSD(true).into());
+        app(OsdEvent::EnableOSD(true).into());
         if notify_startup {
-            app().send(OsdEvent::Startup.into());
+            OsdController::show(OsdParams {
+                label: "RazeControlHub".to_string(),
+                total_steps: 0,
+                active_steps: 0,
+                icon: Some(OsdIcon::RazerControlHub),
+            });
+            app(OsdEvent::Startup.into());
         }
         PersistBuffer::enable();
 

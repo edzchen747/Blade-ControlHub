@@ -52,7 +52,7 @@ impl<'a> PerformanceHandler<'a> {
         let perf_mode: PerfMode = command(self.device, 0x0d82, &[0, 0, 0, 0], Some(2))
             .unwrap_or(0)
             .into();
-        app().send(OsdEvent::PerfMode(perf_mode).into());
+        app(OsdEvent::PerfMode(perf_mode).into());
         perf_mode
     }
 

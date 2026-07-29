@@ -60,7 +60,7 @@ impl<'a> KeyboardHandler<'a> {
     pub fn get_keyboard_brightness(&self) -> u8 {
         // unwrap_or(0): returns 0 on hardware/protocol failure
         let brightness = command(self.device, 0x0383, &[1, 5, 0], Some(2)).unwrap_or(0);
-        app().send(OsdEvent::KeyboardBrightness(brightness).into());
+        app(OsdEvent::KeyboardBrightness(brightness).into());
         brightness
     }
 
@@ -91,7 +91,7 @@ impl<'a> KeyboardHandler<'a> {
     pub fn set_rgb_effect(&mut self, rgb_effect: RGBEffect) {
         if rgb_effect == RGBEffect::Ambient {
             AmbientEffect::start(device());
-            app().send(OsdEvent::RGBEffect(rgb_effect).into());
+            app(OsdEvent::RGBEffect(rgb_effect).into());
         } else {
             AmbientEffect::stop();
         }
@@ -106,7 +106,7 @@ impl<'a> KeyboardHandler<'a> {
         let _ = self.app_config.get().rgb_effect.set(&rgb_effect);
         if rgb_effect != RGBEffect::Ambient {
             let effect = self.get_rgb_effect();
-            app().send(OsdEvent::RGBEffect(effect).into());
+            app(OsdEvent::RGBEffect(effect).into());
         }
         self.persist_config();
     }
@@ -123,7 +123,7 @@ impl<'a> KeyboardHandler<'a> {
         let new_brightness = if brightness > 0 { 0 } else { 255 };
         let _ = command(self.device, 0x0303, &[1, 38, new_brightness], None);
         let _ = command(self.device, 0x0300, &[1, 38, new_brightness / 255], None);
-        app().send(OsdEvent::UnderGlow(new_brightness).into());
+        app(OsdEvent::UnderGlow(new_brightness).into());
         self.app_config.get().vc_lvl = new_brightness;
         self.persist_config();
     }
@@ -164,7 +164,7 @@ impl<'a> KeyboardHandler<'a> {
                 let _ = command(self.device, 0x0302, &[1, 4, 1], None);
             }
         }
-        app().send(OsdEvent::LidLogo(mode).into());
+        app(OsdEvent::LidLogo(mode).into());
         self.persist_config();
     }
 

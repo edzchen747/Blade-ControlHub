@@ -4,13 +4,12 @@
 //! Change an icon asset once, propagate everywhere it's consumed.
 
 use std::borrow::Cow;
-use std::sync::LazyLock;
 
 // ── OSD Icon Identifiers ────────────────────────────────────────────────────
 
 /// Identifies which icon to display on the OSD overlay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum OsdIconId {
+pub enum OsdIcon {
     RazerControlHub,
     Brightness,
     KeyboardBrightness,
@@ -32,83 +31,44 @@ const STRIKE_THROUGH_SVG: &str =
 
 /// Overlays a red strike-through line onto an existing SVG icon by inserting
 /// it just before the closing `</svg>` tag.
-fn with_strikethrough(base_svg: &[u8]) -> Vec<u8> {
+fn with_strikethrough(base_svg: &[u8]) -> Cow<'static, [u8]> {
     let base = std::str::from_utf8(base_svg).expect("SVG asset must be valid UTF-8");
-    base.replacen("</svg>", &format!("{STRIKE_THROUGH_SVG}\n</svg>"), 1)
-        .into_bytes()
+    Cow::Owned(
+        base.replacen("</svg>", &format!("{STRIKE_THROUGH_SVG}\n</svg>"), 1)
+            .into_bytes(),
+    )
 }
 
-// Lazily-generated "off" state icons — computed once, cached forever.
-static MIC_OFF_SVG: LazyLock<Vec<u8>> =
-    LazyLock::new(|| with_strikethrough(include_bytes!("../../assets/mic.svg")));
-static TRACKPAD_OFF_SVG: LazyLock<Vec<u8>> =
-    LazyLock::new(|| with_strikethrough(include_bytes!("../../assets/trackpad.svg")));
-static UNDERGLOW_OFF_SVG: LazyLock<Vec<u8>> =
-    LazyLock::new(|| with_strikethrough(include_bytes!("../../assets/underglow.svg")));
-static BATTERY_LIMIT_OFF: LazyLock<Vec<u8>> =
-    LazyLock::new(|| with_strikethrough(include_bytes!("../../assets/battery_limit.svg")));
-
-impl OsdIconId {
+impl OsdIcon {
     /// Returns the `(uri, bytes)` pair for embedding the icon in the OSD.
     ///
     /// For "off" states the icon is generated dynamically by overlaying a red
     /// strike-through on the base icon — no separate `_off.svg` asset needed.
-    pub fn icon_data(&self) -> (&'static str, Cow<'static, [u8]>) {
+    pub fn as_bytes(&self) -> Cow<'static, [u8]> {
         match self {
-            Self::RazerControlHub => (
-                "bytes://icon.svg",
-                Cow::Borrowed(include_bytes!("../../assets/icon.svg")),
-            ),
-            Self::Brightness => (
-                "bytes://brightness.svg",
-                Cow::Borrowed(include_bytes!("../../assets/brightness.svg")),
-            ),
-            Self::KeyboardBrightness => (
-                "bytes://keyboard.svg",
-                Cow::Borrowed(include_bytes!("../../assets/keyboard.svg")),
-            ),
-            Self::MicMute(false) => (
-                "bytes://mic.svg",
-                Cow::Borrowed(include_bytes!("../../assets/mic.svg")),
-            ),
-            Self::MicMute(true) => ("bytes://mic_off.svg", Cow::Borrowed(&MIC_OFF_SVG)),
-            Self::Trackpad(true) => (
-                "bytes://trackpad.svg",
-                Cow::Borrowed(include_bytes!("../../assets/trackpad.svg")),
-            ),
-            Self::Trackpad(false) => ("bytes://trackpad_off.svg", Cow::Borrowed(&TRACKPAD_OFF_SVG)),
-            Self::RGBEffect => (
-                "bytes://rgb_effect.svg",
-                Cow::Borrowed(include_bytes!("../../assets/rgb_effect.svg")),
-            ),
-            Self::UnderGlow(true) => (
-                "bytes://underglow.svg",
-                Cow::Borrowed(include_bytes!("../../assets/underglow.svg")),
-            ),
-            Self::UnderGlow(false) => (
-                "bytes://underglow_off.svg",
-                Cow::Borrowed(&UNDERGLOW_OFF_SVG),
-            ),
-            Self::RefreshRate => (
-                "bytes://refresh.svg",
-                Cow::Borrowed(include_bytes!("../../assets/refresh.svg")),
-            ),
-            Self::BatteryLimit(true) => (
-                "bytes://battery_limit.svg",
-                Cow::Borrowed(include_bytes!("../../assets/battery_limit.svg")),
-            ),
-            Self::BatteryLimit(false) => (
-                "bytes://battery_limit_off.svg",
-                Cow::Borrowed(&BATTERY_LIMIT_OFF),
-            ),
-            Self::FunctionKey => (
-                "bytes://function_key.svg",
-                Cow::Borrowed(include_bytes!("../../assets/function_key.svg")),
-            ),
-            Self::GPU => (
-                "bytes://gpu.svg",
-                Cow::Borrowed(include_bytes!("../../assets/gpu.svg")),
-            ),
+            Self::RazerControlHub => Cow::Borrowed(include_bytes!("../../assets/icon.svg")),
+            Self::Brightness => Cow::Borrowed(include_bytes!("../../assets/brightness.svg")),
+            Self::KeyboardBrightness => Cow::Borrowed(include_bytes!("../../assets/keyboard.svg")),
+            Self::MicMute(false) => Cow::Borrowed(include_bytes!("../../assets/mic.svg")),
+            Self::MicMute(true) => with_strikethrough(include_bytes!("../../assets/mic.svg")),
+            Self::Trackpad(true) => Cow::Borrowed(include_bytes!("../../assets/trackpad.svg")),
+            Self::Trackpad(false) => {
+                with_strikethrough(include_bytes!("../../assets/trackpad.svg"))
+            }
+            Self::RGBEffect => Cow::Borrowed(include_bytes!("../../assets/rgb_effect.svg")),
+            Self::UnderGlow(true) => Cow::Borrowed(include_bytes!("../../assets/underglow.svg")),
+            Self::UnderGlow(false) => {
+                with_strikethrough(include_bytes!("../../assets/underglow.svg"))
+            }
+            Self::RefreshRate => Cow::Borrowed(include_bytes!("../../assets/refresh.svg")),
+            Self::BatteryLimit(true) => {
+                Cow::Borrowed(include_bytes!("../../assets/battery_limit.svg"))
+            }
+            Self::BatteryLimit(false) => {
+                with_strikethrough(include_bytes!("../../assets/battery_limit.svg"))
+            }
+            Self::FunctionKey => Cow::Borrowed(include_bytes!("../../assets/function_key.svg")),
+            Self::GPU => Cow::Borrowed(include_bytes!("../../assets/gpu.svg")),
         }
     }
 }

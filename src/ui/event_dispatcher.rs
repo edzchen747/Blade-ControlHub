@@ -6,8 +6,8 @@
 //! 2. `SideEffect` — actions the application must perform (settings, shutdown, etc.)
 
 use crate::razer::enums::{BatteryLimit, PerfMode};
-use crate::ui::app_events::{AppEvent, OsdEvent, OsdResponse};
-use crate::ui::icons::OsdIconId;
+use crate::ui::app_events::{AppEvent, OsdEvent};
+use crate::ui::icons::OsdIcon;
 
 // ── Side Effects ─────────────────────────────────────────────────────────────
 
@@ -32,119 +32,118 @@ pub struct EventDispatcher;
 impl EventDispatcher {
     /// Dispatches an `AppEvent`, returning both the optional `OsdResponse` and
     /// the optional `SideEffect`. Order of operations: side effect first, OSD second.
-    pub fn dispatch(event: AppEvent) -> (Option<OsdResponse>, Option<SideEffect>) {
-        let osd = Self::generate_osd(&event);
+    pub fn dispatch(event: AppEvent) -> (Option<SideEffect>) {
         let side = Self::extract_side_effect(&event);
-        (osd, side)
+        (side)
     }
 
     // ── OSD Response Generation ─────────────────────────────────────────
 
-    fn generate_osd(event: &AppEvent) -> Option<OsdResponse> {
-        match event {
-            AppEvent::OsdEvent(OsdEvent::Startup) => Some(OsdResponse {
-                text: "Razer\nControlHub".to_string(),
-                icon_id: Some(OsdIconId::RazerControlHub),
-                total_levels: 0,
-                current_level: 0,
-            }),
-            AppEvent::OsdEvent(OsdEvent::EnableOSD(_)) => None,
-            AppEvent::OsdEvent(OsdEvent::ScreenBrightness(lvl)) => Some(OsdResponse {
-                text: String::new(),
-                icon_id: Some(OsdIconId::Brightness),
-                total_levels: 10,
-                current_level: lvl / 10,
-            }),
-            AppEvent::OsdEvent(OsdEvent::KeyboardBrightness(lvl)) => Some(OsdResponse {
-                text: String::new(),
-                icon_id: Some(OsdIconId::KeyboardBrightness),
-                total_levels: 5,
-                current_level: lvl / 51,
-            }),
-            AppEvent::OsdEvent(OsdEvent::PerfMode(mode)) => Some(OsdResponse {
-                text: mode.to_string(),
-                icon_id: None,
-                total_levels: 0,
-                current_level: 0,
-            }),
-            AppEvent::OsdEvent(OsdEvent::MicMute(muted)) => Some(OsdResponse {
-                text: String::new(),
-                icon_id: Some(OsdIconId::MicMute(*muted)),
-                total_levels: 1,
-                current_level: !*muted as u8,
-            }),
-            AppEvent::OsdEvent(OsdEvent::Trackpad(state)) => Some(OsdResponse {
-                text: String::new(),
-                icon_id: Some(OsdIconId::Trackpad(*state)),
-                total_levels: 1,
-                current_level: *state as u8,
-            }),
-            AppEvent::OsdEvent(OsdEvent::RGBEffect(effect)) => Some(OsdResponse {
-                text: effect.to_string(),
-                icon_id: Some(OsdIconId::RGBEffect),
-                total_levels: 0,
-                current_level: 0,
-            }),
-            AppEvent::OsdEvent(OsdEvent::UnderGlow(lvl)) => Some(OsdResponse {
-                text: String::new(),
-                icon_id: Some(OsdIconId::UnderGlow(*lvl > 0)),
-                total_levels: 1,
-                current_level: *lvl / 255,
-            }),
-            AppEvent::OsdEvent(OsdEvent::RefreshRate(current, level, total)) => Some(OsdResponse {
-                text: current.to_string(),
-                icon_id: Some(OsdIconId::RefreshRate),
-                total_levels: *total,
-                current_level: *level,
-            }),
-            AppEvent::OsdEvent(OsdEvent::LidLogo(current)) => Some(OsdResponse {
-                text: current.to_string(),
-                icon_id: Some(OsdIconId::RefreshRate),
-                total_levels: 2,
-                current_level: *current as u8,
-            }),
-            AppEvent::OsdEvent(OsdEvent::BatteryLimit(current, level, total)) => {
-                Some(OsdResponse {
-                    text: BatteryLimit::from(*current).to_string(),
-                    icon_id: Some(OsdIconId::BatteryLimit(
-                        BatteryLimit::from(*current) != BatteryLimit::Off,
-                    )),
-                    total_levels: *total,
-                    current_level: *level,
-                })
-            }
-            AppEvent::OsdEvent(OsdEvent::ToggleDefaultMultimediaKeys(is_multimedia)) => {
-                let text = if *is_multimedia {
-                    "Multimedia".to_string()
-                } else {
-                    "Function".to_string()
-                };
-                Some(OsdResponse {
-                    text,
-                    icon_id: Some(OsdIconId::FunctionKey),
-                    total_levels: 1,
-                    current_level: *is_multimedia as u8,
-                })
-            }
-            AppEvent::OsdEvent(OsdEvent::CloseGPUApps(finished)) => {
-                let text = if *finished {
-                    "Done".to_string()
-                } else {
-                    "Closing apps...".to_string()
-                };
-                Some(OsdResponse {
-                    text,
-                    icon_id: Some(OsdIconId::GPU),
-                    total_levels: 0,
-                    current_level: 0,
-                })
-            }
-            AppEvent::RazerKeyCode(_)
-            | AppEvent::OpenSettings
-            | AppEvent::ToggleSettings
-            | AppEvent::Shutdown => None,
-        }
-    }
+    // fn generate_osd(event: &AppEvent) -> Option<OsdResponse> {
+    //     match event {
+    //         AppEvent::OsdEvent(OsdEvent::Startup) => Some(OsdResponse {
+    //             text: "Razer\nControlHub".to_string(),
+    //             icon_id: Some(OsdIcon::RazerControlHub),
+    //             total_levels: 0,
+    //             current_level: 0,
+    //         }),
+    //         AppEvent::OsdEvent(OsdEvent::EnableOSD(_)) => None,
+    //         AppEvent::OsdEvent(OsdEvent::ScreenBrightness(lvl)) => Some(OsdResponse {
+    //             text: String::new(),
+    //             icon_id: Some(OsdIcon::Brightness),
+    //             total_levels: 10,
+    //             current_level: lvl / 10,
+    //         }),
+    //         AppEvent::OsdEvent(OsdEvent::KeyboardBrightness(lvl)) => Some(OsdResponse {
+    //             text: String::new(),
+    //             icon_id: Some(OsdIcon::KeyboardBrightness),
+    //             total_levels: 5,
+    //             current_level: lvl / 51,
+    //         }),
+    //         AppEvent::OsdEvent(OsdEvent::PerfMode(mode)) => Some(OsdResponse {
+    //             text: mode.to_string(),
+    //             icon_id: None,
+    //             total_levels: 0,
+    //             current_level: 0,
+    //         }),
+    //         AppEvent::OsdEvent(OsdEvent::MicMute(muted)) => Some(OsdResponse {
+    //             text: String::new(),
+    //             icon_id: Some(OsdIcon::MicMute(*muted)),
+    //             total_levels: 1,
+    //             current_level: !*muted as u8,
+    //         }),
+    //         AppEvent::OsdEvent(OsdEvent::Trackpad(state)) => Some(OsdResponse {
+    //             text: String::new(),
+    //             icon_id: Some(OsdIcon::Trackpad(*state)),
+    //             total_levels: 1,
+    //             current_level: *state as u8,
+    //         }),
+    //         AppEvent::OsdEvent(OsdEvent::RGBEffect(effect)) => Some(OsdResponse {
+    //             text: effect.to_string(),
+    //             icon_id: Some(OsdIcon::RGBEffect),
+    //             total_levels: 0,
+    //             current_level: 0,
+    //         }),
+    //         AppEvent::OsdEvent(OsdEvent::UnderGlow(lvl)) => Some(OsdResponse {
+    //             text: String::new(),
+    //             icon_id: Some(OsdIcon::UnderGlow(*lvl > 0)),
+    //             total_levels: 1,
+    //             current_level: *lvl / 255,
+    //         }),
+    //         AppEvent::OsdEvent(OsdEvent::RefreshRate(current, level, total)) => Some(OsdResponse {
+    //             text: current.to_string(),
+    //             icon_id: Some(OsdIcon::RefreshRate),
+    //             total_levels: *total,
+    //             current_level: *level,
+    //         }),
+    //         AppEvent::OsdEvent(OsdEvent::LidLogo(current)) => Some(OsdResponse {
+    //             text: current.to_string(),
+    //             icon_id: Some(OsdIcon::RefreshRate),
+    //             total_levels: 2,
+    //             current_level: *current as u8,
+    //         }),
+    //         AppEvent::OsdEvent(OsdEvent::BatteryLimit(current, level, total)) => {
+    //             Some(OsdResponse {
+    //                 text: BatteryLimit::from(*current).to_string(),
+    //                 icon_id: Some(OsdIcon::BatteryLimit(
+    //                     BatteryLimit::from(*current) != BatteryLimit::Off,
+    //                 )),
+    //                 total_levels: *total,
+    //                 current_level: *level,
+    //             })
+    //         }
+    //         AppEvent::OsdEvent(OsdEvent::ToggleDefaultMultimediaKeys(is_multimedia)) => {
+    //             let text = if *is_multimedia {
+    //                 "Multimedia".to_string()
+    //             } else {
+    //                 "Function".to_string()
+    //             };
+    //             Some(OsdResponse {
+    //                 text,
+    //                 icon_id: Some(OsdIcon::FunctionKey),
+    //                 total_levels: 1,
+    //                 current_level: *is_multimedia as u8,
+    //             })
+    //         }
+    //         AppEvent::OsdEvent(OsdEvent::CloseGPUApps(finished)) => {
+    //             let text = if *finished {
+    //                 "Done".to_string()
+    //             } else {
+    //                 "Closing apps...".to_string()
+    //             };
+    //             Some(OsdResponse {
+    //                 text,
+    //                 icon_id: Some(OsdIcon::GPU),
+    //                 total_levels: 0,
+    //                 current_level: 0,
+    //             })
+    //         }
+    //         AppEvent::RazerKeyCode(_)
+    //         | AppEvent::OpenSettings
+    //         | AppEvent::ToggleSettings
+    //         | AppEvent::Shutdown => None,
+    //     }
+    // }
 
     // ── Side Effect Extraction ──────────────────────────────────────────
 

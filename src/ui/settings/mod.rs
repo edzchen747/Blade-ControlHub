@@ -1,15 +1,8 @@
-/// Settings window orchestrator.
-///
-/// This module manages the Settings viewport lifecycle and delegates rendering
-/// to individual tab components (`device_tab`, `key_mapping_tab`, `appearance_tab`).
-use std::sync::{Arc, Mutex};
-
 use eframe::egui::{self};
 use egui::Context;
 use resvg::{tiny_skia, usvg};
 
 use crate::razer::config::AppConfig;
-use crate::ui::app::app;
 use crate::ui::custom_key_map::CustomKeyMap;
 use crate::ui::theme::{
     SETTINGS_ICON_COLOR, SETTINGS_ICON_SIZE, SETTINGS_PADDING_RATIO, SETTINGS_WINDOW_SIZE,
@@ -55,68 +48,23 @@ impl Settings {
         }
     }
 
-    pub fn run(ctx: &egui::Context, config_window: Arc<Mutex<Self>>) {
-        let config_handle = config_window.clone();
-        if !config_handle.lock().unwrap().show {
-            return;
-        }
-
-        let icon_data = Arc::new(load_settings_icon());
-
-        let config_handle = config_window.clone();
-
-        let (screen_width, screen_height) = ctx.input(|i| {
-            // Access the specific monitor this window is currently on
-            if let Some(monitor) = i.viewport().monitor_size {
-                (monitor.x, monitor.y)
-            } else {
-                (1920.0, 1080.0)
-            }
-        });
-
-        let window_size = SETTINGS_WINDOW_SIZE;
-        let padding = screen_height * SETTINGS_PADDING_RATIO;
-        let spawn_pos = egui::pos2(
-            screen_width - window_size.x - padding * 0.1,
-            screen_height - window_size.y - padding,
-        );
-
-        ctx.show_viewport_deferred(
-            egui::ViewportId::from_hash_of("settings_window"),
-            egui::ViewportBuilder::default()
-                .with_title(SETTINGS_WINDOW_TITLE)
-                .with_icon(icon_data.clone())
-                .with_mouse_passthrough(false)
-                .with_position(spawn_pos)
-                .with_inner_size(window_size)
-                .with_min_inner_size(window_size)
-                .with_max_inner_size(window_size)
-                .with_resizable(false)
-                .with_maximize_button(false),
-            move |ctx, _class| {
-                let send_window_top = config_handle.lock().unwrap().update;
-                if send_window_top {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-                    config_handle.lock().unwrap().update = false;
-                }
-                let mut config_window = config_handle.lock().unwrap();
-                if ctx.input(|i| i.viewport().close_requested()) {
-                    config_window.show = false;
-                }
-
-                config_window.ui(ctx);
-            },
-        );
-    }
+    // Note: The redundant pub fn run(...) has been removed entirely!
 
     pub fn ui(&mut self, ctx: &Context) {
+        // Force focus if the tray requested an update pop-to-front
+        if self.update {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            self.update = false;
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading(format!("{}", get_model_name()));
+            ui.heading(""); // get_model_name(&self.app_config)
             ui.separator();
 
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.current_tab, "Device".into(), "Device");
                 ui.selectable_value(&mut self.current_tab, "Key Mapping".into(), "Key Mapping");
+                ui.selectable_value(&mut self.current_tab, "Appearance".into(), "Appearance");
             });
             ui.separator();
 
@@ -134,38 +82,43 @@ impl Settings {
             }
         });
     }
-}
 
-pub fn load_settings_icon() -> egui::IconData {
-    let size = SETTINGS_ICON_SIZE;
-    let mut pixmap = tiny_skia::Pixmap::new(size, size).unwrap();
+    // Make this public so main.rs can access it on startup
+    pub fn load_settings_icon() -> egui::IconData {
+        let size = SETTINGS_ICON_SIZE;
+        let mut pixmap = tiny_skia::Pixmap::new(size, size).unwrap();
+        let opt = usvg::Options::default();
 
-    let opt = usvg::Options::default();
+        let coloured_svg = include_str!("../../../assets/settings_icon.svg")
+            .replace("#FFFFFF", SETTINGS_ICON_COLOR)
+            .replace("#ffffff", &SETTINGS_ICON_COLOR.to_lowercase());
+        let tree = usvg::Tree::from_str(&coloured_svg, &opt).expect("Failed to parse SVG");
 
-    let coloured_svg = include_str!("../../../assets/settings_icon.svg")
-        .replace("#FFFFFF", SETTINGS_ICON_COLOR)
-        .replace("#ffffff", &SETTINGS_ICON_COLOR.to_lowercase());
-    let tree = usvg::Tree::from_str(&coloured_svg, &opt).expect("Failed to parse SVG");
+        let svg_size = tree.size();
+        let scale = (size as f32 / svg_size.width()).min(size as f32 / svg_size.height());
 
-    let svg_size = tree.size();
-    let scale = (size as f32 / svg_size.width()).min(size as f32 / svg_size.height());
+        let tx = (size as f32 - (svg_size.width() * scale)) / 2.0;
+        let ty = (size as f32 - (svg_size.height() * scale)) / 2.0;
+        let transform = tiny_skia::Transform::from_scale(scale, scale).post_translate(tx, ty);
 
-    let tx = (size as f32 - (svg_size.width() * scale)) / 2.0;
-    let ty = (size as f32 - (svg_size.height() * scale)) / 2.0;
+        resvg::render(&tree, transform, &mut pixmap.as_mut());
+        let rgba = pixmap.take();
 
-    let transform = tiny_skia::Transform::from_scale(scale, scale).post_translate(tx, ty);
-
-    resvg::render(&tree, transform, &mut pixmap.as_mut());
-
-    let rgba = pixmap.take(); // Returns the raw Vec<u8>
-
-    egui::IconData {
-        rgba,
-        width: size,
-        height: size,
+        egui::IconData {
+            rgba,
+            width: size,
+            height: size,
+        }
     }
-}
 
-fn get_model_name() -> String {
-    app().device.get_model_name().unwrap_or_default()
+    fn get_model_name(app_config: &Option<AppConfig>) -> String {
+        if let Some(config) = app_config {
+            // Replace `.model_name` with whatever field name your AppConfig struct
+            // uses to store the hardware identifier string (e.g., config.device_name)
+            config.model_name.clone()
+        } else {
+            // Fallback safely if config isn't populated yet
+            "Blade Laptop".to_string()
+        }
+    }
 }

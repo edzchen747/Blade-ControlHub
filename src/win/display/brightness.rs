@@ -26,7 +26,7 @@ impl BrightnessWorker {
 
     pub fn set_screen_brightness(&self, new_level: u8) {
         let discrete_lvl = (new_level as f64 / 10.0).round() as u8 * 10;
-        app().send(OsdEvent::ScreenBrightness(discrete_lvl).into());
+        app(OsdEvent::ScreenBrightness(discrete_lvl).into());
         debug!(level = discrete_lvl, "Queuing screen brightness change");
         SCREEN_TARGET_LVL.store(discrete_lvl, Ordering::SeqCst);
         let _ = self.tx.send(());

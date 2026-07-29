@@ -89,7 +89,7 @@ impl HidApiListener {
                                     warn!(keycode = buf[1], "Unmapped Razer keycode received");
                                 }
                             } else {
-                                app().send(AppEvent::RazerKeyCode(buf[1]));
+                                app(AppEvent::RazerKeyCode(buf[1]));
                             }
                         }
                     }

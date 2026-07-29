@@ -4,6 +4,8 @@ use tracing::warn;
 
 #[derive(Clone, Copy, Display, Debug, PartialEq, Serialize, Deserialize)]
 pub enum PerfMode {
+    #[strum(serialize = "Battery Saver")]
+    BatterySaver = 3,
     Silent = 5,
     Quiet = 6,
     Balanced = 0,
@@ -16,6 +18,7 @@ pub enum PerfMode {
 impl From<u8> for PerfMode {
     fn from(value: u8) -> Self {
         match value {
+            3 => Self::BatterySaver,
             5 => Self::Silent,
             6 => Self::Quiet,
             0 => Self::Balanced,
@@ -124,13 +127,14 @@ pub const RGB_EFFECTS: [RGBEffect; 6] = [
     RGBEffect::Reactive,
 ];
 
-pub const PERF_MODES: [PerfMode; 6] = [
-    PerfMode::Silent,
-    PerfMode::Quiet,
+pub const PERF_MODES: [PerfMode; 7] = [
     PerfMode::Balanced,
     PerfMode::Performance,
     PerfMode::Turbo,
     PerfMode::Custom,
+    PerfMode::BatterySaver,
+    PerfMode::Silent,
+    PerfMode::Quiet,
 ];
 
 pub const BATTERY_LIMITS: [BatteryLimit; 8] = [

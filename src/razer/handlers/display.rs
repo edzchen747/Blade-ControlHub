@@ -48,7 +48,7 @@ impl<'a> DisplayHandler<'a> {
             .position(|&rate| rate == current)
             .unwrap_or(0);
         if !silent {
-            app().send(OsdEvent::RefreshRate(current, level as u8, supported.len() as u8).into());
+            app(OsdEvent::RefreshRate(current, level as u8, supported.len() as u8).into());
         }
         self.app_config.get().screen_refresh = current;
         self.persist_config();
