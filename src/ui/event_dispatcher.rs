@@ -18,7 +18,6 @@ pub enum SideEffect {
     Restart(i32),
     Shutdown,
     EnableOsd(bool),
-    RazerKeyCode(u8),
     PerfMode(PerfMode),
 }
 
@@ -42,7 +41,6 @@ impl EventDispatcher {
             AppEvent::Shutdown => Some(SideEffect::Shutdown),
             AppEvent::OsdEvent(OsdEvent::EnableOSD(enable)) => Some(SideEffect::EnableOsd(*enable)),
             AppEvent::OsdEvent(OsdEvent::PerfMode(mode)) => Some(SideEffect::PerfMode(*mode)),
-            AppEvent::RazerKeyCode(key_code) => Some(SideEffect::RazerKeyCode(*key_code)),
             _ => None,
         }
     }
@@ -97,10 +95,6 @@ mod tests {
                 PerfMode::Performance,
             ))),
             Some(SideEffect::PerfMode(PerfMode::Performance))
-        );
-        assert_eq!(
-            EventDispatcher::dispatch(AppEvent::RazerKeyCode(0x42)),
-            Some(SideEffect::RazerKeyCode(0x42))
         );
     }
 

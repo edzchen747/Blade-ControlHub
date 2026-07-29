@@ -132,7 +132,6 @@ impl OsdEvent {
 #[derive(PartialEq, Clone, Copy, serde::Serialize)]
 pub enum AppEvent {
     OsdEvent(OsdEvent),
-    RazerKeyCode(u8),
     OpenSettings,
     ToggleSettings,
     Restart(i32),

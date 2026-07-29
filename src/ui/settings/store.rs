@@ -54,11 +54,6 @@ impl SettingsStore {
         self.settings().show = false;
     }
 
-    /// Sets a captured Razer key code in the currently listening slot.
-    pub fn set_razer_key_code(&self, key_code: u8) {
-        self.settings().custom_key_map.special_key = Some(key_code);
-    }
-
     /// Runs a short mutation against the settings state with poison recovery.
     pub fn with_settings<R>(&self, f: impl FnOnce(&mut Settings) -> R) -> R {
         let mut settings = self.settings();

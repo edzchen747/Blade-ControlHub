@@ -108,9 +108,8 @@ fn razer_special_key_tab(ui: &mut eframe::egui::Ui, ctx: &egui::Context, setting
         if let Some(idx) = row_to_remove {
             settings.custom_key_map.razer_keys.remove(idx);
         }
-        if new_listening_idx.is_some() {
-            settings.custom_key_map.set_listening_idx(new_listening_idx);
-            settings.queue_command(SettingsCommand::BeginRazerKeyCapture);
+        if let Some(row_idx) = new_listening_idx {
+            settings.queue_command(SettingsCommand::BeginRazerKeyCapture { row_idx });
         }
 
         ui.add_space(SETTINGS_CONTENT_TOP_SPACING);

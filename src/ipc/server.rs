@@ -1,9 +1,10 @@
+use std::collections::VecDeque;
 use std::io;
 use std::ptr::null_mut;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tracing::warn;
 use windows_sys::Win32::Foundation::{ERROR_PIPE_CONNECTED, GetLastError};
@@ -19,14 +20,15 @@ use windows_sys::Win32::System::Pipes::{
 
 use crate::core::shared_state::KEYMAP_LISTENING;
 use crate::ipc::framing::{PipeHandle, read_json_frame, wide_null, write_json_frame};
-use crate::ipc::protocol::{IpcRequest, IpcResponse, PIPE_NAME};
+use crate::ipc::protocol::{IpcRequest, IpcResponse, PIPE_NAME, RazerKeyEvent};
 use crate::razer::device_handle::DeviceHandle;
 
 static IPC_SERVER_RUNNING: AtomicBool = AtomicBool::new(false);
 static IPC_SERVER_THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
-static CAPTURED_RAZER_KEY: Mutex<Option<u8>> = Mutex::new(None);
+static RAZER_KEY_EVENTS: Mutex<RazerKeyEventLog> = Mutex::new(RazerKeyEventLog::new());
 
 const SECURITY_DESCRIPTOR_REVISION: u32 = 1;
+const MAX_RAZER_KEY_EVENTS: usize = 32;
 
 pub fn start(device: DeviceHandle) {
     join_finished_server_thread();
@@ -55,13 +57,8 @@ pub fn stop() {
     join_server_thread();
 }
 
-pub fn capture_razer_key_code(key_code: u8) {
-    if !KEYMAP_LISTENING.load(Ordering::SeqCst) {
-        return;
-    }
-
-    *captured_razer_key() = Some(key_code);
-    KEYMAP_LISTENING.store(false, Ordering::SeqCst);
+pub fn record_razer_key_code(key_code: u8) -> RazerKeyEvent {
+    razer_key_events().push(key_code)
 }
 
 fn run_server(device: DeviceHandle) {
@@ -83,7 +80,7 @@ fn run_server(device: DeviceHandle) {
     }
 
     KEYMAP_LISTENING.store(false, Ordering::SeqCst);
-    *captured_razer_key() = None;
+    razer_key_events().clear();
     IPC_SERVER_RUNNING.store(false, Ordering::SeqCst);
 }
 
@@ -122,18 +119,12 @@ fn dispatch_request(request: IpcRequest, device: &DeviceHandle) -> IpcResponse {
         }
         IpcRequest::SetBatteryLimit { limit } => ack(device.set_battery_limit(limit)),
         IpcRequest::SetThemeColor { color } => ack(device.set_theme_color(color)),
-        IpcRequest::BeginRazerKeyCapture => {
-            *captured_razer_key() = None;
-            KEYMAP_LISTENING.store(true, Ordering::SeqCst);
-            IpcResponse::Ack
+        IpcRequest::BeginRazerKeyCapture { after_unix_ms } => {
+            begin_razer_key_capture(after_unix_ms)
         }
-        IpcRequest::CancelRazerKeyCapture => {
-            KEYMAP_LISTENING.store(false, Ordering::SeqCst);
-            *captured_razer_key() = None;
-            IpcResponse::Ack
-        }
-        IpcRequest::PollCapturedRazerKey => {
-            IpcResponse::CapturedRazerKey(captured_razer_key().take())
+        IpcRequest::CancelRazerKeyCapture => cancel_razer_key_capture(),
+        IpcRequest::PollCapturedRazerKey { after_sequence } => {
+            poll_captured_razer_key(after_sequence)
         }
     }
 }
@@ -145,6 +136,26 @@ fn ack(result: crate::error::AppResult<()>) -> IpcResponse {
             message: error.to_string(),
         },
     }
+}
+
+fn begin_razer_key_capture(after_unix_ms: u64) -> IpcResponse {
+    let events = razer_key_events();
+    let after_sequence = events.latest_sequence_before(after_unix_ms);
+    KEYMAP_LISTENING.store(true, Ordering::SeqCst);
+    IpcResponse::RazerKeyCaptureStarted { after_sequence }
+}
+
+fn cancel_razer_key_capture() -> IpcResponse {
+    KEYMAP_LISTENING.store(false, Ordering::SeqCst);
+    IpcResponse::Ack
+}
+
+fn poll_captured_razer_key(after_sequence: u64) -> IpcResponse {
+    let event = razer_key_events().first_after(after_sequence);
+    if event.is_some() {
+        KEYMAP_LISTENING.store(false, Ordering::SeqCst);
+    }
+    IpcResponse::CapturedRazerKey(event)
 }
 
 fn create_pipe() -> io::Result<PipeHandle> {
@@ -225,10 +236,72 @@ fn server_thread() -> MutexGuard<'static, Option<JoinHandle<()>>> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn captured_razer_key() -> MutexGuard<'static, Option<u8>> {
-    CAPTURED_RAZER_KEY
+fn razer_key_events() -> MutexGuard<'static, RazerKeyEventLog> {
+    RAZER_KEY_EVENTS
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+struct RazerKeyEventLog {
+    next_sequence: u64,
+    events: VecDeque<RazerKeyEvent>,
+}
+
+impl RazerKeyEventLog {
+    const fn new() -> Self {
+        Self {
+            next_sequence: 0,
+            events: VecDeque::new(),
+        }
+    }
+
+    fn push(&mut self, key_code: u8) -> RazerKeyEvent {
+        self.push_at(key_code, current_unix_ms())
+    }
+
+    fn push_at(&mut self, key_code: u8, unix_ms: u64) -> RazerKeyEvent {
+        self.next_sequence = self.next_sequence.saturating_add(1);
+        let event = RazerKeyEvent {
+            sequence: self.next_sequence,
+            unix_ms,
+            key_code,
+        };
+        self.events.push_back(event);
+        while self.events.len() > MAX_RAZER_KEY_EVENTS {
+            self.events.pop_front();
+        }
+        event
+    }
+
+    fn latest_sequence_before(&self, unix_ms: u64) -> u64 {
+        self.events
+            .iter()
+            .rev()
+            .find(|event| event.unix_ms < unix_ms)
+            .map(|event| event.sequence)
+            .unwrap_or(0)
+    }
+
+    fn first_after(&self, sequence: u64) -> Option<RazerKeyEvent> {
+        self.events
+            .iter()
+            .copied()
+            .find(|event| event.sequence > sequence)
+    }
+
+    fn clear(&mut self) {
+        self.next_sequence = 0;
+        self.events.clear();
+    }
+}
+
+fn current_unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
 }
 
 fn join_finished_server_thread() {
@@ -271,28 +344,82 @@ mod tests {
     }
 
     #[test]
-    fn capture_razer_key_code_records_key_and_stops_listening() {
+    fn record_razer_key_code_records_key_event() {
         let _guard = test_lock();
 
-        KEYMAP_LISTENING.store(true, Ordering::SeqCst);
-        *captured_razer_key() = None;
+        razer_key_events().clear();
 
-        capture_razer_key_code(0x42);
+        let event = record_razer_key_code(0x42);
 
-        assert!(!KEYMAP_LISTENING.load(Ordering::SeqCst));
-        assert_eq!(captured_razer_key().take(), Some(0x42));
+        assert_eq!(event.key_code, 0x42);
+        assert_eq!(razer_key_events().first_after(0), Some(event));
     }
 
     #[test]
-    fn capture_razer_key_code_ignores_keys_when_not_listening() {
+    fn poll_captured_razer_key_stops_listening_after_match() {
         let _guard = test_lock();
 
+        razer_key_events().clear();
+        KEYMAP_LISTENING.store(true, Ordering::SeqCst);
+        let event = record_razer_key_code(0x42);
+
+        let response = poll_captured_razer_key(0);
+
+        assert_eq!(response, IpcResponse::CapturedRazerKey(Some(event)));
+        assert!(!KEYMAP_LISTENING.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn begin_razer_key_capture_returns_current_sequence_baseline() {
+        let _guard = test_lock();
+
+        razer_key_events().clear();
         KEYMAP_LISTENING.store(false, Ordering::SeqCst);
-        *captured_razer_key() = None;
+        let before_capture = record_razer_key_code(0x41);
 
-        capture_razer_key_code(0x42);
+        let response = begin_razer_key_capture(before_capture.unix_ms.saturating_add(1));
 
-        assert_eq!(captured_razer_key().take(), None);
+        assert_eq!(
+            response,
+            IpcResponse::RazerKeyCaptureStarted {
+                after_sequence: before_capture.sequence
+            }
+        );
+        assert!(KEYMAP_LISTENING.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn begin_razer_key_capture_uses_click_time_not_request_arrival_time() {
+        let _guard = test_lock();
+
+        razer_key_events().clear();
+        let before_click = razer_key_events().push_at(0x40, 100);
+        let after_click_before_begin = razer_key_events().push_at(0x41, 200);
+
+        let response = begin_razer_key_capture(150);
+
+        assert_eq!(
+            response,
+            IpcResponse::RazerKeyCaptureStarted {
+                after_sequence: before_click.sequence
+            }
+        );
+        assert_eq!(
+            poll_captured_razer_key(before_click.sequence),
+            IpcResponse::CapturedRazerKey(Some(after_click_before_begin))
+        );
+    }
+
+    #[test]
+    fn poll_captured_razer_key_ignores_events_before_baseline() {
+        let _guard = test_lock();
+
+        razer_key_events().clear();
+        let before_capture = record_razer_key_code(0x41);
+
+        let response = poll_captured_razer_key(before_capture.sequence);
+
+        assert_eq!(response, IpcResponse::CapturedRazerKey(None));
     }
 
     #[test]

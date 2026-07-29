@@ -41,15 +41,27 @@ pub enum IpcRequest {
     SetThemeColor {
         color: ThemeColor,
     },
-    BeginRazerKeyCapture,
+    BeginRazerKeyCapture {
+        after_unix_ms: u64,
+    },
     CancelRazerKeyCapture,
-    PollCapturedRazerKey,
+    PollCapturedRazerKey {
+        after_sequence: u64,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RazerKeyEvent {
+    pub sequence: u64,
+    pub unix_ms: u64,
+    pub key_code: u8,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IpcResponse {
     SettingsState(SettingsState),
-    CapturedRazerKey(Option<u8>),
+    RazerKeyCaptureStarted { after_sequence: u64 },
+    CapturedRazerKey(Option<RazerKeyEvent>),
     Ack,
     Error { message: String },
 }

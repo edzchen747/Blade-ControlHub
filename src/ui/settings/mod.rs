@@ -32,7 +32,7 @@ pub enum SettingsCommand {
     SetUnderGlow(PowerProfile, bool),
     SetBatteryLimit(BatteryLimit),
     SetThemeColor(ThemeColor),
-    BeginRazerKeyCapture,
+    BeginRazerKeyCapture { row_idx: usize },
     CancelRazerKeyCapture,
 }
 

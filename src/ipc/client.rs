@@ -12,7 +12,7 @@ use windows_sys::Win32::Storage::FileSystem::{
 use crate::config::ThemeColor;
 use crate::error::{AppError, AppResult};
 use crate::ipc::framing::{PipeHandle, read_json_frame, wide_null, write_json_frame};
-use crate::ipc::protocol::{IpcRequest, IpcResponse, PIPE_NAME};
+use crate::ipc::protocol::{IpcRequest, IpcResponse, PIPE_NAME, RazerKeyEvent};
 use crate::razer::{
     config::PowerProfile,
     enums::{BatteryLimit, PerfMode, RGBEffect},
@@ -66,17 +66,20 @@ pub fn set_theme_color(color: ThemeColor) -> AppResult<()> {
     expect_ack(send_request(IpcRequest::SetThemeColor { color })?)
 }
 
-pub fn begin_razer_key_capture() -> AppResult<()> {
-    expect_ack(send_request(IpcRequest::BeginRazerKeyCapture)?)
+pub fn begin_razer_key_capture(after_unix_ms: u64) -> AppResult<u64> {
+    match send_request(IpcRequest::BeginRazerKeyCapture { after_unix_ms })? {
+        IpcResponse::RazerKeyCaptureStarted { after_sequence } => Ok(after_sequence),
+        response => Err(unexpected_response(response)),
+    }
 }
 
 pub fn cancel_razer_key_capture() -> AppResult<()> {
     expect_ack(send_request(IpcRequest::CancelRazerKeyCapture)?)
 }
 
-pub fn poll_captured_razer_key() -> AppResult<Option<u8>> {
-    match send_request(IpcRequest::PollCapturedRazerKey)? {
-        IpcResponse::CapturedRazerKey(key_code) => Ok(key_code),
+pub fn poll_captured_razer_key(after_sequence: u64) -> AppResult<Option<RazerKeyEvent>> {
+    match send_request(IpcRequest::PollCapturedRazerKey { after_sequence })? {
+        IpcResponse::CapturedRazerKey(event) => Ok(event),
         response => Err(unexpected_response(response)),
     }
 }

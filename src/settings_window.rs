@@ -7,11 +7,17 @@ use blade_controlhub::ui::settings::Settings;
 use blade_controlhub::ui::settings::SettingsCommand;
 use blade_controlhub::ui::settings::store::SettingsStore;
 use blade_controlhub::ui::theme::{
-    SETTINGS_LOADING_ICON_COLOR, SETTINGS_PADDING_RATIO, SETTINGS_WINDOW_SIZE,
-    SETTINGS_WINDOW_TITLE,
+    SETTINGS_KEY_LISTEN_INTERVAL_MS, SETTINGS_LOADING_ICON_COLOR, SETTINGS_PADDING_RATIO,
+    SETTINGS_WINDOW_SIZE, SETTINGS_WINDOW_TITLE,
 };
 use eframe::egui;
-use std::time::{Duration, Instant};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+    mpsc::{self, Receiver, Sender},
+};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::warn;
 
 const SETTINGS_FRAME_INTERVAL: Duration = Duration::from_millis(16);
@@ -22,6 +28,11 @@ struct SettingsApp {
     state_loaded: bool,
     last_state_refresh: Option<Instant>,
     last_frame_at: Option<Instant>,
+    razer_key_capture_tx: Sender<RazerKeyCaptureMessage>,
+    razer_key_capture_rx: Receiver<RazerKeyCaptureMessage>,
+    razer_key_capture_cancel: Option<Arc<AtomicBool>>,
+    razer_key_capture_id: u64,
+    active_razer_key_capture_id: Option<u64>,
     applied_window_icon_color: Option<ThemeColor>,
     native_window_icons: Option<NativeWindowIcons>,
 }
@@ -29,6 +40,7 @@ struct SettingsApp {
 impl SettingsApp {
     fn new(state: Option<SettingsState>) -> Self {
         let settings = SettingsStore::new();
+        let (razer_key_capture_tx, razer_key_capture_rx) = mpsc::channel();
         if let Some(state) = state.clone() {
             settings.show(state);
         } else {
@@ -43,12 +55,19 @@ impl SettingsApp {
             state_loaded: state.is_some(),
             last_state_refresh: Some(Instant::now()),
             last_frame_at: None,
+            razer_key_capture_tx,
+            razer_key_capture_rx,
+            razer_key_capture_cancel: None,
+            razer_key_capture_id: 0,
+            active_razer_key_capture_id: None,
             applied_window_icon_color: None,
             native_window_icons: None,
         }
     }
 
     fn process_backend(&mut self, ctx: &egui::Context) {
+        self.drain_razer_key_capture_messages(ctx);
+
         let commands = self
             .settings
             .with_settings(|settings| settings.drain_commands());
@@ -112,30 +131,12 @@ impl SettingsApp {
                         command_sent = true;
                     }
                 }
-                SettingsCommand::BeginRazerKeyCapture => {
-                    if let Err(error) = client::begin_razer_key_capture() {
-                        warn!(%error, "Failed to start Razer key capture");
-                    }
+                SettingsCommand::BeginRazerKeyCapture { row_idx } => {
+                    self.start_razer_key_capture(row_idx, ctx);
                 }
                 SettingsCommand::CancelRazerKeyCapture => {
-                    if let Err(error) = client::cancel_razer_key_capture() {
-                        warn!(%error, "Failed to cancel Razer key capture");
-                    }
+                    self.cancel_razer_key_capture(ctx);
                 }
-            }
-        }
-
-        let is_listening = self
-            .settings
-            .with_settings(|settings| settings.custom_key_map.get_listening_idx().is_some());
-        if is_listening {
-            match client::poll_captured_razer_key() {
-                Ok(Some(key_code)) => {
-                    self.settings
-                        .with_settings(|settings| settings.apply_captured_razer_key(key_code));
-                }
-                Ok(None) => {}
-                Err(error) => warn!(%error, "Failed to poll captured Razer key"),
             }
         }
 
@@ -143,6 +144,85 @@ impl SettingsApp {
             self.refresh_settings_state(ctx);
         } else if let Some(retry_after) = self.next_state_retry_after() {
             ctx.request_repaint_after(retry_after);
+        }
+    }
+
+    fn start_razer_key_capture(&mut self, row_idx: usize, ctx: &egui::Context) {
+        if let Some(cancel) = self.razer_key_capture_cancel.take() {
+            cancel.store(true, Ordering::SeqCst);
+        }
+
+        self.razer_key_capture_id = self.razer_key_capture_id.saturating_add(1);
+        let capture_id = self.razer_key_capture_id;
+        self.active_razer_key_capture_id = Some(capture_id);
+        let after_unix_ms = current_unix_ms();
+        self.settings.with_settings(|settings| {
+            settings.custom_key_map.special_key = None;
+            settings.custom_key_map.set_listening_idx(Some(row_idx));
+        });
+        ctx.request_repaint();
+
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.razer_key_capture_cancel = Some(cancel.clone());
+        let tx = self.razer_key_capture_tx.clone();
+        let worker_ctx = ctx.clone();
+
+        if let Err(error) = thread::Builder::new()
+            .name("blade-settings-razer-key-capture".to_string())
+            .spawn(move || {
+                run_razer_key_capture_worker(capture_id, after_unix_ms, cancel, tx, worker_ctx)
+            })
+        {
+            warn!(%error, "Failed to spawn Razer key capture worker");
+            self.razer_key_capture_cancel = None;
+            self.active_razer_key_capture_id = None;
+            self.settings
+                .with_settings(|settings| settings.custom_key_map.set_listening_idx(None));
+            ctx.request_repaint();
+        }
+    }
+
+    fn cancel_razer_key_capture(&mut self, ctx: &egui::Context) {
+        if let Some(cancel) = self.razer_key_capture_cancel.take() {
+            cancel.store(true, Ordering::SeqCst);
+        }
+        self.active_razer_key_capture_id = None;
+        self.settings
+            .with_settings(|settings| settings.custom_key_map.set_listening_idx(None));
+        ctx.request_repaint();
+
+        let ctx = ctx.clone();
+        if let Err(error) = thread::Builder::new()
+            .name("blade-settings-razer-key-cancel".to_string())
+            .spawn(move || {
+                if let Err(error) = client::cancel_razer_key_capture() {
+                    warn!(%error, "Failed to cancel Razer key capture");
+                }
+                ctx.request_repaint();
+            })
+        {
+            warn!(%error, "Failed to spawn Razer key capture cancel worker");
+        }
+    }
+
+    fn drain_razer_key_capture_messages(&mut self, ctx: &egui::Context) {
+        while let Ok(message) = self.razer_key_capture_rx.try_recv() {
+            if Some(message.capture_id()) != self.active_razer_key_capture_id {
+                continue;
+            }
+
+            match message {
+                RazerKeyCaptureMessage::Captured {
+                    capture_id: _,
+                    key_code,
+                } => {
+                    self.razer_key_capture_cancel = None;
+                    self.active_razer_key_capture_id = None;
+                    self.settings
+                        .with_settings(|settings| settings.apply_captured_razer_key(key_code));
+                    ctx.request_repaint();
+                }
+            }
         }
     }
 
@@ -209,13 +289,96 @@ impl SettingsApp {
     }
 }
 
+impl Drop for SettingsApp {
+    fn drop(&mut self) {
+        if let Some(cancel) = self.razer_key_capture_cancel.take() {
+            cancel.store(true, Ordering::SeqCst);
+            let _ = client::cancel_razer_key_capture();
+        }
+    }
+}
+
+enum RazerKeyCaptureMessage {
+    Captured { capture_id: u64, key_code: u8 },
+}
+
+impl RazerKeyCaptureMessage {
+    fn capture_id(&self) -> u64 {
+        match self {
+            Self::Captured { capture_id, .. } => *capture_id,
+        }
+    }
+}
+
+fn run_razer_key_capture_worker(
+    capture_id: u64,
+    after_unix_ms: u64,
+    cancel: Arc<AtomicBool>,
+    tx: Sender<RazerKeyCaptureMessage>,
+    ctx: egui::Context,
+) {
+    let mut after_sequence = loop {
+        if cancel.load(Ordering::SeqCst) {
+            return;
+        }
+
+        match client::begin_razer_key_capture(after_unix_ms) {
+            Ok(after_sequence) => break after_sequence,
+            Err(error) => {
+                warn!(%error, "Razer key capture begin failed; retrying");
+                thread::sleep(razer_key_capture_retry_interval());
+            }
+        }
+    };
+
+    while !cancel.load(Ordering::SeqCst) {
+        match client::poll_captured_razer_key(after_sequence) {
+            Ok(Some(event)) => {
+                after_sequence = event.sequence;
+                if event.key_code == 0 {
+                    continue;
+                }
+
+                let _ = tx.send(RazerKeyCaptureMessage::Captured {
+                    capture_id,
+                    key_code: event.key_code,
+                });
+                ctx.request_repaint();
+                return;
+            }
+            Ok(None) => thread::sleep(razer_key_capture_poll_interval()),
+            Err(error) => {
+                warn!(%error, "Razer key capture poll failed; retrying");
+                thread::sleep(razer_key_capture_retry_interval());
+            }
+        }
+    }
+}
+
 impl eframe::App for SettingsApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.pace_frame();
-        self.process_backend(ctx);
         self.settings.with_settings(|settings| settings.ui(ctx));
+        self.process_backend(ctx);
         self.update_window_icon(frame);
     }
+}
+
+fn razer_key_capture_poll_interval() -> Duration {
+    Duration::from_millis(SETTINGS_KEY_LISTEN_INTERVAL_MS)
+}
+
+fn razer_key_capture_retry_interval() -> Duration {
+    Duration::from_millis(100)
+}
+
+fn current_unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
 }
 
 #[cfg(target_os = "windows")]
@@ -439,6 +602,14 @@ mod tests {
         assert!(
             app.settings
                 .with_settings(|settings| settings.state.is_none() && settings.show)
+        );
+    }
+
+    #[test]
+    fn razer_key_capture_poll_interval_uses_settings_listen_interval() {
+        assert_eq!(
+            razer_key_capture_poll_interval(),
+            Duration::from_millis(SETTINGS_KEY_LISTEN_INTERVAL_MS)
         );
     }
 

@@ -6,7 +6,6 @@ use crate::{
     config,
     core::shared_state::{FN_PRESSED, KEYMAP_LISTENING},
     error::{AppError, AppResult},
-    ui::{app::app, app_events::AppEvent},
     win::input::{key_map::KEY_MAP, razer_key},
 };
 use hidapi::{HidApi, HidDevice};
@@ -185,14 +184,13 @@ fn handle_razer_special_key(key_code: u8) {
         0x00 => FN_PRESSED.store(false, Ordering::SeqCst),
         _ => {
             let key = razer_key::Key::from(key_code);
+            crate::ipc::server::record_razer_key_code(key_code);
             if !KEYMAP_LISTENING.load(Ordering::SeqCst) {
                 if let Some(action) = KEY_MAP.get(&key.into()) {
                     let _ = action.execute();
                 } else {
                     warn!(keycode = key_code, "Unmapped Razer keycode received");
                 }
-            } else {
-                app(AppEvent::RazerKeyCode(key_code));
             }
         }
     }

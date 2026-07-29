@@ -1,9 +1,7 @@
 use std::path::PathBuf;
 use std::process::{Child, Command, ExitStatus};
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 
-use crate::core::shared_state::KEYMAP_LISTENING;
 use crate::razer::device_handle::{DeviceHandle, device, stop_device_channel_monitor};
 use crate::ui::app_events::AppEvent::{self, OsdEvent};
 use crate::ui::event_dispatcher::{EventDispatcher, SideEffect};
@@ -95,13 +93,6 @@ pub fn app(event: AppEvent) {
             }
             SideEffect::EnableOsd(enable) => {
                 core(&ctx).osd_enabled = enable;
-            }
-            SideEffect::RazerKeyCode(key_code) => {
-                if KEYMAP_LISTENING.load(Ordering::SeqCst) {
-                    crate::ipc::server::capture_razer_key_code(key_code);
-                    let core = core(&ctx);
-                    core.settings.set_razer_key_code(key_code);
-                }
             }
             SideEffect::PerfMode(mode) => {
                 TrayManager::set_tray_icon(mode);
