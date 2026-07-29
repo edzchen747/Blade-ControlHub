@@ -7,6 +7,7 @@ use eframe::egui;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::config::ThemeColor;
+use crate::razer::enums::PerfMode;
 
 // ── Re-exports for backward compatibility ─────────────────────────────────────
 
@@ -18,6 +19,9 @@ pub use super::layout::*;
 
 /// Default icon color (hex string for SVG replacement).
 pub const DEFAULT_ICON_COLOR: &str = "#95A5A6";
+
+/// Neutral icon/accent color used before the runtime settings state is available.
+pub const SETTINGS_LOADING_ICON_COLOR: ThemeColor = ThemeColor::new(0x95, 0xa5, 0xa6);
 
 /// Tooltip text displayed when hovering the tray icon.
 pub const APP_TOOLTIP: &str = "Blade ControlHub";
@@ -123,6 +127,28 @@ pub fn theme_text_color(color: ThemeColor) -> egui::Color32 {
         egui::Color32::BLACK
     } else {
         egui::Color32::WHITE
+    }
+}
+
+pub fn perf_mode_hex_color(mode: PerfMode) -> &'static str {
+    perf_mode_color_components(mode).0
+}
+
+pub fn perf_mode_color32(mode: PerfMode) -> egui::Color32 {
+    let (_, r, g, b) = perf_mode_color_components(mode);
+    egui::Color32::from_rgb(r, g, b)
+}
+
+fn perf_mode_color_components(mode: PerfMode) -> (&'static str, u8, u8, u8) {
+    match mode {
+        PerfMode::BatterySaver => ("#9BF542", 0x9b, 0xf5, 0x42),
+        PerfMode::Silent => ("#00C853", 0x00, 0xc8, 0x53),
+        PerfMode::Quiet => ("#00E5FF", 0x00, 0xe5, 0xff),
+        PerfMode::Balanced => ("#FFD600", 0xff, 0xd6, 0x00),
+        PerfMode::Performance => ("#FF5D00", 0xff, 0x5d, 0x00),
+        PerfMode::Turbo => ("#D50000", 0xd5, 0x00, 0x00),
+        PerfMode::Custom => ("#A200FF", 0xa2, 0x00, 0xff),
+        PerfMode::Unknown => (DEFAULT_ICON_COLOR, 0x95, 0xa5, 0xa6),
     }
 }
 

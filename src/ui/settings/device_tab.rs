@@ -8,6 +8,7 @@ use crate::razer::{
     enums::{PerfMode, RGBEffect},
 };
 use crate::runtime::settings_state::DeviceProfileState;
+use crate::ui::theme::perf_mode_color32;
 
 use super::Settings;
 use super::SettingsCommand;
@@ -50,22 +51,32 @@ fn profile_switcher(ui: &mut egui::Ui, settings: &mut Settings) {
 
 fn performance_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
     let profile = settings.selected_profile;
-    section(ui, "Performance", |ui| {
-        let Some(profile_state) = selected_profile_state(settings) else {
-            ui.label("Waiting for runtime state...");
-            return;
-        };
+    let profile_state = selected_profile_state(settings);
+    let perf_mode = profile_state
+        .as_ref()
+        .map(|state| state.perf_mode)
+        .unwrap_or(PerfMode::Unknown);
 
-        ui.horizontal_wrapped(|ui| {
-            for mode in profile_state.perf_modes {
-                let selected = mode == profile_state.perf_mode;
-                if ui.selectable_label(selected, mode.to_string()).clicked() && !selected {
-                    set_perf_mode(settings, profile, mode);
-                    ctx.request_repaint_of(egui::ViewportId::ROOT);
+    section_with_header(
+        ui,
+        |ui| performance_header(ui, perf_mode),
+        |ui| {
+            let Some(profile_state) = profile_state else {
+                ui.label("Waiting for runtime state...");
+                return;
+            };
+
+            ui.horizontal_wrapped(|ui| {
+                for mode in profile_state.perf_modes {
+                    let selected = mode == profile_state.perf_mode;
+                    if ui.selectable_label(selected, mode.to_string()).clicked() && !selected {
+                        set_perf_mode(settings, profile, mode);
+                        ctx.request_repaint_of(egui::ViewportId::ROOT);
+                    }
                 }
-            }
-        });
-    });
+            });
+        },
+    );
 }
 
 fn refresh_rate_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
@@ -149,14 +160,37 @@ fn other_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut Settings
 }
 
 fn section(ui: &mut egui::Ui, title: &str, add_contents: impl FnOnce(&mut egui::Ui)) {
+    section_with_header(
+        ui,
+        |ui| {
+            ui.label(title);
+        },
+        add_contents,
+    );
+}
+
+fn section_with_header(
+    ui: &mut egui::Ui,
+    add_header: impl FnOnce(&mut egui::Ui),
+    add_contents: impl FnOnce(&mut egui::Ui),
+) {
     egui::Frame::group(ui.style())
         .inner_margin(egui::Margin::symmetric(8.0, 7.0))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(title);
+            add_header(ui);
             ui.separator();
             add_contents(ui);
         });
+}
+
+fn performance_header(ui: &mut egui::Ui, perf_mode: PerfMode) {
+    ui.horizontal(|ui| {
+        ui.label("Performance");
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(egui::RichText::new("⏺").color(perf_mode_color32(perf_mode)));
+        });
+    });
 }
 
 fn selected_profile_state(settings: &Settings) -> Option<DeviceProfileState> {

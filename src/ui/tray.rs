@@ -18,7 +18,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use crate::razer::enums::PerfMode;
 use crate::ui::app::app;
 use crate::ui::app_events::AppEvent;
-use crate::ui::theme::{APP_TOOLTIP, DEFAULT_ICON_COLOR, TRAY_ICON_SCALE_FACTOR, TRAY_ICON_SIZE};
+use crate::ui::theme::{
+    APP_TOOLTIP, DEFAULT_ICON_COLOR, TRAY_ICON_SCALE_FACTOR, TRAY_ICON_SIZE, perf_mode_hex_color,
+};
 use crate::win::system::cli_utils::cycle_gpu;
 use crate::win::system::startup::Startup;
 
@@ -285,22 +287,9 @@ impl TrayManager {
 
     fn set_perf_mode_icon(tray_icon: &mut TrayIcon, perf_mode: PerfMode) {
         debug!(mode = ?perf_mode, "Switching tray icon colour");
-        let hex = Self::perf_mode_color(perf_mode);
+        let hex = perf_mode_hex_color(perf_mode);
         if let Some(new_icon) = Self::load_tray_icon(hex) {
             let _ = tray_icon.set_icon(Some(new_icon));
-        }
-    }
-
-    fn perf_mode_color(mode: PerfMode) -> &'static str {
-        match mode {
-            PerfMode::BatterySaver => "#9BF542",
-            PerfMode::Silent => "#00C853",
-            PerfMode::Quiet => "#00E5FF",
-            PerfMode::Balanced => "#FFD600",
-            PerfMode::Performance => "#FF5D00",
-            PerfMode::Turbo => "#D50000",
-            PerfMode::Custom => "#A200FF",
-            PerfMode::Unknown => DEFAULT_ICON_COLOR,
         }
     }
 
@@ -415,22 +404,16 @@ mod tests {
     fn perf_mode_color_maps_known_modes() {
         let _guard = test_lock();
 
-        assert_eq!(TrayManager::perf_mode_color(PerfMode::Balanced), "#FFD600");
-        assert_eq!(TrayManager::perf_mode_color(PerfMode::Turbo), "#D50000");
-        assert_eq!(
-            TrayManager::perf_mode_color(PerfMode::BatterySaver),
-            "#9BF542"
-        );
+        assert_eq!(perf_mode_hex_color(PerfMode::Balanced), "#FFD600");
+        assert_eq!(perf_mode_hex_color(PerfMode::Turbo), "#D50000");
+        assert_eq!(perf_mode_hex_color(PerfMode::BatterySaver), "#9BF542");
     }
 
     #[test]
     fn perf_mode_color_uses_default_for_unknown() {
         let _guard = test_lock();
 
-        assert_eq!(
-            TrayManager::perf_mode_color(PerfMode::Unknown),
-            DEFAULT_ICON_COLOR
-        );
+        assert_eq!(perf_mode_hex_color(PerfMode::Unknown), DEFAULT_ICON_COLOR);
     }
 
     #[test]

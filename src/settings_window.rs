@@ -7,7 +7,8 @@ use blade_controlhub::ui::settings::Settings;
 use blade_controlhub::ui::settings::SettingsCommand;
 use blade_controlhub::ui::settings::store::SettingsStore;
 use blade_controlhub::ui::theme::{
-    SETTINGS_PADDING_RATIO, SETTINGS_WINDOW_SIZE, SETTINGS_WINDOW_TITLE,
+    SETTINGS_LOADING_ICON_COLOR, SETTINGS_PADDING_RATIO, SETTINGS_WINDOW_SIZE,
+    SETTINGS_WINDOW_TITLE,
 };
 use eframe::egui;
 use std::time::{Duration, Instant};
@@ -28,7 +29,15 @@ struct SettingsApp {
 impl SettingsApp {
     fn new(state: Option<SettingsState>) -> Self {
         let settings = SettingsStore::new();
-        settings.show(state.clone().unwrap_or_default());
+        if let Some(state) = state.clone() {
+            settings.show(state);
+        } else {
+            settings.with_settings(|settings| {
+                settings.show = true;
+                settings.update = true;
+                settings.state = None;
+            });
+        }
         Self {
             settings,
             state_loaded: state.is_some(),
@@ -186,7 +195,7 @@ impl SettingsApp {
                 .state
                 .as_ref()
                 .map(|state| state.theme_color)
-                .unwrap_or_default()
+                .unwrap_or(SETTINGS_LOADING_ICON_COLOR)
         });
 
         if self.applied_window_icon_color == Some(color) {
@@ -326,7 +335,7 @@ fn main() -> eframe::Result<()> {
         initial_state
             .as_ref()
             .map(|state| state.theme_color)
-            .unwrap_or_default(),
+            .unwrap_or(SETTINGS_LOADING_ICON_COLOR),
     );
     let window_size = SETTINGS_WINDOW_SIZE;
 
@@ -420,6 +429,17 @@ mod tests {
         assert_eq!(monitor_from_dimensions(0, 1080), None);
         assert_eq!(monitor_from_dimensions(1920, 0), None);
         assert_eq!(monitor_from_dimensions(-1, 1080), None);
+    }
+
+    #[test]
+    fn settings_app_starts_loading_without_default_settings_state() {
+        let app = SettingsApp::new(None);
+
+        assert!(!app.state_loaded);
+        assert!(
+            app.settings
+                .with_settings(|settings| settings.state.is_none() && settings.show)
+        );
     }
 
     #[test]

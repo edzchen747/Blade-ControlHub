@@ -2,6 +2,7 @@ use eframe::egui::{self};
 use egui::Context;
 use resvg::{tiny_skia, usvg};
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::warn;
 
 use crate::config::ThemeColor;
@@ -11,7 +12,10 @@ use crate::razer::{
 };
 use crate::runtime::settings_state::SettingsState;
 use crate::ui::custom_key_map::CustomKeyMap;
-use crate::ui::theme::{SETTINGS_ICON_SIZE, scaled_theme_color32, theme_color32, theme_text_color};
+use crate::ui::theme::{
+    SETTINGS_ICON_SIZE, SETTINGS_LOADING_ICON_COLOR, scaled_theme_color32, theme_color32,
+    theme_text_color,
+};
 
 mod device_tab;
 mod key_mapping_tab;
@@ -116,6 +120,11 @@ impl Settings {
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
+            if self.state.is_none() {
+                loading_screen(ui, ctx);
+                return;
+            }
+
             ui.heading(Self::get_model_name(&self.state));
             ui.separator();
 
@@ -211,7 +220,7 @@ impl Settings {
             .state
             .as_ref()
             .map(|state| state.theme_color)
-            .unwrap_or_default();
+            .unwrap_or(SETTINGS_LOADING_ICON_COLOR);
 
         apply_settings_theme(ctx, color);
 
@@ -224,6 +233,20 @@ impl Settings {
         ))));
         self.applied_icon_color = Some(color);
     }
+}
+
+fn loading_screen(ui: &mut egui::Ui, ctx: &Context) {
+    ctx.request_repaint_after(Duration::from_millis(16));
+
+    let available_size = ui.available_size();
+
+    ui.allocate_ui_with_layout(
+        available_size,
+        egui::Layout::centered_and_justified(egui::Direction::TopDown),
+        |ui| {
+            ui.add(egui::Spinner::new().size(50.0));
+        },
+    );
 }
 
 fn apply_settings_theme(ctx: &Context, color: ThemeColor) {

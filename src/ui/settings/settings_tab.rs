@@ -88,9 +88,16 @@ fn theme_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut Settings
         let mut rgb = theme_color(settings).to_rgb_array();
 
         ui.horizontal(|ui| {
-            ui.label("Accent Colour");
+            ui.label("Accent Color");
             if ui.color_edit_button_rgb(&mut rgb).changed() {
                 set_theme_color(settings, ThemeColor::from_rgb_array(rgb));
+                ctx.request_repaint_of(egui::ViewportId::ROOT);
+            };
+            if ui.button("Reset").clicked() {
+                set_theme_color(
+                    settings,
+                    ThemeColor::from_rgb_array(ThemeColor::default().to_rgb_array()),
+                );
                 ctx.request_repaint_of(egui::ViewportId::ROOT);
             }
         });
