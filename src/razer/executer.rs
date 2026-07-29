@@ -1,8 +1,9 @@
+use crate::config::ThemeColor;
 use crate::config::persist_config;
 use crate::error::AppError;
-use crate::razer::config::AppConfig;
+use crate::razer::config::{AppConfig, PowerProfile};
 use crate::razer::device_handle::DeviceCmd;
-use crate::razer::enums::RGBEffect;
+use crate::razer::enums::{BatteryLimit, PerfMode, RGBEffect};
 use crate::razer::handlers::{
     AudioHandler, BatteryHandler, DisplayHandler, KeyboardHandler, PerformanceHandler,
 };
@@ -37,6 +38,7 @@ impl<'a> Executer<'a> {
         rx: Receiver<DeviceCmd>,
     ) -> Result<Self, AppError> {
         let display_manager = DisplayManager::new().ok_or(AppError::DisplayNotFound)?;
+        crate::ui::theme::set_runtime_theme_color(app_config.theme_color);
         Ok(Self {
             device,
             app_config,
@@ -92,18 +94,39 @@ impl<'a> Executer<'a> {
             DeviceCmd::AdjustKeyboardLight(up) => self.kb().adjust_keyboard_light(up),
             DeviceCmd::CycleRGBMode => self.kb().cycle_rgb_mode(),
             DeviceCmd::ToggleUnderGlow => self.kb().toggle_under_glow(),
+            DeviceCmd::SetUnderGlow(profile, enabled, tx) => {
+                let _ = tx.send(self.set_under_glow_for_profile(profile, enabled));
+            }
             DeviceCmd::SetKeyboardColor(r, g, b) => self.kb().set_keyboard_color(r, g, b),
+            DeviceCmd::SetKeyboardBrightness(profile, brightness, tx) => {
+                let _ = tx.send(self.set_keyboard_brightness_for_profile(profile, brightness));
+            }
             DeviceCmd::SetLidLogo(mode) => self.kb().set_lid_logo(mode),
             DeviceCmd::CyclePerfMode => self.perf().cycle_perf_mode(),
+            DeviceCmd::SetPerfMode(profile, mode, tx) => {
+                let _ = tx.send(self.set_perf_mode_for_profile(profile, mode));
+            }
             DeviceCmd::AdjustScreenBrightness(change) => {
                 self.brightness_worker.adjust_screen_brightness(change);
                 self.persist_config();
             }
             DeviceCmd::CycleRefreshRate => self.display().cycle_refresh_rate(),
+            DeviceCmd::SetRefreshRate(profile, refresh_rate, tx) => {
+                let _ = tx.send(self.set_refresh_rate_for_profile(profile, refresh_rate));
+            }
             DeviceCmd::SetMuteIndicator(io, muted) => {
                 AudioHandler::new(self.device).set_mute_indicator(io, muted);
             }
             DeviceCmd::CycleBatteryLimit => self.battery().cycle_battery_limit(),
+            DeviceCmd::SetBatteryLimit(limit, tx) => {
+                let _ = tx.send(self.set_battery_limit(limit));
+            }
+            DeviceCmd::SetThemeColor(color, tx) => {
+                let _ = tx.send(self.set_theme_color(color));
+            }
+            DeviceCmd::SetRGBMode(profile, effect, tx) => {
+                let _ = tx.send(self.set_rgb_effect_for_profile(profile, effect));
+            }
             DeviceCmd::GetPID(tx) => {
                 let _ = tx.send(self.device.info.pid);
             }
@@ -119,14 +142,126 @@ impl<'a> Executer<'a> {
             DeviceCmd::ToggleDefaultMultimediaKeys(tx) => {
                 let _ = tx.send(self.kb().toggle_default_multimedia_keys());
             }
+            DeviceCmd::SetDefaultMultimediaKeys(enabled, tx) => {
+                let _ = tx.send(self.set_default_multimedia_keys(enabled));
+            }
             DeviceCmd::GetConfig(tx) => {
                 let _ = tx.send(self.app_config.clone());
+            }
+            DeviceCmd::GetSettingsState(tx) => {
+                let supported_refresh_rates = self.display_manager.get_supported_rates();
+                let state = crate::runtime::settings_state::SettingsState::from_config(
+                    self.app_config.clone(),
+                    supported_refresh_rates,
+                );
+                let _ = tx.send(state);
             }
             DeviceCmd::PersistConfig => {
                 crate::config::persist_config(self.app_config, &self.persist_buffer);
             }
         }
         true
+    }
+
+    fn set_perf_mode_for_profile(
+        &mut self,
+        profile: PowerProfile,
+        mode: PerfMode,
+    ) -> crate::error::AppResult<()> {
+        if self.profile_is_active(profile) {
+            self.perf().set_perf_mode(mode);
+        } else {
+            self.app_config.profile_mut(profile).perf_mode.set(&mode)?;
+            self.persist_config();
+        }
+        Ok(())
+    }
+
+    fn set_refresh_rate_for_profile(
+        &mut self,
+        profile: PowerProfile,
+        refresh_rate: u32,
+    ) -> crate::error::AppResult<()> {
+        let supported = self.display_manager.get_supported_rates();
+        if !supported.contains(&refresh_rate) {
+            return Err(crate::error::AppError::Internal(format!(
+                "Unsupported refresh rate: {refresh_rate}Hz"
+            )));
+        }
+
+        if self.profile_is_active(profile) {
+            self.display().set_refresh_rate(refresh_rate);
+        } else {
+            self.app_config.profile_mut(profile).screen_refresh = refresh_rate;
+            self.persist_config();
+        }
+        Ok(())
+    }
+
+    fn set_keyboard_brightness_for_profile(
+        &mut self,
+        profile: PowerProfile,
+        brightness: u8,
+    ) -> crate::error::AppResult<()> {
+        if self.profile_is_active(profile) {
+            self.kb().set_keyboard_brightness(brightness);
+        } else {
+            self.app_config.profile_mut(profile).key_lvl = brightness;
+            self.persist_config();
+        }
+        Ok(())
+    }
+
+    fn set_rgb_effect_for_profile(
+        &mut self,
+        profile: PowerProfile,
+        effect: RGBEffect,
+    ) -> crate::error::AppResult<()> {
+        if self.profile_is_active(profile) {
+            self.kb().set_rgb_effect(effect);
+        } else {
+            self.app_config
+                .profile_mut(profile)
+                .rgb_effect
+                .set(&effect)?;
+            self.persist_config();
+        }
+        Ok(())
+    }
+
+    fn set_under_glow_for_profile(
+        &mut self,
+        profile: PowerProfile,
+        enabled: bool,
+    ) -> crate::error::AppResult<()> {
+        if self.profile_is_active(profile) {
+            self.kb().set_under_glow_enabled(enabled);
+        } else {
+            self.app_config.profile_mut(profile).vc_lvl = if enabled { 255 } else { 0 };
+            self.persist_config();
+        }
+        Ok(())
+    }
+
+    fn set_battery_limit(&mut self, limit: BatteryLimit) -> crate::error::AppResult<()> {
+        self.battery().set_battery_limit(limit);
+        Ok(())
+    }
+
+    fn set_default_multimedia_keys(&mut self, enabled: bool) -> crate::error::AppResult<()> {
+        self.kb().set_default_multimedia_keys(enabled);
+        Ok(())
+    }
+
+    fn set_theme_color(&mut self, color: ThemeColor) -> crate::error::AppResult<()> {
+        self.app_config.theme_color = color;
+        crate::ui::theme::set_runtime_theme_color(color);
+        self.persist_config();
+        Ok(())
+    }
+
+    fn profile_is_active(&self, profile: PowerProfile) -> bool {
+        AppConfig::active_profile() == profile
     }
 
     #[instrument(skip(self), fields(notify_startup))]

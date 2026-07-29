@@ -5,7 +5,6 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 
 use crate::core::shared_state::KEYMAP_LISTENING;
 use crate::razer::device_handle::{DeviceHandle, device, stop_device_channel_monitor};
-use crate::runtime::settings_state::SettingsState;
 use crate::ui::app_events::AppEvent::{self, OsdEvent};
 use crate::ui::event_dispatcher::{EventDispatcher, SideEffect};
 use crate::ui::osd_controller::OsdController;
@@ -193,11 +192,7 @@ fn shutdown_runtime(ctx: &AppContext, reason: &str) {
 }
 
 fn open_or_toggle_settings(ctx: &AppContext) {
-    let settings_state = ctx
-        .device
-        .get_config()
-        .map(SettingsState::from)
-        .unwrap_or_default();
+    let settings_state = ctx.device.get_settings_state().unwrap_or_default();
 
     {
         let core = core(ctx);

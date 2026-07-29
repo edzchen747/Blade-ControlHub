@@ -7,7 +7,7 @@ mod mock_device;
 
 use crate::hal::DeviceController;
 use crate::razer::config::AppConfig;
-use crate::razer::enums::{BATTERY_LIMITS, PERF_MODES, RGB_EFFECTS};
+use crate::razer::enums::{BATTERY_LIMITS, PERF_MODES, PerfMode, RGB_EFFECTS};
 use mock_device::MockDeviceController;
 
 // ── MockDeviceController wiring ──────────────────────────────────────────────
@@ -69,8 +69,19 @@ fn app_config_battery_limit_cycle_covers_all_items() {
 }
 
 #[test]
-fn perf_modes_constant_has_seven_entries() {
-    assert_eq!(PERF_MODES.len(), 7);
+fn perf_modes_constant_uses_ui_order() {
+    assert_eq!(
+        PERF_MODES,
+        [
+            PerfMode::BatterySaver,
+            PerfMode::Silent,
+            PerfMode::Quiet,
+            PerfMode::Balanced,
+            PerfMode::Performance,
+            PerfMode::Turbo,
+            PerfMode::Custom,
+        ]
+    );
 }
 
 #[test]

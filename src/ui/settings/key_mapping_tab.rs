@@ -13,7 +13,7 @@ use crate::ui::theme::{
 
 use super::Settings;
 use super::SettingsCommand;
-use super::device_tab::default_func_key_switcher;
+use super::settings_tab::default_func_key_switcher;
 
 pub fn show(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
     ui.horizontal(|ui| {

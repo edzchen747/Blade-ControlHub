@@ -17,9 +17,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{PCWSTR, Result as WinResult, w};
 
-use crate::ui::app::app;
-use crate::ui::app_events::AppEvent;
-
 const WM_GPU_MONITOR_STOP: u32 = WM_USER + 3;
 static GPU_MONITOR_RUNNING: AtomicBool = AtomicBool::new(false);
 static GPU_MONITOR_HWND: AtomicIsize = AtomicIsize::new(0);
@@ -129,12 +126,10 @@ impl GpuDisplayMonitor {
     }
 
     fn display_gpu_change_callback(&mut self, new_display_gpu: String) {
-        if should_restart_for_gpu_change(&self.last_display_gpu, &new_display_gpu) {
-            info!("Display changed to different graphics adapter. Restarting app...");
-            app(AppEvent::Restart(1));
-        } else {
-            self.last_display_gpu = new_display_gpu;
+        if display_gpu_changed(&self.last_display_gpu, &new_display_gpu) {
+            info!("Display changed to different graphics adapter; restart is no longer required");
         }
+        self.last_display_gpu = new_display_gpu;
     }
 }
 
@@ -318,7 +313,7 @@ fn parse_wchar_slice(slice: &[u16]) -> OsString {
     OsString::from_wide(&slice[..len])
 }
 
-fn should_restart_for_gpu_change(last_display_gpu: &str, new_display_gpu: &str) -> bool {
+fn display_gpu_changed(last_display_gpu: &str, new_display_gpu: &str) -> bool {
     !last_display_gpu.is_empty() && last_display_gpu != new_display_gpu
 }
 
@@ -326,7 +321,7 @@ fn should_restart_for_gpu_change(last_display_gpu: &str, new_display_gpu: &str) 
 mod tests {
     use super::{
         GPU_MONITOR_HWND, GPU_MONITOR_RUNNING, GpuDisplayMonitor, gpu_monitor_thread,
-        join_gpu_monitor_thread, parse_wchar_slice, should_restart_for_gpu_change,
+        join_gpu_monitor_thread, parse_wchar_slice,
     };
     use std::sync::atomic::Ordering;
     use std::thread;
@@ -341,18 +336,28 @@ mod tests {
     }
 
     #[test]
-    fn gpu_change_does_not_restart_before_baseline() {
-        assert!(!should_restart_for_gpu_change("", "NVIDIA"));
+    fn gpu_change_is_ignored_before_baseline() {
+        assert!(!super::display_gpu_changed("", "NVIDIA"));
     }
 
     #[test]
-    fn gpu_change_does_not_restart_for_same_gpu() {
-        assert!(!should_restart_for_gpu_change("NVIDIA", "NVIDIA"));
+    fn gpu_change_is_false_for_same_gpu() {
+        assert!(!super::display_gpu_changed("NVIDIA", "NVIDIA"));
     }
 
     #[test]
-    fn gpu_change_restarts_after_baseline_changes() {
-        assert!(should_restart_for_gpu_change("Intel", "NVIDIA"));
+    fn gpu_change_is_detected_after_baseline_changes() {
+        assert!(super::display_gpu_changed("Intel", "NVIDIA"));
+    }
+
+    #[test]
+    fn gpu_change_callback_updates_last_gpu_without_restart() {
+        let mut monitor = GpuDisplayMonitor::new();
+
+        monitor.display_gpu_change_callback("Intel".to_string());
+        monitor.display_gpu_change_callback("NVIDIA".to_string());
+
+        assert_eq!(monitor.last_display_gpu, "NVIDIA");
     }
 
     #[test]

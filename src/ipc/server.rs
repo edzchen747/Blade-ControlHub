@@ -21,7 +21,6 @@ use crate::core::shared_state::KEYMAP_LISTENING;
 use crate::ipc::framing::{PipeHandle, read_json_frame, wide_null, write_json_frame};
 use crate::ipc::protocol::{IpcRequest, IpcResponse, PIPE_NAME};
 use crate::razer::device_handle::DeviceHandle;
-use crate::runtime::settings_state::SettingsState;
 
 static IPC_SERVER_RUNNING: AtomicBool = AtomicBool::new(false);
 static IPC_SERVER_THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
@@ -103,24 +102,26 @@ fn handle_client(pipe: &PipeHandle, device: &DeviceHandle) {
 
 fn dispatch_request(request: IpcRequest, device: &DeviceHandle) -> IpcResponse {
     match request {
-        IpcRequest::GetSettingsState => match device.get_config() {
-            Ok(config) => IpcResponse::SettingsState(SettingsState::from(config)),
+        IpcRequest::GetSettingsState => match device.get_settings_state() {
+            Ok(state) => IpcResponse::SettingsState(state),
             Err(error) => IpcResponse::Error {
                 message: error.to_string(),
             },
         },
-        IpcRequest::SetDefaultMultimediaKeys { enabled } => match device.get_config() {
-            Ok(config) if config.default_multimedia_keys == enabled => IpcResponse::Ack,
-            Ok(_) => match device.toggle_default_multimedia_keys() {
-                Ok(_) => IpcResponse::Ack,
-                Err(error) => IpcResponse::Error {
-                    message: error.to_string(),
-                },
-            },
-            Err(error) => IpcResponse::Error {
-                message: error.to_string(),
-            },
-        },
+        IpcRequest::SetDefaultMultimediaKeys { enabled } => {
+            ack(device.set_default_multimedia_keys(enabled))
+        }
+        IpcRequest::SetPerfMode { profile, mode } => ack(device.set_perf_mode(profile, mode)),
+        IpcRequest::SetRefreshRate { profile, hz } => ack(device.set_refresh_rate(profile, hz)),
+        IpcRequest::SetKeyboardBrightness { profile, level } => {
+            ack(device.set_keyboard_brightness(profile, level))
+        }
+        IpcRequest::SetRgbEffect { profile, effect } => ack(device.set_rgb_mode(profile, effect)),
+        IpcRequest::SetUnderGlow { profile, enabled } => {
+            ack(device.set_under_glow(profile, enabled))
+        }
+        IpcRequest::SetBatteryLimit { limit } => ack(device.set_battery_limit(limit)),
+        IpcRequest::SetThemeColor { color } => ack(device.set_theme_color(color)),
         IpcRequest::BeginRazerKeyCapture => {
             *captured_razer_key() = None;
             KEYMAP_LISTENING.store(true, Ordering::SeqCst);
@@ -134,6 +135,15 @@ fn dispatch_request(request: IpcRequest, device: &DeviceHandle) -> IpcResponse {
         IpcRequest::PollCapturedRazerKey => {
             IpcResponse::CapturedRazerKey(captured_razer_key().take())
         }
+    }
+}
+
+fn ack(result: crate::error::AppResult<()>) -> IpcResponse {
+    match result {
+        Ok(()) => IpcResponse::Ack,
+        Err(error) => IpcResponse::Error {
+            message: error.to_string(),
+        },
     }
 }
 

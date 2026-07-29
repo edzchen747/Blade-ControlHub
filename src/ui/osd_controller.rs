@@ -482,8 +482,9 @@ fn generate_progress_svg(total_steps: usize, active_steps: usize) -> String {
 
     for i in 0..total_steps {
         let x_pos = padding_x + i as f32 * (block_w + gap);
+        let active_fill = crate::ui::theme::runtime_theme_color().to_hex_string();
         let fill_color = if i < active_steps {
-            "#F1C40F"
+            active_fill.as_str()
         } else {
             "#FFFFFF"
         };
@@ -509,8 +510,11 @@ fn render_svg_to_bytes(
 ) -> Option<Vec<u8>> {
     let opt = get_svg_options();
 
-    let bg_data = include_bytes!("../../assets/frame.svg");
-    let bg_tree = match resvg::usvg::Tree::from_data(bg_data, opt) {
+    let frame_svg = include_str!("../../assets/frame.svg").replace(
+        "#F1C40F",
+        &crate::ui::theme::runtime_theme_color().to_hex_string(),
+    );
+    let bg_tree = match resvg::usvg::Tree::from_data(frame_svg.as_bytes(), opt) {
         Ok(tree) => tree,
         Err(error) => {
             warn!(?error, "Failed to parse OSD frame SVG");

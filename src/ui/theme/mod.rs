@@ -4,6 +4,9 @@
 //! This module now focuses exclusively on colors, fonts, and visual effects.
 
 use eframe::egui;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+use crate::config::ThemeColor;
 
 // ── Re-exports for backward compatibility ─────────────────────────────────────
 
@@ -13,7 +16,7 @@ pub use super::layout::*;
 
 // ── Tray Theme ───────────────────────────────────────────────────────────────
 
-/// Default tray icon color (hex string for SVG replacement).
+/// Default icon color (hex string for SVG replacement).
 pub const DEFAULT_ICON_COLOR: &str = "#95A5A6";
 
 /// Tooltip text displayed when hovering the tray icon.
@@ -22,8 +25,8 @@ pub const APP_TOOLTIP: &str = "Blade ControlHub";
 /// Title shown on the settings window frame.
 pub const SETTINGS_WINDOW_TITLE: &str = "Blade ControlHub";
 
-/// Gold color used for the settings icon SVG replacement.
-pub const SETTINGS_ICON_COLOR: &str = "#FFD700";
+static RUNTIME_THEME_COLOR: AtomicU32 =
+    AtomicU32::new(theme_color_to_u32(ThemeColor::new(0xff, 0xd7, 0x00)));
 
 // ── OSD Colors ───────────────────────────────────────────────────────────────
 
@@ -91,4 +94,46 @@ impl OsdColors {
     fn clamp(v: f32) -> f32 {
         v.clamp(0.0, 255.0)
     }
+}
+
+pub fn set_runtime_theme_color(color: ThemeColor) {
+    RUNTIME_THEME_COLOR.store(theme_color_to_u32(color), Ordering::SeqCst);
+}
+
+pub fn runtime_theme_color() -> ThemeColor {
+    theme_color_from_u32(RUNTIME_THEME_COLOR.load(Ordering::SeqCst))
+}
+
+pub fn theme_color32(color: ThemeColor) -> egui::Color32 {
+    egui::Color32::from_rgb(color.r, color.g, color.b)
+}
+
+pub fn scaled_theme_color32(color: ThemeColor, scale: f32) -> egui::Color32 {
+    let scale = scale.clamp(0.0, 1.0);
+    egui::Color32::from_rgb(
+        (color.r as f32 * scale).round() as u8,
+        (color.g as f32 * scale).round() as u8,
+        (color.b as f32 * scale).round() as u8,
+    )
+}
+
+pub fn theme_text_color(color: ThemeColor) -> egui::Color32 {
+    let luminance = 0.2126 * color.r as f32 + 0.7152 * color.g as f32 + 0.0722 * color.b as f32;
+    if luminance > 145.0 {
+        egui::Color32::BLACK
+    } else {
+        egui::Color32::WHITE
+    }
+}
+
+const fn theme_color_to_u32(color: ThemeColor) -> u32 {
+    ((color.r as u32) << 16) | ((color.g as u32) << 8) | color.b as u32
+}
+
+fn theme_color_from_u32(value: u32) -> ThemeColor {
+    ThemeColor::new(
+        ((value >> 16) & 0xff) as u8,
+        ((value >> 8) & 0xff) as u8,
+        (value & 0xff) as u8,
+    )
 }

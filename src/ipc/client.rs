@@ -9,9 +9,14 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 
+use crate::config::ThemeColor;
 use crate::error::{AppError, AppResult};
 use crate::ipc::framing::{PipeHandle, read_json_frame, wide_null, write_json_frame};
 use crate::ipc::protocol::{IpcRequest, IpcResponse, PIPE_NAME};
+use crate::razer::{
+    config::PowerProfile,
+    enums::{BatteryLimit, PerfMode, RGBEffect},
+};
 use crate::runtime::settings_state::SettingsState;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(500);
@@ -28,6 +33,37 @@ pub fn set_default_multimedia_keys(enabled: bool) -> AppResult<()> {
     expect_ack(send_request(IpcRequest::SetDefaultMultimediaKeys {
         enabled,
     })?)
+}
+
+pub fn set_perf_mode(profile: PowerProfile, mode: PerfMode) -> AppResult<()> {
+    expect_ack(send_request(IpcRequest::SetPerfMode { profile, mode })?)
+}
+
+pub fn set_refresh_rate(profile: PowerProfile, hz: u32) -> AppResult<()> {
+    expect_ack(send_request(IpcRequest::SetRefreshRate { profile, hz })?)
+}
+
+pub fn set_keyboard_brightness(profile: PowerProfile, level: u8) -> AppResult<()> {
+    expect_ack(send_request(IpcRequest::SetKeyboardBrightness {
+        profile,
+        level,
+    })?)
+}
+
+pub fn set_rgb_effect(profile: PowerProfile, effect: RGBEffect) -> AppResult<()> {
+    expect_ack(send_request(IpcRequest::SetRgbEffect { profile, effect })?)
+}
+
+pub fn set_under_glow(profile: PowerProfile, enabled: bool) -> AppResult<()> {
+    expect_ack(send_request(IpcRequest::SetUnderGlow { profile, enabled })?)
+}
+
+pub fn set_battery_limit(limit: BatteryLimit) -> AppResult<()> {
+    expect_ack(send_request(IpcRequest::SetBatteryLimit { limit })?)
+}
+
+pub fn set_theme_color(color: ThemeColor) -> AppResult<()> {
+    expect_ack(send_request(IpcRequest::SetThemeColor { color })?)
 }
 
 pub fn begin_razer_key_capture() -> AppResult<()> {

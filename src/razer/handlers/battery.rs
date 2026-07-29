@@ -37,6 +37,7 @@ impl<'a> BatteryHandler<'a> {
     pub fn set_battery_limit(&mut self, limit: BatteryLimit) {
         let _ = command(self.device, 0x0712, &[limit as u8], None);
         let _ = command(self.device, 0x070f, &[10], None);
+        let _ = self.app_config.battery_limit.set(&limit);
         self.persist_config();
     }
 

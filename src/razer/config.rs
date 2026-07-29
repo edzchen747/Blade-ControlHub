@@ -1,9 +1,17 @@
+use crate::config::ThemeColor;
 use crate::core::shared_state::{IS_PLUGGED_IN, SHIFT_PRESSED};
 use crate::error::{AppError, AppResult};
 use crate::razer::enums::*;
 use std::sync::atomic::Ordering;
 
 use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PowerProfile {
+    #[default]
+    Ac,
+    Battery,
+}
 
 // ── CycleState ──────────────────────────────────────────────────────────────
 
@@ -107,7 +115,9 @@ fn default_rgb_effect() -> CycleState<RGBEffect> {
 }
 
 fn default_perf_mode() -> CycleState<PerfMode> {
-    CycleState::new(PERF_MODES.to_vec())
+    let mut perf_mode = CycleState::new(PERF_MODES.to_vec());
+    let _ = perf_mode.set(&PerfMode::Balanced);
+    perf_mode
 }
 
 // ── AppConfig ───────────────────────────────────────────────────────────────
@@ -123,6 +133,7 @@ pub struct AppConfig {
     battery_state: DeviceState,
     pub battery_limit: CycleState<BatteryLimit>,
     pub default_multimedia_keys: bool,
+    pub theme_color: ThemeColor,
     pub keyboard_width: u8,
 }
 
@@ -138,27 +149,42 @@ impl Default for AppConfig {
                 items: BATTERY_LIMITS.to_vec(),
             },
             default_multimedia_keys: false,
+            theme_color: ThemeColor::default(),
             keyboard_width: 0,
         }
     }
 }
 
 impl AppConfig {
+    pub fn active_profile() -> PowerProfile {
+        if IS_PLUGGED_IN.load(Ordering::SeqCst) {
+            PowerProfile::Ac
+        } else {
+            PowerProfile::Battery
+        }
+    }
+
     /// Returns a mutable reference to the active power state.
     pub fn get(&mut self) -> &mut DeviceState {
-        if IS_PLUGGED_IN.load(Ordering::SeqCst) {
-            &mut self.power_state
-        } else {
-            &mut self.battery_state
-        }
+        self.profile_mut(Self::active_profile())
     }
 
     /// Returns a clone of the active power state.
     pub fn read(&self) -> DeviceState {
-        if IS_PLUGGED_IN.load(Ordering::SeqCst) {
-            self.power_state.clone()
-        } else {
-            self.battery_state.clone()
+        self.profile(Self::active_profile())
+    }
+
+    pub fn profile(&self, profile: PowerProfile) -> DeviceState {
+        match profile {
+            PowerProfile::Ac => self.power_state.clone(),
+            PowerProfile::Battery => self.battery_state.clone(),
+        }
+    }
+
+    pub fn profile_mut(&mut self, profile: PowerProfile) -> &mut DeviceState {
+        match profile {
+            PowerProfile::Ac => &mut self.power_state,
+            PowerProfile::Battery => &mut self.battery_state,
         }
     }
 
@@ -192,5 +218,36 @@ mod tests {
         let serialized = serde_json::to_value(&config).expect("config must serialize");
         assert_eq!(serialized["model_pid"], "0x02c7");
         assert_eq!(config.model_name, "Razer Blade Test");
+    }
+
+    #[test]
+    fn app_config_defaults_to_gold_theme_color() {
+        let config = AppConfig::default();
+
+        assert_eq!(config.theme_color, ThemeColor::default());
+    }
+
+    #[test]
+    fn profile_mut_updates_only_selected_profile() {
+        let mut config = AppConfig::default();
+
+        config.profile_mut(PowerProfile::Battery).key_lvl = 51;
+
+        assert_eq!(config.profile(PowerProfile::Battery).key_lvl, 51);
+        assert_eq!(config.profile(PowerProfile::Ac).key_lvl, 255);
+    }
+
+    #[test]
+    fn default_perf_mode_remains_balanced() {
+        let mut config = AppConfig::default();
+
+        assert_eq!(
+            config.profile_mut(PowerProfile::Ac).perf_mode.value(),
+            PerfMode::Balanced
+        );
+        assert_eq!(
+            config.profile_mut(PowerProfile::Battery).perf_mode.value(),
+            PerfMode::Balanced
+        );
     }
 }

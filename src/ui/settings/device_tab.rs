@@ -1,53 +1,208 @@
 /// Device tab UI component.
 ///
-/// Renders the device settings panel, including the default function key behavior switcher.
+/// Renders AC/Battery profile-specific controls.
 use eframe::egui;
+
+use crate::razer::{
+    config::PowerProfile,
+    enums::{PerfMode, RGBEffect},
+};
+use crate::runtime::settings_state::DeviceProfileState;
 
 use super::Settings;
 use super::SettingsCommand;
 
 pub fn show(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
-    default_func_key_switcher(ui, ctx, settings);
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            profile_switcher(ui, settings);
+            ui.add_space(8.0);
+            performance_section(ui, ctx, settings);
+            ui.add_space(8.0);
+            refresh_rate_section(ui, ctx, settings);
+            ui.add_space(8.0);
+            lighting_section(ui, ctx, settings);
+            ui.add_space(8.0);
+            other_section(ui, ctx, settings);
+        });
 }
 
-pub(super) fn default_func_key_switcher(
-    ui: &mut eframe::egui::Ui,
-    ctx: &egui::Context,
-    settings: &mut Settings,
-) {
-    let mut changed = false;
-    ui.label("Default Function key behaviour:");
+fn profile_switcher(ui: &mut egui::Ui, settings: &mut Settings) {
     ui.horizontal(|ui| {
-        let current_default = default_multimedia_keys(settings);
-        let mut selected_default = current_default;
+        ui.label("Profile");
+        ui.selectable_value(&mut settings.selected_profile, PowerProfile::Ac, "AC Power");
+        ui.selectable_value(
+            &mut settings.selected_profile,
+            PowerProfile::Battery,
+            "Battery",
+        );
 
-        changed |= ui
-            .selectable_value(&mut selected_default, false, "Function")
-            .changed();
-        changed |= ui
-            .selectable_value(&mut selected_default, true, "Multimedia")
-            .changed();
+        if settings
+            .state
+            .as_ref()
+            .is_some_and(|state| state.current_profile == settings.selected_profile)
+        {
+            ui.label("Active");
+        }
+    });
+}
 
-        if changed && selected_default != current_default {
-            set_default_multimedia_keys(settings, selected_default);
+fn performance_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
+    let profile = settings.selected_profile;
+    section(ui, "Performance", |ui| {
+        let Some(profile_state) = selected_profile_state(settings) else {
+            ui.label("Waiting for runtime state...");
+            return;
+        };
+
+        ui.horizontal_wrapped(|ui| {
+            for mode in profile_state.perf_modes {
+                let selected = mode == profile_state.perf_mode;
+                if ui.selectable_label(selected, mode.to_string()).clicked() && !selected {
+                    set_perf_mode(settings, profile, mode);
+                    ctx.request_repaint_of(egui::ViewportId::ROOT);
+                }
+            }
+        });
+    });
+}
+
+fn refresh_rate_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
+    let profile = settings.selected_profile;
+    section(ui, "Refresh Rate", |ui| {
+        let Some(profile_state) = selected_profile_state(settings) else {
+            ui.label("Waiting for runtime state...");
+            return;
+        };
+
+        if profile_state.supported_refresh_rates.is_empty() {
+            ui.label("No refresh rates detected");
+            return;
+        }
+
+        ui.horizontal_wrapped(|ui| {
+            for hz in profile_state.supported_refresh_rates {
+                let selected = hz == profile_state.refresh_rate;
+                if ui.selectable_label(selected, format!("{hz} Hz")).clicked() && !selected {
+                    set_refresh_rate(settings, profile, hz);
+                    ctx.request_repaint_of(egui::ViewportId::ROOT);
+                }
+            }
+        });
+    });
+}
+
+fn lighting_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
+    let profile = settings.selected_profile;
+    section(ui, "Lighting", |ui| {
+        let Some(profile_state) = selected_profile_state(settings) else {
+            ui.label("Waiting for runtime state...");
+            return;
+        };
+
+        let mut brightness = profile_state.keyboard_brightness;
+        ui.horizontal(|ui| {
+            ui.label("Keyboard Brightness");
+            ui.add(
+                egui::Slider::new(&mut brightness, 0_u8..=255_u8)
+                    .show_value(false)
+                    .step_by(51.0),
+            );
+            ui.label((brightness / 51).to_string());
+        });
+        if brightness != profile_state.keyboard_brightness {
+            set_keyboard_brightness(settings, profile, brightness);
+            ctx.request_repaint_of(egui::ViewportId::ROOT);
+        }
+
+        let mut selected_effect = profile_state.rgb_effect;
+        egui::ComboBox::from_id_source(format!("rgb-effect-{profile:?}"))
+            .selected_text(selected_effect.to_string())
+            .show_ui(ui, |ui| {
+                for effect in &profile_state.rgb_effects {
+                    ui.selectable_value(&mut selected_effect, *effect, effect.to_string());
+                }
+            });
+
+        if selected_effect != profile_state.rgb_effect {
+            set_rgb_effect(settings, profile, selected_effect);
             ctx.request_repaint_of(egui::ViewportId::ROOT);
         }
     });
 }
 
-fn default_multimedia_keys(settings: &Settings) -> bool {
+fn other_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
+    let profile = settings.selected_profile;
+    section(ui, "Other", |ui| {
+        let Some(profile_state) = selected_profile_state(settings) else {
+            ui.label("Waiting for runtime state...");
+            return;
+        };
+
+        let mut enabled = profile_state.underglow_enabled;
+        if ui.checkbox(&mut enabled, "Vapour Chamber Light").changed() {
+            set_under_glow(settings, profile, enabled);
+            ctx.request_repaint_of(egui::ViewportId::ROOT);
+        }
+    });
+}
+
+fn section(ui: &mut egui::Ui, title: &str, add_contents: impl FnOnce(&mut egui::Ui)) {
+    egui::Frame::group(ui.style())
+        .inner_margin(egui::Margin::symmetric(8.0, 7.0))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(title);
+            ui.separator();
+            add_contents(ui);
+        });
+}
+
+fn selected_profile_state(settings: &Settings) -> Option<DeviceProfileState> {
     settings
         .state
         .as_ref()
-        .map(|state| state.default_multimedia_keys)
-        .unwrap_or_default()
+        .map(|state| state.profile(settings.selected_profile).clone())
 }
 
-fn set_default_multimedia_keys(settings: &mut Settings, enabled: bool) {
+fn set_perf_mode(settings: &mut Settings, profile: PowerProfile, mode: PerfMode) {
     if let Some(state) = settings.state.as_mut() {
-        state.default_multimedia_keys = enabled;
+        state.profile_mut(profile).perf_mode = mode;
         settings.update = true;
-        settings.queue_command(SettingsCommand::SetDefaultMultimediaKeys(enabled));
+        settings.queue_command(SettingsCommand::SetPerfMode(profile, mode));
+    }
+}
+
+fn set_refresh_rate(settings: &mut Settings, profile: PowerProfile, hz: u32) {
+    if let Some(state) = settings.state.as_mut() {
+        state.profile_mut(profile).refresh_rate = hz;
+        settings.update = true;
+        settings.queue_command(SettingsCommand::SetRefreshRate(profile, hz));
+    }
+}
+
+fn set_keyboard_brightness(settings: &mut Settings, profile: PowerProfile, brightness: u8) {
+    if let Some(state) = settings.state.as_mut() {
+        state.profile_mut(profile).keyboard_brightness = brightness;
+        settings.update = true;
+        settings.queue_command(SettingsCommand::SetKeyboardBrightness(profile, brightness));
+    }
+}
+
+fn set_rgb_effect(settings: &mut Settings, profile: PowerProfile, effect: RGBEffect) {
+    if let Some(state) = settings.state.as_mut() {
+        state.profile_mut(profile).rgb_effect = effect;
+        settings.update = true;
+        settings.queue_command(SettingsCommand::SetRgbEffect(profile, effect));
+    }
+}
+
+fn set_under_glow(settings: &mut Settings, profile: PowerProfile, enabled: bool) {
+    if let Some(state) = settings.state.as_mut() {
+        state.profile_mut(profile).underglow_enabled = enabled;
+        settings.update = true;
+        settings.queue_command(SettingsCommand::SetUnderGlow(profile, enabled));
     }
 }
 
@@ -58,24 +213,94 @@ mod tests {
     use crate::runtime::settings_state::SettingsState;
 
     #[test]
-    fn set_default_multimedia_keys_updates_settings_config() {
+    fn set_perf_mode_updates_selected_profile_only() {
         let mut settings = Settings::new();
         settings.show(SettingsState::from(AppConfig::default()));
 
-        set_default_multimedia_keys(&mut settings, true);
+        set_perf_mode(&mut settings, PowerProfile::Battery, PerfMode::Silent);
 
-        assert!(default_multimedia_keys(&settings));
-        assert!(settings.update);
+        let state = settings.state.as_ref().expect("state should be present");
+        assert_eq!(state.battery_profile.perf_mode, PerfMode::Silent);
+        assert_eq!(state.ac_profile.perf_mode, PerfMode::Balanced);
         assert_eq!(
             settings.drain_commands(),
-            vec![SettingsCommand::SetDefaultMultimediaKeys(true)]
+            vec![SettingsCommand::SetPerfMode(
+                PowerProfile::Battery,
+                PerfMode::Silent
+            )]
         );
     }
 
     #[test]
-    fn default_multimedia_keys_falls_back_to_function_mode_without_config() {
-        let settings = Settings::new();
+    fn set_refresh_rate_updates_selected_profile_only() {
+        let mut settings = Settings::new();
+        settings.show(SettingsState::from_config(
+            AppConfig::default(),
+            vec![60, 240],
+        ));
 
-        assert!(!default_multimedia_keys(&settings));
+        set_refresh_rate(&mut settings, PowerProfile::Battery, 240);
+
+        let state = settings.state.as_ref().expect("state should be present");
+        assert_eq!(state.battery_profile.refresh_rate, 240);
+        assert_eq!(state.ac_profile.refresh_rate, 0);
+        assert_eq!(
+            settings.drain_commands(),
+            vec![SettingsCommand::SetRefreshRate(PowerProfile::Battery, 240)]
+        );
+    }
+
+    #[test]
+    fn set_keyboard_brightness_updates_selected_profile_only() {
+        let mut settings = Settings::new();
+        settings.show(SettingsState::from(AppConfig::default()));
+
+        set_keyboard_brightness(&mut settings, PowerProfile::Battery, 102);
+
+        let state = settings.state.as_ref().expect("state should be present");
+        assert_eq!(state.battery_profile.keyboard_brightness, 102);
+        assert_eq!(state.ac_profile.keyboard_brightness, 255);
+        assert_eq!(
+            settings.drain_commands(),
+            vec![SettingsCommand::SetKeyboardBrightness(
+                PowerProfile::Battery,
+                102
+            )]
+        );
+    }
+
+    #[test]
+    fn set_rgb_effect_updates_selected_profile_only() {
+        let mut settings = Settings::new();
+        settings.show(SettingsState::from(AppConfig::default()));
+
+        set_rgb_effect(&mut settings, PowerProfile::Battery, RGBEffect::Wave);
+
+        let state = settings.state.as_ref().expect("state should be present");
+        assert_eq!(state.battery_profile.rgb_effect, RGBEffect::Wave);
+        assert_eq!(state.ac_profile.rgb_effect, RGBEffect::Cycle);
+        assert_eq!(
+            settings.drain_commands(),
+            vec![SettingsCommand::SetRgbEffect(
+                PowerProfile::Battery,
+                RGBEffect::Wave
+            )]
+        );
+    }
+
+    #[test]
+    fn set_under_glow_updates_selected_profile_only() {
+        let mut settings = Settings::new();
+        settings.show(SettingsState::from(AppConfig::default()));
+
+        set_under_glow(&mut settings, PowerProfile::Battery, false);
+
+        let state = settings.state.as_ref().expect("state should be present");
+        assert!(!state.battery_profile.underglow_enabled);
+        assert!(state.ac_profile.underglow_enabled);
+        assert_eq!(
+            settings.drain_commands(),
+            vec![SettingsCommand::SetUnderGlow(PowerProfile::Battery, false)]
+        );
     }
 }

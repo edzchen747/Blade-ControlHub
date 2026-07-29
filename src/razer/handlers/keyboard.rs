@@ -65,8 +65,16 @@ impl<'a> KeyboardHandler<'a> {
 
     pub fn toggle_default_multimedia_keys(&mut self) -> bool {
         let current_default = self.app_config.default_multimedia_keys;
-        self.app_config.default_multimedia_keys = !current_default;
-        match !current_default {
+        self.set_default_multimedia_keys(!current_default)
+    }
+
+    pub fn set_default_multimedia_keys(&mut self, enabled: bool) -> bool {
+        if self.app_config.default_multimedia_keys == enabled {
+            return self.get_default_multimedia_keys();
+        }
+
+        self.app_config.default_multimedia_keys = enabled;
+        match enabled {
             true => self.enable_multimedia_keys(),
             false => self.restore_fn_keys(),
         }
@@ -113,7 +121,11 @@ impl<'a> KeyboardHandler<'a> {
 
     pub fn toggle_under_glow(&mut self) {
         let brightness = self.get_under_glow_brightness();
-        let new_brightness = if brightness > 0 { 0 } else { 255 };
+        self.set_under_glow_enabled(brightness == 0);
+    }
+
+    pub fn set_under_glow_enabled(&mut self, enabled: bool) {
+        let new_brightness = if enabled { 255 } else { 0 };
         let _ = command(self.device, 0x0303, &[1, 38, new_brightness], None);
         let _ = command(self.device, 0x0300, &[1, 38, new_brightness / 255], None);
         app(OsdEvent::UnderGlow(new_brightness).into());

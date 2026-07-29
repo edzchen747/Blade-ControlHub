@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use strum_macros::Display;
 use tracing::warn;
 
-#[derive(Clone, Copy, Display, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Display, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PerfMode {
     #[strum(serialize = "Battery Saver")]
     BatterySaver = 3,
@@ -37,7 +37,7 @@ impl From<u8> for PerfMode {
     }
 }
 
-#[derive(Clone, Copy, Display, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Display, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RGBEffect {
     #[default]
     Cycle = 4,
@@ -71,7 +71,7 @@ impl From<u8> for RGBEffect {
     }
 }
 
-#[derive(Clone, Copy, Display, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Display, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BatteryLimit {
     #[default]
     Off = 60,
@@ -114,7 +114,7 @@ impl From<u8> for BatteryLimit {
     }
 }
 
-#[derive(Clone, Copy, Display, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Display, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LidLogoMode {
     On = 2,
     Breathing = 1,
@@ -132,13 +132,13 @@ pub const RGB_EFFECTS: [RGBEffect; 6] = [
 ];
 
 pub const PERF_MODES: [PerfMode; 7] = [
+    PerfMode::BatterySaver,
+    PerfMode::Silent,
+    PerfMode::Quiet,
     PerfMode::Balanced,
     PerfMode::Performance,
     PerfMode::Turbo,
     PerfMode::Custom,
-    PerfMode::BatterySaver,
-    PerfMode::Silent,
-    PerfMode::Quiet,
 ];
 
 pub const BATTERY_LIMITS: [BatteryLimit; 8] = [
