@@ -26,6 +26,7 @@ pub mod icons;
 pub mod layout;
 pub mod osd_controller;
 pub mod settings;
+pub mod settings_window;
 pub mod theme;
 pub mod tray;
 

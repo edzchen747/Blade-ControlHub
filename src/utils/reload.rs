@@ -3,6 +3,8 @@ use std::time::Duration;
 use sysinfo::System;
 use tracing::{error, warn};
 
+use crate::runtime::launch_args::is_settings_mode_arg;
+
 const APP_PROCESS_NAMES: &[&str] = &["blade-controlhub", "blade-controlhub.exe"];
 const SILENT_RESTART_ARGS: &[&str] = &["--silent"];
 const DEFAULT_RESTART_ARGS: &[&str] = &[];
@@ -57,7 +59,10 @@ pub fn close_running_instances() {
 
     let mut found_old = false;
     for (pid, process) in sys.processes() {
-        if is_app_process_name(process.name()) && *pid != current_pid {
+        if is_app_process_name(process.name())
+            && !is_settings_mode_process(process)
+            && *pid != current_pid
+        {
             if process.kill() {
                 found_old = true;
             } else {
@@ -75,6 +80,13 @@ fn is_app_process_name(name: &str) -> bool {
     APP_PROCESS_NAMES
         .iter()
         .any(|app_name| name.eq_ignore_ascii_case(app_name))
+}
+
+fn is_settings_mode_process(process: &sysinfo::Process) -> bool {
+    process
+        .cmd()
+        .iter()
+        .any(|arg| is_settings_mode_arg(arg.as_str()))
 }
 
 #[cfg(test)]
@@ -98,5 +110,12 @@ mod tests {
         assert!(is_app_process_name("blade-controlhub.exe"));
         assert!(is_app_process_name("BLADE-CONTROLHUB.EXE"));
         assert!(!is_app_process_name("blade-settings"));
+    }
+
+    #[test]
+    fn settings_mode_arg_is_detected_case_insensitively() {
+        assert!(is_settings_mode_arg("--settings"));
+        assert!(is_settings_mode_arg("--SETTINGS"));
+        assert!(!is_settings_mode_arg("--silent"));
     }
 }

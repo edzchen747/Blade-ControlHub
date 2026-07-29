@@ -4,6 +4,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::time::Instant;
 
 use crate::razer::device_handle::{DeviceHandle, device, stop_device_channel_monitor};
+use crate::runtime::launch_args::SETTINGS_MODE_ARG;
 use crate::ui::app_events::{AppEvent, OsdEvent};
 use crate::ui::event_dispatcher::{EventDispatcher, SideEffect};
 use crate::ui::osd_controller::OsdController;
@@ -266,7 +267,10 @@ fn open_or_toggle_settings(ctx: &AppContext) {
         elapsed_ms = total_started.elapsed().as_millis() as u64,
         "Launching settings window process"
     );
-    match Command::new(&settings_exe).spawn() {
+    let mut settings_command = Command::new(&settings_exe);
+    settings_command.args(settings_process_args());
+
+    match settings_command.spawn() {
         Ok(child) => {
             info!(
                 pid = child.id(),
@@ -344,12 +348,16 @@ fn child_state(child: &mut Child) -> ChildState {
 }
 
 fn settings_executable_path() -> std::io::Result<PathBuf> {
-    Ok(settings_executable_path_from(std::env::current_exe()?))
+    std::env::current_exe()
 }
 
+#[cfg(test)]
 fn settings_executable_path_from(current_exe: PathBuf) -> PathBuf {
-    let file_name = format!("blade-settings{}", std::env::consts::EXE_SUFFIX);
-    current_exe.with_file_name(file_name)
+    current_exe
+}
+
+fn settings_process_args() -> &'static [&'static str] {
+    &[SETTINGS_MODE_ARG]
 }
 
 #[cfg(test)]
@@ -358,7 +366,7 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn settings_executable_path_is_next_to_current_binary() {
+    fn settings_executable_path_is_current_binary() {
         let path = settings_executable_path_from(PathBuf::from(
             r"C:\Tools\Blade\target\debug\blade-controlhub.exe",
         ));
@@ -366,7 +374,12 @@ mod tests {
         assert_eq!(
             path,
             Path::new(r"C:\Tools\Blade\target\debug")
-                .join(format!("blade-settings{}", std::env::consts::EXE_SUFFIX))
+                .join(format!("blade-controlhub{}", std::env::consts::EXE_SUFFIX))
         );
+    }
+
+    #[test]
+    fn settings_process_args_select_settings_mode() {
+        assert_eq!(settings_process_args(), [SETTINGS_MODE_ARG]);
     }
 }

@@ -1,17 +1,15 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
-use blade_controlhub::config::ThemeColor;
-use blade_controlhub::ipc::client;
-use blade_controlhub::razer::enums::PerfMode;
-use blade_controlhub::runtime::settings_state::SettingsState;
-use blade_controlhub::ui::settings::Settings;
-use blade_controlhub::ui::settings::SettingsCommand;
-use blade_controlhub::ui::settings::store::SettingsStore;
-use blade_controlhub::ui::theme::{
+use crate::config::ThemeColor;
+use crate::ipc::client;
+use crate::razer::enums::PerfMode;
+use crate::runtime::settings_state::SettingsState;
+use crate::ui::settings::Settings;
+use crate::ui::settings::SettingsCommand;
+use crate::ui::settings::store::SettingsStore;
+use crate::ui::theme::{
     SETTINGS_KEY_LISTEN_INTERVAL_MS, SETTINGS_LOADING_ICON_COLOR, SETTINGS_PADDING_RATIO,
     SETTINGS_WINDOW_SIZE, SETTINGS_WINDOW_TITLE,
 };
-use blade_controlhub::utils::log_file::{init_log_file_writer_for_child, set_cwd};
+use crate::utils::log_file::{init_log_file_writer_for_child, set_cwd};
 use eframe::egui;
 use std::sync::{
     Arc,
@@ -510,7 +508,7 @@ fn try_load_settings_state() -> Option<SettingsState> {
     }
 }
 
-fn main() -> eframe::Result<()> {
+pub fn run() -> eframe::Result<()> {
     let process_started = Instant::now();
     if let Err(error) = set_cwd() {
         eprintln!("Failed to set settings window working directory: {error}");
@@ -694,7 +692,7 @@ mod tests {
         assert_eq!(
             app.settings
                 .with_settings(|settings| settings.unsupported_perf_mode_message()),
-            Some("\"Performance\" mode not supported on device".to_string())
+            Some("\"Performance\" mode not supported".to_string())
         );
     }
 

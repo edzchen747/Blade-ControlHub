@@ -77,7 +77,7 @@ impl<'a> DisplayHandler<'a> {
             if let Some(closest_refresh_rate) = find_closest(&supported, refresh_rate) {
                 new_refresh_rate = closest_refresh_rate;
             } else {
-                new_refresh_rate = supported.last().unwrap().clone();
+                new_refresh_rate = *supported.last().unwrap();
             }
         }
         self.app_config.get().screen_refresh = new_refresh_rate;

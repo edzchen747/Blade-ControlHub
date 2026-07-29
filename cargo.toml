@@ -13,10 +13,6 @@ default-run = "blade-controlhub"
 # name = "blade-controlhub"
 # path = "src/main.rs"
 
-[[bin]]
-name = "blade-settings"
-path = "src/settings_window.rs"
-
 [dependencies]
 anyhow = "1.0"
 thiserror = "1"

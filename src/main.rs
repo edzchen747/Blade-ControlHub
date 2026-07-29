@@ -1,8 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use blade_controlhub::{
+    error::AppError,
     error::AppResult,
     razer::{self, device_handle::device},
+    runtime::launch_args,
     ui,
     ui::app_events::{OsdEvent, OsdIcon},
     ui::osd_controller::{OsdController, OsdParams},
@@ -13,6 +15,11 @@ use blade_controlhub::{
 use tracing::info;
 
 fn main() -> AppResult<()> {
+    if launch_args::current_process_is_settings_mode() {
+        return ui::settings_window::run()
+            .map_err(|error| AppError::Internal(format!("settings UI failed: {error:?}")));
+    }
+
     set_cwd()?;
     init_log_file_writer();
 
