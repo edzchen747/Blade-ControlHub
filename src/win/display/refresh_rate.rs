@@ -4,10 +4,12 @@ use std::sync::atomic::Ordering;
 use crate::core::shared_state::SHIFT_PRESSED;
 use crate::error::{AppError, AppResult};
 use tracing::info;
+use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Gdi::{
-    CDS_UPDATEREGISTRY, DEVMODEW, DISP_CHANGE_SUCCESSFUL, DISPLAY_DEVICE_ATTACHED_TO_DESKTOP,
-    DISPLAY_DEVICE_PRIMARY_DEVICE, DISPLAY_DEVICEW, DM_DISPLAYFREQUENCY, ENUM_CURRENT_SETTINGS,
-    ENUM_DISPLAY_SETTINGS_MODE, EnumDisplayDevicesW, EnumDisplaySettingsW,
+    CDS_UPDATEREGISTRY, ChangeDisplaySettingsExW, DEVMODEW, DISP_CHANGE_SUCCESSFUL,
+    DISPLAY_DEVICE_ATTACHED_TO_DESKTOP, DISPLAY_DEVICE_PRIMARY_DEVICE, DISPLAY_DEVICEW,
+    DM_DISPLAYFREQUENCY, ENUM_CURRENT_SETTINGS, ENUM_DISPLAY_SETTINGS_MODE, EnumDisplayDevicesW,
+    EnumDisplaySettingsW,
 };
 use windows::core::PCWSTR;
 
@@ -20,34 +22,14 @@ pub struct DisplayManager {
 impl DisplayManager {
     pub fn new() -> Option<Self> {
         let mut device_index = 0;
-        loop {
-            let mut display_device: DISPLAY_DEVICEW = unsafe { std::mem::zeroed() };
-            display_device.cb = std::mem::size_of::<DISPLAY_DEVICEW>() as u32;
-
-            unsafe {
-                if EnumDisplayDevicesW(None, device_index, &mut display_device, 0).as_bool() {
-                    let flags = display_device.StateFlags;
-
-                    let is_active = (flags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) != 0;
-                    let is_primary = (flags & DISPLAY_DEVICE_PRIMARY_DEVICE) != 0;
-
-                    // Check the string for "Internal"
-                    let device_string =
-                        String::from_utf16_lossy(&display_device.DeviceString).to_lowercase();
-                    let is_integrated =
-                        device_string.contains("internal") || device_string.contains("integrated");
-
-                    if is_active && (is_primary || is_integrated) {
-                        return Some(DisplayManager {
-                            device_name: display_device.DeviceName.to_vec(),
-                        });
-                    }
-
-                    device_index += 1;
-                } else {
-                    break;
-                }
+        while let Some(display_device) = enum_display_device(device_index) {
+            if is_target_display(&display_device) {
+                return Some(DisplayManager {
+                    device_name: display_device.DeviceName.to_vec(),
+                });
             }
+
+            device_index += 1;
         }
         None
     }
@@ -61,74 +43,51 @@ impl DisplayManager {
         let mut rates = BTreeSet::new();
         let mut mode_index = 0;
 
-        loop {
-            let mut dev_mode: DEVMODEW = unsafe { std::mem::zeroed() };
-            dev_mode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
-
-            unsafe {
-                if EnumDisplaySettingsW(
-                    self.pcwstr(),
-                    ENUM_DISPLAY_SETTINGS_MODE(mode_index),
-                    &mut dev_mode,
-                )
-                .as_bool()
-                {
-                    if dev_mode.dmDisplayFrequency > 1 {
-                        rates.insert(dev_mode.dmDisplayFrequency);
-                    }
-                    mode_index += 1;
-                } else {
-                    break;
-                }
+        while let Some(dev_mode) =
+            enum_display_settings(self.pcwstr(), ENUM_DISPLAY_SETTINGS_MODE(mode_index))
+        {
+            if dev_mode.dmDisplayFrequency > 1 {
+                rates.insert(dev_mode.dmDisplayFrequency);
             }
+            mode_index += 1;
         }
         rates.into_iter().collect()
     }
 
     pub fn get_current_rate(&self) -> u32 {
-        let mut dev_mode: DEVMODEW = unsafe { std::mem::zeroed() };
-        dev_mode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
-
-        unsafe {
-            if EnumDisplaySettingsW(self.pcwstr(), ENUM_CURRENT_SETTINGS, &mut dev_mode).as_bool() {
-                dev_mode.dmDisplayFrequency
-            } else {
-                0
-            }
-        }
+        enum_display_settings(self.pcwstr(), ENUM_CURRENT_SETTINGS)
+            .map(|dev_mode| dev_mode.dmDisplayFrequency)
+            .unwrap_or(0)
     }
 
     pub fn set_refresh_rate(&self, new_rate: u32) -> AppResult<()> {
         info!(rate_hz = new_rate, "Setting refresh rate");
-        let mut dev_mode: DEVMODEW = unsafe { std::mem::zeroed() };
-        dev_mode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
-
-        unsafe {
-            // Get current settings to keep current resolution
-            if !EnumDisplaySettingsW(self.pcwstr(), ENUM_CURRENT_SETTINGS, &mut dev_mode).as_bool()
-            {
-                return Err(AppError::Internal(
+        let mut dev_mode =
+            enum_display_settings(self.pcwstr(), ENUM_CURRENT_SETTINGS).ok_or_else(|| {
+                AppError::Internal(
                     "EnumDisplaySettingsW failed to get current settings".to_string(),
-                ));
-            }
+                )
+            })?;
 
-            dev_mode.dmDisplayFrequency = new_rate;
-            dev_mode.dmFields |= DM_DISPLAYFREQUENCY;
+        dev_mode.dmDisplayFrequency = new_rate;
+        dev_mode.dmFields |= DM_DISPLAYFREQUENCY;
 
-            // CDS_UPDATEREGISTRY makes the change persistent (survives reboot).
-            let result = windows::Win32::Graphics::Gdi::ChangeDisplaySettingsW(
+        let result = unsafe {
+            ChangeDisplaySettingsExW(
+                self.pcwstr(),
                 Some(&dev_mode),
+                HWND::default(),
                 CDS_UPDATEREGISTRY,
-            );
-
-            if result == DISP_CHANGE_SUCCESSFUL {
-                Ok(())
-            } else {
-                Err(AppError::Internal(format!(
-                    "ChangeDisplaySettingsW failed for {}Hz: Win32 code {}",
-                    new_rate, result.0
-                )))
-            }
+                None,
+            )
+        };
+        if result == DISP_CHANGE_SUCCESSFUL {
+            Ok(())
+        } else {
+            Err(AppError::Internal(format!(
+                "ChangeDisplaySettingsExW failed for {}Hz: Win32 code {}",
+                new_rate, result.0
+            )))
         }
     }
 
@@ -140,33 +99,141 @@ impl DisplayManager {
 
         let current = self.get_current_rate();
 
-        // Find the first rate in the sorted list that is higher/lower than current rate
         let reverse = SHIFT_PRESSED.load(Ordering::SeqCst);
-        let found_rate = if reverse {
-            supported
-                .iter()
-                .rev()
-                .find(|&&rate| rate < current)
-                .copied()
-        } else {
-            supported.iter().find(|&&rate| rate > current).copied()
-        };
+        let next_rate =
+            choose_next_rate(&supported, current, reverse).ok_or(AppError::DisplayNotFound)?;
 
-        let next_rate = match found_rate {
-            Some(rate) => rate,
-            None => {
-                let fallback = if reverse {
-                    supported.last()
-                } else {
-                    supported.first()
-                };
-                fallback.copied().ok_or(AppError::DisplayNotFound)?
-            }
-        };
+        self.set_refresh_rate(next_rate)?;
+        Ok(next_rate)
+    }
+}
 
-        match self.set_refresh_rate(next_rate) {
-            Ok(_) => Ok(next_rate),
-            Err(e) => Err(e),
-        }
+fn initialized_display_device() -> DISPLAY_DEVICEW {
+    // SAFETY: DISPLAY_DEVICEW is a plain C struct. EnumDisplayDevicesW expects
+    // the caller to zero-initialize it and set `cb` before the call.
+    let mut display_device: DISPLAY_DEVICEW = unsafe { std::mem::zeroed() };
+    display_device.cb = std::mem::size_of::<DISPLAY_DEVICEW>() as u32;
+    display_device
+}
+
+fn initialized_dev_mode() -> DEVMODEW {
+    // SAFETY: DEVMODEW is a plain C struct. EnumDisplaySettingsW expects
+    // `dmSize` to be populated and leaves the remaining fields as output data.
+    let mut dev_mode: DEVMODEW = unsafe { std::mem::zeroed() };
+    dev_mode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+    dev_mode
+}
+
+fn enum_display_device(device_index: u32) -> Option<DISPLAY_DEVICEW> {
+    let mut display_device = initialized_display_device();
+    unsafe { EnumDisplayDevicesW(None, device_index, &mut display_device, 0).as_bool() }
+        .then_some(display_device)
+}
+
+fn enum_display_settings(
+    device_name: PCWSTR,
+    mode: ENUM_DISPLAY_SETTINGS_MODE,
+) -> Option<DEVMODEW> {
+    let mut dev_mode = initialized_dev_mode();
+    unsafe { EnumDisplaySettingsW(device_name, mode, &mut dev_mode).as_bool() }.then_some(dev_mode)
+}
+
+fn is_target_display(display_device: &DISPLAY_DEVICEW) -> bool {
+    display_matches_target(
+        display_device.StateFlags,
+        &wide_string_until_nul(&display_device.DeviceString),
+    )
+}
+
+fn display_matches_target(flags: u32, device_description: &str) -> bool {
+    let is_active = (flags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) != 0;
+    let is_primary = (flags & DISPLAY_DEVICE_PRIMARY_DEVICE) != 0;
+    let description = device_description.to_lowercase();
+    let is_integrated = description.contains("internal") || description.contains("integrated");
+    is_active && (is_primary || is_integrated)
+}
+
+fn wide_string_until_nul(value: &[u16]) -> String {
+    let end = value.iter().position(|&ch| ch == 0).unwrap_or(value.len());
+    String::from_utf16_lossy(&value[..end])
+}
+
+fn choose_next_rate(supported: &[u32], current: u32, reverse: bool) -> Option<u32> {
+    if reverse {
+        supported
+            .iter()
+            .rev()
+            .find(|&&rate| rate < current)
+            .copied()
+            .or_else(|| supported.last().copied())
+    } else {
+        supported
+            .iter()
+            .find(|&&rate| rate > current)
+            .copied()
+            .or_else(|| supported.first().copied())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        DISPLAY_DEVICE_ATTACHED_TO_DESKTOP, DISPLAY_DEVICE_PRIMARY_DEVICE, choose_next_rate,
+        display_matches_target, wide_string_until_nul,
+    };
+
+    #[test]
+    fn choose_next_rate_advances_to_higher_rate() {
+        assert_eq!(choose_next_rate(&[60, 120, 144], 60, false), Some(120));
+    }
+
+    #[test]
+    fn choose_next_rate_wraps_forward_to_first_rate() {
+        assert_eq!(choose_next_rate(&[60, 120, 144], 144, false), Some(60));
+    }
+
+    #[test]
+    fn choose_next_rate_reverses_to_lower_rate() {
+        assert_eq!(choose_next_rate(&[60, 120, 144], 144, true), Some(120));
+    }
+
+    #[test]
+    fn choose_next_rate_wraps_reverse_to_last_rate() {
+        assert_eq!(choose_next_rate(&[60, 120, 144], 60, true), Some(144));
+    }
+
+    #[test]
+    fn choose_next_rate_returns_none_for_empty_rates() {
+        assert_eq!(choose_next_rate(&[], 60, false), None);
+    }
+
+    #[test]
+    fn primary_active_display_is_target() {
+        assert!(display_matches_target(
+            DISPLAY_DEVICE_ATTACHED_TO_DESKTOP | DISPLAY_DEVICE_PRIMARY_DEVICE,
+            "Generic PnP Monitor",
+        ));
+    }
+
+    #[test]
+    fn integrated_active_display_is_target() {
+        assert!(display_matches_target(
+            DISPLAY_DEVICE_ATTACHED_TO_DESKTOP,
+            "Internal Display",
+        ));
+    }
+
+    #[test]
+    fn detached_integrated_display_is_not_target() {
+        assert!(!display_matches_target(0, "Internal Display"));
+    }
+
+    #[test]
+    fn wide_string_parser_stops_at_nul() {
+        let value = [
+            'R' as u16, 'a' as u16, 'z' as u16, 'e' as u16, 'r' as u16, 0, 'X' as u16,
+        ];
+
+        assert_eq!(wide_string_until_nul(&value), "Razer");
     }
 }

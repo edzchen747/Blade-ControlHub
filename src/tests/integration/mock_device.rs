@@ -3,8 +3,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 
-use crate::core::traits::DeviceController;
 use crate::error::AppResult;
+use crate::hal::DeviceController;
 use crate::razer::enums::LidLogoMode;
 
 /// Thread-safe mock that records which commands were dispatched.

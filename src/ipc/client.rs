@@ -1,0 +1,103 @@
+use std::io;
+use std::ptr::null_mut;
+use std::thread;
+use std::time::{Duration, Instant};
+
+use windows_sys::Win32::Foundation::ERROR_PIPE_BUSY;
+use windows_sys::Win32::Storage::FileSystem::{
+    CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, OPEN_EXISTING,
+};
+
+use crate::error::{AppError, AppResult};
+use crate::ipc::framing::{PipeHandle, read_json_frame, wide_null, write_json_frame};
+use crate::ipc::protocol::{IpcRequest, IpcResponse, PIPE_NAME};
+use crate::runtime::settings_state::SettingsState;
+
+const CONNECT_TIMEOUT: Duration = Duration::from_millis(500);
+const CONNECT_RETRY: Duration = Duration::from_millis(25);
+
+pub fn get_settings_state() -> AppResult<SettingsState> {
+    match send_request(IpcRequest::GetSettingsState)? {
+        IpcResponse::SettingsState(state) => Ok(state),
+        response => Err(unexpected_response(response)),
+    }
+}
+
+pub fn set_default_multimedia_keys(enabled: bool) -> AppResult<()> {
+    expect_ack(send_request(IpcRequest::SetDefaultMultimediaKeys {
+        enabled,
+    })?)
+}
+
+pub fn begin_razer_key_capture() -> AppResult<()> {
+    expect_ack(send_request(IpcRequest::BeginRazerKeyCapture)?)
+}
+
+pub fn cancel_razer_key_capture() -> AppResult<()> {
+    expect_ack(send_request(IpcRequest::CancelRazerKeyCapture)?)
+}
+
+pub fn poll_captured_razer_key() -> AppResult<Option<u8>> {
+    match send_request(IpcRequest::PollCapturedRazerKey)? {
+        IpcResponse::CapturedRazerKey(key_code) => Ok(key_code),
+        response => Err(unexpected_response(response)),
+    }
+}
+
+pub fn send_request(request: IpcRequest) -> AppResult<IpcResponse> {
+    let pipe = connect()?;
+    write_json_frame(&pipe, &request)?;
+    let response = read_json_frame(&pipe)?;
+    match response {
+        IpcResponse::Error { message } => Err(AppError::Internal(message)),
+        response => Ok(response),
+    }
+}
+
+fn expect_ack(response: IpcResponse) -> AppResult<()> {
+    match response {
+        IpcResponse::Ack => Ok(()),
+        response => Err(unexpected_response(response)),
+    }
+}
+
+fn unexpected_response(response: IpcResponse) -> AppError {
+    AppError::Internal(format!("Unexpected IPC response: {response:?}"))
+}
+
+fn connect() -> io::Result<PipeHandle> {
+    let pipe_name = wide_null(PIPE_NAME);
+    let deadline = Instant::now() + CONNECT_TIMEOUT;
+
+    loop {
+        let handle = unsafe {
+            CreateFileW(
+                pipe_name.as_ptr(),
+                FILE_GENERIC_READ | FILE_GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                null_mut(),
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL,
+                0,
+            )
+        };
+
+        match PipeHandle::new(handle) {
+            Ok(pipe) => return Ok(pipe),
+            Err(error)
+                if error.raw_os_error() == Some(ERROR_PIPE_BUSY as i32)
+                    && Instant::now() < deadline =>
+            {
+                thread::sleep(CONNECT_RETRY);
+            }
+            Err(error) if Instant::now() < deadline => {
+                thread::sleep(CONNECT_RETRY);
+                if error.kind() == io::ErrorKind::NotFound {
+                    continue;
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}

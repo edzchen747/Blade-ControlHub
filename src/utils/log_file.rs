@@ -1,23 +1,19 @@
 use std::io::{BufRead, BufReader, Write};
+use std::sync::OnceLock;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 pub const LOG_PATH: &str = "app.log";
 pub const TRUNC_MAX_LINES: usize = 1000;
+static LOG_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
 
-pub fn set_cwd() {
-    let exe_path = std::env::current_exe()
-        .map_err(crate::error::AppError::Io)
-        .unwrap();
-    let exe_dir = exe_path
-        .parent()
-        .ok_or_else(|| {
-            crate::error::AppError::Internal("Executable has no parent directory".to_string())
-        })
-        .unwrap();
-    std::env::set_current_dir(exe_dir)
-        .map_err(crate::error::AppError::Io)
-        .unwrap();
+pub fn set_cwd() -> crate::error::AppResult<()> {
+    let exe_path = std::env::current_exe().map_err(crate::error::AppError::Io)?;
+    let exe_dir = exe_path.parent().ok_or_else(|| {
+        crate::error::AppError::Internal("Executable has no parent directory".to_string())
+    })?;
+    std::env::set_current_dir(exe_dir).map_err(crate::error::AppError::Io)?;
+    Ok(())
 }
 
 pub fn init_log_file_writer() {
@@ -30,17 +26,15 @@ pub fn init_log_file_writer() {
         .with_target(false)
         .compact();
 
-    let _guard;
-
     if cfg!(debug_assertions) {
-        builder.init();
+        let _ = builder.try_init();
     } else {
         let file_appender = tracing_appender::rolling::never(".", LOG_PATH);
 
         let (file_writer, g) = tracing_appender::non_blocking(file_appender);
-        _guard = Some(g);
+        let _ = LOG_GUARD.set(g);
 
-        builder.with_writer(file_writer).init();
+        let _ = builder.with_writer(file_writer).try_init();
     }
 
     info!("── Start New Session ───────────────────────────────────────────────────────");
@@ -53,7 +47,7 @@ pub fn truncate_log_file() {
     };
 
     let reader = BufReader::new(file);
-    let mut lines: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
+    let mut lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
 
     if lines.len() > TRUNC_MAX_LINES {
         lines = lines.split_off(lines.len() - TRUNC_MAX_LINES);

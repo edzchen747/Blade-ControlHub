@@ -1,5 +1,3 @@
-use serde::Serialize;
-
 use crate::{
     razer::enums::{BatteryLimit, LidLogoMode, PerfMode, RGBEffect},
     ui::osd_controller::OsdParams,
@@ -137,11 +135,77 @@ pub enum AppEvent {
     RazerKeyCode(u8),
     OpenSettings,
     ToggleSettings,
+    Restart(i32),
     Shutdown,
 }
 
 impl From<OsdEvent> for AppEvent {
     fn from(event: OsdEvent) -> Self {
         AppEvent::OsdEvent(event)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_event_maps_to_canonical_controlhub_osd() {
+        let params = OsdEvent::Startup.as_params().expect("startup has OSD");
+
+        assert_eq!(params.label, "Razer\nControlHub");
+        assert_eq!(params.icon, Some(OsdIcon::RazerControlHub));
+        assert_eq!(params.total_steps, 0);
+        assert_eq!(params.active_steps, 0);
+    }
+
+    #[test]
+    fn enable_osd_event_has_no_overlay_params() {
+        assert!(OsdEvent::EnableOSD(false).as_params().is_none());
+        assert!(OsdEvent::EnableOSD(true).as_params().is_none());
+    }
+
+    #[test]
+    fn brightness_event_maps_to_ten_step_level() {
+        let params = OsdEvent::ScreenBrightness(70)
+            .as_params()
+            .expect("brightness has OSD");
+
+        assert_eq!(params.label, "");
+        assert_eq!(params.icon, Some(OsdIcon::Brightness));
+        assert_eq!(params.total_steps, 10);
+        assert_eq!(params.active_steps, 7);
+    }
+
+    #[test]
+    fn mute_and_trackpad_events_map_boolean_state_to_single_step_level() {
+        let muted = OsdEvent::MicMute(true).as_params().expect("mute has OSD");
+        let unmuted = OsdEvent::MicMute(false).as_params().expect("mute has OSD");
+        let trackpad_off = OsdEvent::Trackpad(false)
+            .as_params()
+            .expect("trackpad has OSD");
+
+        assert_eq!(muted.icon, Some(OsdIcon::MicMute(true)));
+        assert_eq!(muted.active_steps, 0);
+        assert_eq!(unmuted.icon, Some(OsdIcon::MicMute(false)));
+        assert_eq!(unmuted.active_steps, 1);
+        assert_eq!(trackpad_off.icon, Some(OsdIcon::Trackpad(false)));
+        assert_eq!(trackpad_off.total_steps, 1);
+        assert_eq!(trackpad_off.active_steps, 0);
+    }
+
+    #[test]
+    fn close_gpu_apps_events_use_progress_labels() {
+        let started = OsdEvent::CloseGPUApps(false)
+            .as_params()
+            .expect("close GPU app status has OSD");
+        let finished = OsdEvent::CloseGPUApps(true)
+            .as_params()
+            .expect("close GPU app status has OSD");
+
+        assert_eq!(started.label, "Closing apps...");
+        assert_eq!(finished.label, "Done");
+        assert_eq!(started.icon, Some(OsdIcon::GPU));
+        assert_eq!(finished.icon, Some(OsdIcon::GPU));
     }
 }

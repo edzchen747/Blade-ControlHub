@@ -9,6 +9,9 @@ pub enum AppError {
     #[error("Hardware command {command:#06x} failed after {attempts} attempts")]
     Protocol { command: u16, attempts: u8 },
 
+    #[error("Hardware device disconnected")]
+    HardwareDisconnected,
+
     // ── HID / Input ─────────────────────────────────────────────────────
     #[error("Failed to initialise HID API: {0}")]
     HidApi(String),

@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::thread;
 use std::time::Duration;
+use tracing::warn;
 
 pub struct KeyCombo([Option<Key>; 4]);
 
@@ -23,15 +24,32 @@ impl KeyCombo {
         }
         Self(buffer)
     }
+
     pub fn trigger(&self) {
-        for key in self {
-            let _ = simulate(&EventType::KeyPress(*key));
+        let failed_events = self.try_trigger();
+        if failed_events > 0 {
+            warn!(failed_events, "One or more simulated key events failed");
+        }
+    }
+
+    fn try_trigger(&self) -> usize {
+        let mut failed_events = 0;
+        for event in self.events() {
+            if let Err(error) = simulate(&event) {
+                failed_events += 1;
+                warn!(?event, ?error, "Failed to simulate key event");
+            }
             thread::sleep(Duration::from_millis(10));
         }
-        for key in self.into_iter().rev() {
-            let _ = simulate(&EventType::KeyRelease(*key));
-            thread::sleep(Duration::from_millis(10));
-        }
+        failed_events
+    }
+
+    fn events(&self) -> Vec<EventType> {
+        self.into_iter()
+            .copied()
+            .map(EventType::KeyPress)
+            .chain(self.into_iter().rev().copied().map(EventType::KeyRelease))
+            .collect()
     }
 }
 
@@ -381,3 +399,50 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
         ),
     ])
 });
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn key_combo_events_press_in_order_and_release_in_reverse() {
+        let combo = KeyCombo::new(&[Key::ControlLeft, Key::ShiftLeft, Key::KeyP]);
+
+        assert_eq!(
+            combo.events(),
+            vec![
+                EventType::KeyPress(Key::ControlLeft),
+                EventType::KeyPress(Key::ShiftLeft),
+                EventType::KeyPress(Key::KeyP),
+                EventType::KeyRelease(Key::KeyP),
+                EventType::KeyRelease(Key::ShiftLeft),
+                EventType::KeyRelease(Key::ControlLeft),
+            ]
+        );
+    }
+
+    #[test]
+    fn key_combo_ignores_keys_after_four_slots() {
+        let combo = KeyCombo::new(&[
+            Key::ControlLeft,
+            Key::ShiftLeft,
+            Key::Alt,
+            Key::KeyP,
+            Key::KeyA,
+        ]);
+
+        assert_eq!(combo.into_iter().count(), 4);
+        assert!(!combo.events().contains(&EventType::KeyPress(Key::KeyA)));
+    }
+
+    #[test]
+    fn key_event_action_executes_only_when_conditions_match() {
+        let enabled = AtomicBool::new(true);
+        let disabled = AtomicBool::new(false);
+        let action = KeyEventAction::new(Box::new(|| {}), vec![Source::IsTrue(&enabled)]);
+        let blocked = KeyEventAction::new(Box::new(|| {}), vec![Source::IsTrue(&disabled)]);
+
+        assert!(action.execute());
+        assert!(!blocked.execute());
+    }
+}

@@ -2,12 +2,13 @@ use serde::{Deserialize, Serialize};
 use strum_macros::Display;
 use tracing::warn;
 
-#[derive(Clone, Copy, Display, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Display, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum PerfMode {
     #[strum(serialize = "Battery Saver")]
     BatterySaver = 3,
     Silent = 5,
     Quiet = 6,
+    #[default]
     Balanced = 0,
     Performance = 2,
     Turbo = 1,
@@ -36,8 +37,9 @@ impl From<u8> for PerfMode {
     }
 }
 
-#[derive(Clone, Copy, Display, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Display, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum RGBEffect {
+    #[default]
     Cycle = 4,
     Wave = 1,
     Breathe = 3,
@@ -69,8 +71,9 @@ impl From<u8> for RGBEffect {
     }
 }
 
-#[derive(Clone, Copy, Display, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Display, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum BatteryLimit {
+    #[default]
     Off = 60,
     #[strum(serialize = "Limit: 50%")]
     Limit50 = 178,
@@ -111,10 +114,11 @@ impl From<u8> for BatteryLimit {
     }
 }
 
-#[derive(Clone, Copy, Display, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Display, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum LidLogoMode {
     On = 2,
     Breathing = 1,
+    #[default]
     Off = 0,
 }
 

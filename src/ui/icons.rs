@@ -4,6 +4,7 @@
 //! Change an icon asset once, propagate everywhere it's consumed.
 
 use std::borrow::Cow;
+use tracing::warn;
 
 // ── OSD Icon Identifiers ────────────────────────────────────────────────────
 
@@ -32,11 +33,19 @@ const STRIKE_THROUGH_SVG: &str =
 /// Overlays a red strike-through line onto an existing SVG icon by inserting
 /// it just before the closing `</svg>` tag.
 fn with_strikethrough(base_svg: &[u8]) -> Cow<'static, [u8]> {
-    let base = std::str::from_utf8(base_svg).expect("SVG asset must be valid UTF-8");
-    Cow::Owned(
-        base.replacen("</svg>", &format!("{STRIKE_THROUGH_SVG}\n</svg>"), 1)
-            .into_bytes(),
-    )
+    match std::str::from_utf8(base_svg) {
+        Ok(base) => Cow::Owned(
+            base.replacen("</svg>", &format!("{STRIKE_THROUGH_SVG}\n</svg>"), 1)
+                .into_bytes(),
+        ),
+        Err(error) => {
+            warn!(
+                ?error,
+                "OSD icon SVG asset was not valid UTF-8; using base icon"
+            );
+            Cow::Owned(base_svg.to_vec())
+        }
+    }
 }
 
 impl OsdIcon {

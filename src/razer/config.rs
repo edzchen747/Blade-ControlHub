@@ -15,28 +15,39 @@ pub struct CycleState<T> {
     pub items: Vec<T>,
 }
 
-impl<T: Clone + PartialEq> CycleState<T> {
+impl<T: Clone + PartialEq + Default> CycleState<T> {
     pub fn new(items: Vec<T>) -> Self {
         Self { index: 0, items }
     }
 
     /// Advances to the next item and returns it.
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> T {
-        debug_assert!(
-            !self.items.is_empty(),
-            "CycleState::next called on empty items"
-        );
         if self.items.is_empty() {
-            return self.items[0].clone(); // unreachable in practice; debug_assert fires in dev
+            self.index = 0;
+            return T::default();
         }
+
         let reverse = SHIFT_PRESSED.load(Ordering::SeqCst);
-        let shift = if reverse { self.items.len() - 1 } else { 1 };
-        self.index = (self.index + shift) % self.items.len();
+        let current_index = self.normalized_index();
+        self.index = if reverse {
+            current_index
+                .checked_sub(1)
+                .unwrap_or_else(|| self.items.len() - 1)
+        } else {
+            (current_index + 1) % self.items.len()
+        };
         self.items[self.index].clone()
     }
 
     /// Returns the current item without advancing.
     pub fn value(&mut self) -> T {
+        if self.items.is_empty() {
+            self.index = 0;
+            return T::default();
+        }
+
+        self.index = self.normalized_index();
         self.items[self.index].clone()
     }
 
@@ -50,6 +61,14 @@ impl<T: Clone + PartialEq> CycleState<T> {
             None => Err(AppError::Internal(
                 "CycleState::set: value not found in items list".to_string(),
             )),
+        }
+    }
+
+    fn normalized_index(&self) -> usize {
+        if self.index < self.items.len() {
+            self.index
+        } else {
+            0
         }
     }
 }
@@ -154,7 +173,24 @@ impl AppConfig {
         self.battery_state.perf_mode.items = PERF_MODES.to_vec();
     }
 
-    pub fn set_pid(&mut self, pid: String) {
+    pub fn set_device_model(&mut self, pid: String, name: String) {
         self.model_pid = pid;
+        self.model_name = name;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_device_model_updates_pid_and_name() {
+        let mut config = AppConfig::default();
+
+        config.set_device_model("0x02c7".to_string(), "Razer Blade Test".to_string());
+
+        let serialized = serde_json::to_value(&config).expect("config must serialize");
+        assert_eq!(serialized["model_pid"], "0x02c7");
+        assert_eq!(config.model_name, "Razer Blade Test");
     }
 }

@@ -162,6 +162,44 @@ fn cycle_state_single_item_next_stays_at_index_zero() {
 }
 
 #[test]
+fn cycle_state_empty_next_returns_default_without_panicking() {
+    let mut cs: CycleState<u8> = CycleState::new(vec![]);
+
+    assert_eq!(cs.next(), 0);
+    assert_eq!(cs.index, 0);
+}
+
+#[test]
+fn cycle_state_empty_value_returns_default_without_panicking() {
+    let mut cs: CycleState<String> = CycleState::new(vec![]);
+
+    assert_eq!(cs.value(), String::default());
+    assert_eq!(cs.index, 0);
+}
+
+#[test]
+fn cycle_state_value_clamps_out_of_range_index() {
+    let mut cs = CycleState {
+        index: 99,
+        items: vec![10u8, 20, 30],
+    };
+
+    assert_eq!(cs.value(), 10);
+    assert_eq!(cs.index, 0);
+}
+
+#[test]
+fn cycle_state_next_clamps_out_of_range_index_before_advancing() {
+    let mut cs = CycleState {
+        index: 99,
+        items: vec![10u8, 20, 30],
+    };
+
+    assert_eq!(cs.next(), 20);
+    assert_eq!(cs.index, 1);
+}
+
+#[test]
 fn cycle_state_next_full_cycle_returns_to_start() {
     let items = vec![1u8, 2, 3, 4, 5];
     let len = items.len();

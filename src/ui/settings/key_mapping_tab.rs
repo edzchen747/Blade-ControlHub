@@ -12,6 +12,7 @@ use crate::ui::theme::{
 };
 
 use super::Settings;
+use super::SettingsCommand;
 use super::device_tab::default_func_key_switcher;
 
 pub fn show(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
@@ -45,20 +46,16 @@ fn multimedia_key_tab(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: 
 fn razer_special_key_tab(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
     ui.label("Remap Speical Razer Keys (e.g. M1, M2, Mic Mute, Trackpad, Performance)");
     ui.add_space(SETTINGS_CONTENT_TOP_SPACING);
-    if let Some(idx) = settings.custom_key_map.get_listening_idx() {
+    if settings.custom_key_map.get_listening_idx().is_some() {
         ctx.request_repaint_after(time::Duration::from_millis(SETTINGS_KEY_LISTEN_INTERVAL_MS));
-        if let Some(key_code) = settings.custom_key_map.special_key {
-            settings.custom_key_map.reset_key_code(key_code);
-            if let Some(row) = settings.custom_key_map.razer_keys.get_mut(idx) {
-                row.key_code = key_code;
-                settings.custom_key_map.set_listening_idx(None);
-                settings.custom_key_map.special_key = None;
-            }
+        if let Some(key_code) = settings.custom_key_map.special_key.take() {
+            settings.apply_captured_razer_key(key_code);
         }
 
         // Allow cancelling with Escape
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             settings.custom_key_map.set_listening_idx(None);
+            settings.queue_command(SettingsCommand::CancelRazerKeyCapture);
         }
     }
 
@@ -113,6 +110,7 @@ fn razer_special_key_tab(ui: &mut eframe::egui::Ui, ctx: &egui::Context, setting
         }
         if new_listening_idx.is_some() {
             settings.custom_key_map.set_listening_idx(new_listening_idx);
+            settings.queue_command(SettingsCommand::BeginRazerKeyCapture);
         }
 
         ui.add_space(SETTINGS_CONTENT_TOP_SPACING);

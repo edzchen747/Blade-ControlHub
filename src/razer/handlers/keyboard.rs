@@ -1,4 +1,4 @@
-use librazer::{command::custom_command, device::Device};
+use librazer::device::Device;
 
 use crate::{
     config::persist_config,
@@ -7,7 +7,7 @@ use crate::{
         config::AppConfig,
         device_handle::device,
         enums::{LidLogoMode, RGBEffect},
-        protocol::command,
+        protocol::{HID_PACKET_ARGS_LEN, command},
     },
     ui::{app::app, app_events::OsdEvent},
     utils::persist::PersistBuffer,
@@ -41,27 +41,20 @@ impl<'a> KeyboardHandler<'a> {
     // ── Keyboard ────────────────────────────────────────────────────────
 
     pub fn adjust_keyboard_light(&mut self, up: bool) {
-        let level = self.get_keyboard_brightness() as f64;
-        let level_discrete = (level / 51.0).round() as i32;
-        let change = if up { 1 } else { -1 };
-        let level_new = (level_discrete + change).clamp(0, 5) as u8 * 51;
+        let level_new = next_keyboard_brightness(self.app_config.read().key_lvl, up);
         self.set_keyboard_brightness(level_new);
-        self.app_config.get().key_lvl = level_new;
-        self.persist_config();
     }
 
     pub fn set_keyboard_brightness(&mut self, brightness: u8) {
+        app(OsdEvent::KeyboardBrightness(brightness).into());
         let _ = command(self.device, 0x0303, &[1, 5, brightness], None);
-        let key_lvl = self.get_keyboard_brightness();
-        self.app_config.get().key_lvl = key_lvl;
+        self.app_config.get().key_lvl = brightness;
         self.persist_config();
     }
 
     pub fn get_keyboard_brightness(&self) -> u8 {
         // unwrap_or(0): returns 0 on hardware/protocol failure
-        let brightness = command(self.device, 0x0383, &[1, 5, 0], Some(2)).unwrap_or(0);
-        app(OsdEvent::KeyboardBrightness(brightness).into());
-        brightness
+        command(self.device, 0x0383, &[1, 5, 0], Some(2)).unwrap_or(0)
     }
 
     pub fn get_default_multimedia_keys(&self) -> bool {
@@ -142,14 +135,21 @@ impl<'a> KeyboardHandler<'a> {
 
     pub fn set_keyboard_color(&self, r: u8, g: u8, b: u8) {
         let width = self.app_config.keyboard_width;
-        let mut args = vec![
-            255, 0, 0, width, 0, 0, 0, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g,
-            b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r,
-            g, b, r, g, b,
-        ];
+        let mut args = keyboard_color_args(width, r, g, b);
+        if args.len() > HID_PACKET_ARGS_LEN {
+            tracing::warn!(
+                len = args.len(),
+                max = HID_PACKET_ARGS_LEN,
+                "Skipping keyboard color command with oversized HID payload"
+            );
+            return;
+        }
+
         for row in 0..=6 {
-            args[1] = row;
-            let _ = custom_command(self.device, 0x030b, &args);
+            if let Some(row_arg) = args.get_mut(1) {
+                *row_arg = row;
+            }
+            let _ = command(self.device, 0x030b, &args, None);
         }
     }
 
@@ -204,5 +204,51 @@ impl<'a> KeyboardHandler<'a> {
 
     fn persist_config(&mut self) {
         persist_config(self.app_config, self.persist_buffer);
+    }
+}
+
+fn keyboard_color_args(width: u8, r: u8, g: u8, b: u8) -> Vec<u8> {
+    vec![
+        255, 0, 0, width, 0, 0, 0, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b,
+        r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b, r, g, b,
+        r, g, b,
+    ]
+}
+
+fn next_keyboard_brightness(current: u8, up: bool) -> u8 {
+    let level_discrete = (current as f64 / 51.0).round() as i32;
+    let change = if up { 1 } else { -1 };
+    (level_discrete + change).clamp(0, 5) as u8 * 51
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keyboard_color_args_fit_external_packet_payload() {
+        let args = keyboard_color_args(18, 1, 2, 3);
+
+        assert!(args.len() <= HID_PACKET_ARGS_LEN);
+    }
+
+    #[test]
+    fn keyboard_color_args_preserve_header_and_repeated_rgb_payload() {
+        let args = keyboard_color_args(18, 1, 2, 3);
+
+        assert_eq!(&args[..7], &[255, 0, 0, 18, 0, 0, 0]);
+        assert!(args[7..].chunks_exact(3).all(|chunk| chunk == [1, 2, 3]));
+    }
+
+    #[test]
+    fn keyboard_brightness_steps_clamp_at_edges() {
+        assert_eq!(next_keyboard_brightness(0, false), 0);
+        assert_eq!(next_keyboard_brightness(255, true), 255);
+    }
+
+    #[test]
+    fn keyboard_brightness_steps_by_fifty_one() {
+        assert_eq!(next_keyboard_brightness(102, true), 153);
+        assert_eq!(next_keyboard_brightness(102, false), 51);
     }
 }

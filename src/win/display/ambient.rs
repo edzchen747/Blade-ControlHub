@@ -1,9 +1,11 @@
 use crate::razer::device_handle::DeviceHandle;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::thread;
+use std::sync::{Mutex, MutexGuard};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 #[cfg(debug_assertions)]
 use tracing::trace;
+use tracing::warn;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -18,47 +20,90 @@ const VERTICAL_SCAN_LINES: i32 = 13;
 const TOTAL_SCAN_LINES: i32 = HORIZONTAL_SCAN_LINES + VERTICAL_SCAN_LINES;
 
 pub static THREAD_GENERATION: AtomicU32 = AtomicU32::new(0);
+static AMBIENT_THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
 pub struct AmbientEffect {}
 
 impl AmbientEffect {
     pub fn start(device_handle: DeviceHandle) {
+        Self::stop();
         let current_generation = THREAD_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
 
-        thread::spawn(move || unsafe {
-            let mut ctx = ScreenCaptureContext::init();
-            let mut engine = ColorEngine::new();
-            let mut scan_data = vec![0u8; (ctx.max_dim * TOTAL_SCAN_LINES * 4) as usize];
-            let mut frame_count: u32 = 0;
-
-            while THREAD_GENERATION.load(Ordering::SeqCst) == current_generation {
-                let start = Instant::now();
-                frame_count = frame_count.wrapping_add(1);
-
-                ctx.capture_scanlines(frame_count, &mut scan_data);
-
-                let (r, g, b) = engine.tick(&scan_data, ctx.s_w, ctx.s_h);
-                print_color_preview(r, g, b);
-                device_handle.set_keyboard_color(r, g, b);
-
-                sleep_until_next_frame(start);
+        match thread::Builder::new()
+            .name("blade-ambient-effect".to_string())
+            .spawn(move || run_ambient_loop(device_handle, current_generation))
+        {
+            Ok(handle) => {
+                *ambient_thread() = Some(handle);
             }
-
-            ctx.cleanup();
-        });
+            Err(error) => {
+                warn!(%error, "Failed to start ambient effect thread");
+            }
+        }
     }
 
     pub fn stop() {
         THREAD_GENERATION.fetch_add(1, Ordering::SeqCst);
+        join_ambient_thread();
+    }
+}
+
+fn ambient_thread() -> MutexGuard<'static, Option<JoinHandle<()>>> {
+    AMBIENT_THREAD
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn join_ambient_thread() {
+    let current_thread_id = thread::current().id();
+    let Some(handle) = ambient_thread().take() else {
+        return;
+    };
+
+    if handle.thread().id() == current_thread_id {
+        warn!("Skipping join of current ambient effect thread during shutdown");
+        return;
+    }
+
+    if handle.join().is_err() {
+        warn!("Ambient effect thread panicked during shutdown");
+    }
+}
+
+fn run_ambient_loop(device_handle: DeviceHandle, current_generation: u32) {
+    let Some(mut ctx) = ScreenCaptureContext::init() else {
+        warn!("Ambient effect disabled because screen capture could not be initialized");
+        return;
+    };
+
+    let mut engine = ColorEngine::new();
+    let mut scan_data = vec![0u8; ctx.scan_buffer_len()];
+    let mut frame_count: u32 = 0;
+
+    while THREAD_GENERATION.load(Ordering::SeqCst) == current_generation {
+        let start = Instant::now();
+        frame_count = frame_count.wrapping_add(1);
+
+        if ctx.capture_scanlines(frame_count, &mut scan_data) {
+            let (r, g, b) = engine.tick(&scan_data, ctx.s_w, ctx.s_h);
+            print_color_preview(r, g, b);
+            device_handle.set_keyboard_color(r, g, b);
+        } else {
+            warn!("Ambient effect stopped because screen capture failed");
+            break;
+        }
+
+        sleep_until_next_frame(start);
     }
 }
 
 // --- Screen Capture ---
 
 struct ScreenCaptureContext {
-    h_dc_screen: HDC,
-    h_dc_mem: HDC,
-    h_bitmap: HBITMAP,
+    _selected_bitmap: ObjectSelection,
+    bitmap: OwnedBitmap,
+    mem_dc: CompatibleDc,
+    screen_dc: DesktopDc,
     bmi: BITMAPINFO,
     s_w: i32,
     s_h: i32,
@@ -66,113 +111,199 @@ struct ScreenCaptureContext {
 }
 
 impl ScreenCaptureContext {
-    unsafe fn init() -> Self {
-        unsafe {
-            let h_dc_screen = GetDC(None);
-            let h_dc_mem_created = CreateCompatibleDC(h_dc_screen);
-            let h_dc_mem = HDC(h_dc_mem_created.0);
+    fn init() -> Option<Self> {
+        let screen_dc = DesktopDc::acquire()?;
+        let mem_dc = CompatibleDc::create(screen_dc.hdc)?;
 
-            let s_w = GetSystemMetrics(SM_CXSCREEN);
-            let s_h = GetSystemMetrics(SM_CYSCREEN);
-            let max_dim = s_w.max(s_h);
-
-            let h_bitmap = CreateCompatibleBitmap(h_dc_screen, max_dim, TOTAL_SCAN_LINES);
-            SelectObject(h_dc_mem, h_bitmap);
-
-            let bmi = BITMAPINFO {
-                bmiHeader: BITMAPINFOHEADER {
-                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                    biWidth: max_dim,
-                    biHeight: -TOTAL_SCAN_LINES, // Negative for top-down DIB
-                    biPlanes: 1,
-                    biBitCount: 32,
-                    biCompression: BI_RGB.0,
-                    ..Default::default()
-                },
-                ..Default::default()
-            };
-
-            Self {
-                h_dc_screen,
-                h_dc_mem,
-                h_bitmap,
-                bmi,
-                s_w,
-                s_h,
-                max_dim,
-            }
+        let s_w = unsafe { GetSystemMetrics(SM_CXSCREEN) };
+        let s_h = unsafe { GetSystemMetrics(SM_CYSCREEN) };
+        let max_dim = s_w.max(s_h);
+        if s_w <= 0 || s_h <= 0 || max_dim <= 0 {
+            return None;
         }
+
+        let bitmap = OwnedBitmap::create_compatible(screen_dc.hdc, max_dim, TOTAL_SCAN_LINES)?;
+        let selected_bitmap = ObjectSelection::select(mem_dc.hdc, bitmap.handle)?;
+
+        let bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: max_dim,
+                biHeight: -TOTAL_SCAN_LINES, // Negative for top-down DIB
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        Some(Self {
+            _selected_bitmap: selected_bitmap,
+            bitmap,
+            mem_dc,
+            screen_dc,
+            bmi,
+            s_w,
+            s_h,
+            max_dim,
+        })
     }
 
-    unsafe fn capture_scanlines(&mut self, frame_count: u32, scan_data: &mut [u8]) {
+    fn scan_buffer_len(&self) -> usize {
+        (self.max_dim * TOTAL_SCAN_LINES * 4) as usize
+    }
+
+    fn capture_scanlines(&mut self, frame_count: u32, scan_data: &mut [u8]) -> bool {
+        if scan_data.len() < self.scan_buffer_len() {
+            return false;
+        }
+
         let mut rng_seed = frame_count;
 
-        unsafe {
-            self.capture_horizontal_lines(&mut rng_seed);
-            self.capture_vertical_lines(&mut rng_seed);
+        let captured_lines = self.capture_horizontal_lines(&mut rng_seed)
+            + self.capture_vertical_lines(&mut rng_seed);
+        if captured_lines == 0 {
+            return false;
+        }
 
+        let copied_lines = unsafe {
             GetDIBits(
-                self.h_dc_mem,
-                self.h_bitmap,
+                self.mem_dc.hdc,
+                self.bitmap.handle,
                 0,
                 TOTAL_SCAN_LINES as u32,
                 Some(scan_data.as_mut_ptr() as *mut _),
                 &mut self.bmi,
                 DIB_RGB_COLORS,
-            );
-        }
+            )
+        };
+        copied_lines == TOTAL_SCAN_LINES
     }
 
-    unsafe fn capture_horizontal_lines(&self, rng_seed: &mut u32) {
+    fn capture_horizontal_lines(&self, rng_seed: &mut u32) -> usize {
+        let mut captured = 0;
         for i in 0..HORIZONTAL_SCAN_LINES {
             *rng_seed = rng_seed.wrapping_mul(1103515245).wrapping_add(12345);
             let jitter = (*rng_seed % 21) as i32 - 10;
             let y = ((self.s_h / (HORIZONTAL_SCAN_LINES + 1)) * (i + 1) + jitter)
                 .clamp(0, self.s_h - 1);
-            unsafe {
-                let _ = BitBlt(
-                    self.h_dc_mem,
+            if unsafe {
+                BitBlt(
+                    self.mem_dc.hdc,
                     0,
                     i,
                     self.s_w,
                     4,
-                    self.h_dc_screen,
+                    self.screen_dc.hdc,
                     0,
                     y,
                     SRCCOPY,
-                );
+                )
+            }
+            .is_ok()
+            {
+                captured += 1;
             }
         }
+        captured
     }
 
-    unsafe fn capture_vertical_lines(&self, rng_seed: &mut u32) {
+    fn capture_vertical_lines(&self, rng_seed: &mut u32) -> usize {
+        let mut captured = 0;
         for i in 0..VERTICAL_SCAN_LINES {
             *rng_seed = rng_seed.wrapping_mul(1103515245).wrapping_add(12345);
             let jitter = (*rng_seed % 21) as i32 - 10;
             let x =
                 ((self.s_w / (VERTICAL_SCAN_LINES + 1)) * (i + 1) + jitter).clamp(0, self.s_w - 1);
-            unsafe {
-                let _ = BitBlt(
-                    self.h_dc_mem,
+            if unsafe {
+                BitBlt(
+                    self.mem_dc.hdc,
                     0,
                     i + HORIZONTAL_SCAN_LINES,
                     4,
                     self.s_h,
-                    self.h_dc_screen,
+                    self.screen_dc.hdc,
                     x,
                     0,
                     SRCCOPY,
-                );
+                )
+            }
+            .is_ok()
+            {
+                captured += 1;
             }
         }
+        captured
     }
+}
 
-    unsafe fn cleanup(&self) {
-        unsafe {
-            let _ = DeleteObject(self.h_bitmap);
-            let _ = DeleteDC(self.h_dc_mem);
-            ReleaseDC(None, self.h_dc_screen);
-        }
+struct DesktopDc {
+    hdc: HDC,
+}
+
+impl DesktopDc {
+    fn acquire() -> Option<Self> {
+        let hdc = unsafe { GetDC(None) };
+        (!hdc.0.is_null()).then_some(Self { hdc })
+    }
+}
+
+impl Drop for DesktopDc {
+    fn drop(&mut self) {
+        let _ = unsafe { ReleaseDC(None, self.hdc) };
+    }
+}
+
+struct CompatibleDc {
+    hdc: HDC,
+}
+
+impl CompatibleDc {
+    fn create(source: HDC) -> Option<Self> {
+        let hdc = unsafe { CreateCompatibleDC(source) };
+        (!hdc.0.is_null()).then_some(Self { hdc })
+    }
+}
+
+impl Drop for CompatibleDc {
+    fn drop(&mut self) {
+        let _ = unsafe { DeleteDC(self.hdc) };
+    }
+}
+
+struct OwnedBitmap {
+    handle: HBITMAP,
+}
+
+impl OwnedBitmap {
+    fn create_compatible(source: HDC, width: i32, height: i32) -> Option<Self> {
+        let handle = unsafe { CreateCompatibleBitmap(source, width, height) };
+        (!handle.0.is_null()).then_some(Self { handle })
+    }
+}
+
+impl Drop for OwnedBitmap {
+    fn drop(&mut self) {
+        let _ = unsafe { DeleteObject(self.handle) };
+    }
+}
+
+struct ObjectSelection {
+    hdc: HDC,
+    old_object: HGDIOBJ,
+}
+
+impl ObjectSelection {
+    fn select(hdc: HDC, bitmap: HBITMAP) -> Option<Self> {
+        let old_object = unsafe { SelectObject(hdc, bitmap) };
+        (!old_object.0.is_null()).then_some(Self { hdc, old_object })
+    }
+}
+
+impl Drop for ObjectSelection {
+    fn drop(&mut self) {
+        let _ = unsafe { SelectObject(self.hdc, self.old_object) };
     }
 }
 
@@ -222,6 +353,11 @@ impl ColorEngine {
     }
 
     fn analyze_scan_data(&mut self, data: &[u8], s_w: i32, s_h: i32) -> ScanAnalysis {
+        if s_w <= 0 || s_h <= 0 {
+            self.prev_avg_rgb = (0.0, 0.0, 0.0);
+            return empty_scan_analysis();
+        }
+
         let stride = (s_w.max(s_h) * 4) as usize;
         let mut vibrant_count = 0;
         let mut candidates = [((0u8, 0u8, 0u8), 0.0f32); 4];
@@ -241,6 +377,10 @@ impl ColorEngine {
             };
 
             for i in (0..limit).step_by(16) {
+                if row_offset + i + 2 >= data.len() {
+                    break;
+                }
+
                 let b = data[row_offset + i];
                 let g = data[row_offset + i + 1];
                 let r = data[row_offset + i + 2];
@@ -280,13 +420,18 @@ impl ColorEngine {
             }
         }
 
+        if sample_count == 0 {
+            self.prev_avg_rgb = (0.0, 0.0, 0.0);
+            return empty_scan_analysis();
+        }
+
         self.prev_avg_rgb = (
             total_r / sample_count as f32,
             total_g / sample_count as f32,
             total_b / sample_count as f32,
         );
 
-        candidates[..c_idx].sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        candidates[..c_idx].sort_by(|a, b| b.1.total_cmp(&a.1));
 
         let mut top_colors = [(0u8, 0u8, 0u8); 3];
         for (i, candidate) in candidates.iter().take(3).enumerate() {
@@ -326,11 +471,24 @@ impl ColorEngine {
                 self.color_index = (self.color_index + 1) % 3;
                 self.cycle_start = Instant::now();
             }
-            analysis.top_colors[self.color_index]
+            analysis
+                .top_colors
+                .get(self.color_index)
+                .copied()
+                .unwrap_or_default()
         } else {
             self.color_index = 0;
-            analysis.top_colors[0]
+            analysis.top_colors.first().copied().unwrap_or_default()
         }
+    }
+}
+
+fn empty_scan_analysis() -> ScanAnalysis {
+    ScanAnalysis {
+        vibrant_count: 0,
+        sample_count: 0,
+        black_screen: true,
+        top_colors: [(0, 0, 0); 3],
     }
 }
 
@@ -446,3 +604,78 @@ fn print_color_preview(r: u8, g: u8, b: u8) {
 
 #[cfg(not(debug_assertions))]
 fn print_color_preview(_r: u8, _g: u8, _b: u8) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn rgb_to_hsv_identifies_red_hue() {
+        let (h, s, v) = rgb_to_hsv(255, 0, 0);
+
+        assert!(h <= 0.01 || h >= 0.99);
+        assert!((s - 1.0).abs() < f32::EPSILON);
+        assert!((v - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn color_engine_handles_black_scan_data_without_panicking() {
+        let s_w = 8;
+        let s_h = 8;
+        let stride = s_w.max(s_h) as usize * 4;
+        let data = vec![0u8; stride * TOTAL_SCAN_LINES as usize];
+        let mut engine = ColorEngine::new();
+
+        let (r, g, b) = engine.tick(&data, s_w, s_h);
+
+        assert!(r <= 1);
+        assert!(g <= 1);
+        assert!(b <= 1);
+    }
+
+    #[test]
+    fn color_engine_handles_empty_scan_data_without_panicking() {
+        let mut engine = ColorEngine::new();
+
+        let (r, g, b) = engine.tick(&[], 8, 8);
+
+        assert!(r <= 1);
+        assert!(g <= 1);
+        assert!(b <= 1);
+    }
+
+    #[test]
+    fn color_engine_handles_invalid_dimensions_without_panicking() {
+        let mut engine = ColorEngine::new();
+
+        let (r, g, b) = engine.tick(&[], 0, -1);
+
+        assert!(r <= 1);
+        assert!(g <= 1);
+        assert!(b <= 1);
+    }
+
+    #[test]
+    fn apply_vibrance_returns_visible_midpoint_color() {
+        let (r, g, b) = apply_vibrance(128, 32, 16);
+
+        assert!(r > g);
+        assert!(g >= b);
+        assert!(r > 70);
+    }
+
+    #[test]
+    fn join_ambient_thread_drains_handle() {
+        let _guard = TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *ambient_thread() = Some(thread::spawn(|| {}));
+
+        join_ambient_thread();
+
+        assert!(ambient_thread().is_none());
+    }
+}

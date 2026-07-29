@@ -1,61 +1,46 @@
 use std::time::Duration;
 
 use sysinfo::System;
-use tracing::error;
+use tracing::{error, warn};
+
+const APP_PROCESS_NAMES: &[&str] = &["blade-controlhub", "blade-controlhub.exe"];
+const SILENT_RESTART_ARGS: &[&str] = &["--silent"];
+const DEFAULT_RESTART_ARGS: &[&str] = &[];
+const DETACHED_PROCESS: u32 = 0x0000_0008;
+const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// Restarts the application by spawning a new instance and exiting.
 pub fn restart_app(code: i32) -> ! {
-    match std::env::current_exe() {
-        Ok(current_exe) => {
-            let mut cmd = std::process::Command::new(&current_exe);
-
-            // Do not show startup OSD with code 1 restart
-            if code == 1 {
-                cmd.arg("--silent");
-            }
-
-            if let Err(e) = cmd.spawn() {
-                error!(error = %e, "Failed to spawn restart process");
-            }
-        }
-        Err(e) => {
-            error!(error = %e, "Failed to resolve current executable path for restart");
-        }
+    if let Err(e) = spawn_replacement_app(code) {
+        error!(error = %e, "Failed to spawn replacement process");
     }
     std::process::exit(code);
 }
 
-/// Extension trait for `Option<T>` that restarts the app on `None` instead of panicking.
-#[allow(dead_code)]
-pub trait OptionReload<T> {
-    fn or_reload(self, msg: &str) -> T;
-}
-
-impl<T> OptionReload<T> for Option<T> {
-    fn or_reload(self, msg: &str) -> T {
-        self.unwrap_or_else(|| {
-            error!(
-                message = msg,
-                "Fatal: Option::None where value was required; restarting"
-            );
-            restart_app(1);
-        })
+pub fn spawn_replacement_app(code: i32) -> std::io::Result<()> {
+    match std::env::current_exe() {
+        Ok(current_exe) => spawn_replacement_process(&current_exe, code),
+        Err(e) => Err(e),
     }
 }
 
-/// Extension trait for `Result<T, E>` that restarts the app on `Err` instead of panicking.
-#[allow(dead_code)]
-pub trait ResultReload<T, E> {
-    fn or_reload(self, msg: &str) -> T;
+fn restart_args(code: i32) -> &'static [&'static str] {
+    if code == 1 {
+        SILENT_RESTART_ARGS
+    } else {
+        DEFAULT_RESTART_ARGS
+    }
 }
 
-impl<T, E: std::fmt::Debug> ResultReload<T, E> for Result<T, E> {
-    fn or_reload(self, msg: &str) -> T {
-        self.unwrap_or_else(|err| {
-            error!(message = msg, error = ?err, "Fatal: Result::Err in non-recoverable path; restarting");
-            restart_app(1);
-        })
-    }
+fn spawn_replacement_process(current_exe: &std::path::Path, code: i32) -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
+
+    let mut cmd = std::process::Command::new(current_exe);
+    cmd.args(restart_args(code))
+        .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+
+    cmd.spawn().map(drop)
 }
 
 pub fn close_running_instances() {
@@ -70,17 +55,48 @@ pub fn close_running_instances() {
     let mut sys = System::new_all();
     sys.refresh_processes();
 
-    let my_name = "blade-controlhub.exe";
-
     let mut found_old = false;
     for (pid, process) in sys.processes() {
-        if process.name() == my_name && *pid != current_pid {
-            process.kill();
-            found_old = true;
+        if is_app_process_name(process.name()) && *pid != current_pid {
+            if process.kill() {
+                found_old = true;
+            } else {
+                warn!(pid = ?pid, "Failed to terminate previous Blade ControlHub process");
+            }
         }
     }
 
     if found_old {
         std::thread::sleep(Duration::from_millis(150));
+    }
+}
+
+fn is_app_process_name(name: &str) -> bool {
+    APP_PROCESS_NAMES
+        .iter()
+        .any(|app_name| name.eq_ignore_ascii_case(app_name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restart_code_one_uses_silent_startup() {
+        assert_eq!(restart_args(1), ["--silent"]);
+    }
+
+    #[test]
+    fn normal_restart_uses_no_extra_args() {
+        assert!(restart_args(0).is_empty());
+        assert!(restart_args(2).is_empty());
+    }
+
+    #[test]
+    fn app_process_name_matches_sysinfo_name_with_or_without_extension() {
+        assert!(is_app_process_name("blade-controlhub"));
+        assert!(is_app_process_name("blade-controlhub.exe"));
+        assert!(is_app_process_name("BLADE-CONTROLHUB.EXE"));
+        assert!(!is_app_process_name("blade_settings"));
     }
 }

@@ -12,6 +12,11 @@ pub fn start_keyboard_hooks(device_pid: u16) -> AppResult<()> {
     hidapi::HidApiListener::new(device_pid).start()
 }
 
+pub fn stop_keyboard_hooks() {
+    key_hook::KeyHook::stop();
+    hidapi::HidApiListener::stop();
+}
+
 #[derive(PartialEq, Eq, Hash)]
 pub enum KeyType {
     VKey(vkey::Key),

@@ -3,7 +3,7 @@ authors = ["me"]
 edition = "2024"
 name = "blade-controlhub"
 version = "1.0.0"
-# default-run = "blade-controlhub"
+default-run = "blade-controlhub"
 
 # [lib]
 # name = "blade_controlhub"
@@ -13,9 +13,9 @@ version = "1.0.0"
 # name = "blade-controlhub"
 # path = "src/main.rs"
 
-# [[bin]]
-# name = "blade-settings"
-# path = "src/settings_window.rs"
+[[bin]]
+name = "blade_settings"
+path = "src/settings_window.rs"
 
 [dependencies]
 anyhow = "1.0"
@@ -70,7 +70,11 @@ windows-sys = { version = "0.52", features = [
     "Win32_System_Power",
     "Win32_UI_WindowsAndMessaging",
     "Win32_Foundation",
-    "Win32_System_LibraryLoader"
+    "Win32_System_LibraryLoader",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Pipes",
+    "Win32_System_IO",
+    "Win32_Security"
 ] }
 winit = "0.29"
 

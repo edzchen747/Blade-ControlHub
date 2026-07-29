@@ -1,24 +1,34 @@
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
-use tracing::{info, warn};
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+use std::sync::{Mutex, MutexGuard};
+use std::thread::{self, JoinHandle};
+use tracing::{error, info, warn};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory, IDXGIFactory};
 use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MONITOR_DEFAULTTOPRIMARY, MONITORINFOEXW, MonitorFromWindow,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, GWLP_USERDATA,
-    GetMessageW, GetWindowLongPtrW, MSG, RegisterClassW, SetWindowLongPtrW, WINDOW_EX_STYLE,
-    WINDOW_STYLE, WM_DISPLAYCHANGE, WM_NCCREATE, WNDCLASSW,
+    CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow,
+    DispatchMessageW, GWLP_USERDATA, GetMessageW, GetWindowLongPtrW, MSG, PostMessageW,
+    RegisterClassW, SetWindowLongPtrW, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE,
+    WM_DISPLAYCHANGE, WM_NCCREATE, WM_USER, WNDCLASSW,
 };
-use windows::core::w;
+use windows::core::{PCWSTR, Result as WinResult, w};
 
-use crate::utils::reload::restart_app;
+use crate::ui::app::app;
+use crate::ui::app_events::AppEvent;
+
+const WM_GPU_MONITOR_STOP: u32 = WM_USER + 3;
+static GPU_MONITOR_RUNNING: AtomicBool = AtomicBool::new(false);
+static GPU_MONITOR_HWND: AtomicIsize = AtomicIsize::new(0);
+static GPU_MONITOR_THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
 /// Detect when main monitor GPU changes and launches app on main display GPU.
 /// Ambient Effect causes stutters in games if it runs on iGPU but game and main display are running on dGPU
 pub struct GpuDisplayMonitor {
-    class_name: windows::core::PCWSTR,
+    class_name: PCWSTR,
     last_display_gpu: String,
 }
 
@@ -31,45 +41,69 @@ impl GpuDisplayMonitor {
     }
 
     pub fn start() {
-        std::thread::spawn(|| {
-            let mut monitor = GpuDisplayMonitor::new();
-            monitor.run();
-        });
+        join_finished_gpu_monitor_thread();
+
+        if GPU_MONITOR_RUNNING.swap(true, Ordering::SeqCst) {
+            return;
+        }
+
+        match thread::Builder::new()
+            .name("blade-gpu-display-monitor".to_string())
+            .spawn(|| {
+                let mut monitor = GpuDisplayMonitor::new();
+                monitor.run();
+            }) {
+            Ok(handle) => {
+                *gpu_monitor_thread() = Some(handle);
+            }
+            Err(error) => {
+                GPU_MONITOR_RUNNING.store(false, Ordering::SeqCst);
+                error!(%error, "Failed to start GPU display monitor thread");
+            }
+        }
+    }
+
+    pub fn stop() {
+        GPU_MONITOR_RUNNING.store(false, Ordering::SeqCst);
+        wake_gpu_monitor(WM_GPU_MONITOR_STOP);
+        join_gpu_monitor_thread();
     }
 
     fn run(&mut self) {
-        unsafe {
-            let wnd_class = WNDCLASSW {
-                style: CS_HREDRAW | CS_VREDRAW,
-                lpfnWndProc: Some(Self::window_procedure),
-                hInstance: HINSTANCE::default(),
-                lpszClassName: self.class_name,
-                ..Default::default()
-            };
-            RegisterClassW(&wnd_class);
+        let Some(window) = GpuMonitorWindow::create(self) else {
+            GPU_MONITOR_RUNNING.store(false, Ordering::SeqCst);
+            return;
+        };
+        GPU_MONITOR_HWND.store(window.hwnd.0 as isize, Ordering::SeqCst);
 
-            let _hwnd = CreateWindowExW(
-                WINDOW_EX_STYLE::default(),
-                self.class_name,
-                w!("GpuMonitorWindow"),
-                WINDOW_STYLE::default(),
-                0,
-                0,
-                0,
-                0,
-                HWND::default(),
-                None,
-                HINSTANCE::default(),
-                Some(self as *mut GpuDisplayMonitor as *const _),
-            )
-            .expect("Fatal internal error: GpuDisplayMonitor message window");
+        // Trigger an explicit baseline check on setup.
+        self.sync_current_main_display_and_gpu();
+        run_gpu_monitor_message_loop();
+        GPU_MONITOR_HWND.store(0, Ordering::SeqCst);
+        GPU_MONITOR_RUNNING.store(false, Ordering::SeqCst);
+    }
 
-            // Trigger an explicit baseline check on setup
-            self.sync_current_main_display_and_gpu();
+    pub fn sync_current_main_display_and_gpu(&mut self) {
+        let Some(display_device_name) = primary_display_device_name() else {
+            error!("Could not retrieve monitor info from GDI");
+            return;
+        };
 
-            let mut msg = MSG::default();
-            while GetMessageW(&mut msg, HWND::default(), 0, 0).as_bool() {
-                // Loop continues executing while window is valid
+        info!(
+            "Current Main Display : {}",
+            display_device_name.to_string_lossy()
+        );
+
+        match active_gpu_for_display(&display_device_name) {
+            Ok(Some(gpu_description)) => {
+                info!("Active GPU Device    : {}", gpu_description);
+                self.display_gpu_change_callback(gpu_description);
+            }
+            Ok(None) => {
+                warn!("Active GPU Device    : Unknown (Could not map DXGI topology)");
+            }
+            Err(error) => {
+                error!(?error, "Failed to initialize DXGI subsystem");
             }
         }
     }
@@ -83,92 +117,261 @@ impl GpuDisplayMonitor {
     ) -> LRESULT {
         unsafe {
             if msg == WM_NCCREATE {
-                let create_struct = lparam.0 as *const CREATESTRUCTW;
-                if !create_struct.is_null() {
-                    let this = (*create_struct).lpCreateParams as isize;
-                    SetWindowLongPtrW(hwnd, GWLP_USERDATA, this);
-                }
-            }
-
-            let user_data = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
-            let monitor: Option<&mut GpuDisplayMonitor> = if user_data != 0 {
-                Some(&mut *(user_data as *mut GpuDisplayMonitor)) // ◄ Added Some() here
-            } else {
-                None
+                store_monitor_pointer(hwnd, lparam);
             };
 
-            if msg == WM_DISPLAYCHANGE {
-                if let Some(m) = monitor {
-                    m.sync_current_main_display_and_gpu();
-                }
+            if GPU_MONITOR_RUNNING.load(Ordering::SeqCst) && msg == WM_DISPLAYCHANGE {
+                with_monitor(hwnd, |monitor| monitor.sync_current_main_display_and_gpu());
             }
 
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
     }
 
-    pub unsafe fn sync_current_main_display_and_gpu(&mut self) {
-        unsafe {
-            let h_monitor = MonitorFromWindow(HWND::default(), MONITOR_DEFAULTTOPRIMARY);
-
-            let mut monitor_info = MONITORINFOEXW::default();
-            monitor_info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
-
-            if GetMonitorInfoW(h_monitor, &mut monitor_info.monitorInfo).as_bool() {
-                let display_device_name = Self::parse_wchar_slice(&monitor_info.szDevice);
-                info!(
-                    "Current Main Display : {}",
-                    display_device_name.to_string_lossy()
-                );
-
-                if let Ok(factory) = CreateDXGIFactory::<IDXGIFactory>() {
-                    let mut adapter_index = 0;
-
-                    while let Ok(adapter) = factory.EnumAdapters(adapter_index) {
-                        let mut output_index = 0;
-
-                        while let Ok(output) = adapter.EnumOutputs(output_index) {
-                            if let Ok(output_desc) = output.GetDesc() {
-                                let output_name = Self::parse_wchar_slice(&output_desc.DeviceName);
-
-                                if output_name == display_device_name {
-                                    if let Ok(adapter_desc) = adapter.GetDesc() {
-                                        let gpu_description =
-                                            Self::parse_wchar_slice(&adapter_desc.Description)
-                                                .to_string_lossy()
-                                                .to_string();
-
-                                        info!("Active GPU Device    : {}", gpu_description);
-                                        self.display_gpu_change_callback(gpu_description);
-                                        return;
-                                    }
-                                }
-                            }
-                            output_index += 1;
-                        }
-                        adapter_index += 1;
-                    }
-                    warn!("Active GPU Device    : Unknown (Could not map DXGI topology)");
-                } else {
-                    eprintln!("Error: Failed to initialize DXGI subsystem.");
-                }
-            } else {
-                eprintln!("Error: Could not retrieve Monitor Info from GDI.");
-            }
-        }
-    }
-
-    fn parse_wchar_slice(slice: &[u16]) -> OsString {
-        let len = slice.iter().position(|&c| c == 0).unwrap_or(slice.len());
-        OsString::from_wide(&slice[..len])
-    }
-
     fn display_gpu_change_callback(&mut self, new_display_gpu: String) {
-        if !self.last_display_gpu.is_empty() && self.last_display_gpu != new_display_gpu {
+        if should_restart_for_gpu_change(&self.last_display_gpu, &new_display_gpu) {
             info!("Display changed to different graphics adapter. Restarting app...");
-            restart_app(1);
+            app(AppEvent::Restart(1));
         } else {
             self.last_display_gpu = new_display_gpu;
         }
+    }
+}
+
+fn gpu_monitor_thread() -> MutexGuard<'static, Option<JoinHandle<()>>> {
+    GPU_MONITOR_THREAD
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn join_finished_gpu_monitor_thread() {
+    let should_join = gpu_monitor_thread()
+        .as_ref()
+        .is_some_and(JoinHandle::is_finished);
+
+    if should_join {
+        join_gpu_monitor_thread();
+    }
+}
+
+fn join_gpu_monitor_thread() {
+    let current_thread_id = thread::current().id();
+    let Some(handle) = gpu_monitor_thread().take() else {
+        return;
+    };
+
+    if handle.thread().id() == current_thread_id {
+        warn!("Skipping join of current GPU display monitor thread during shutdown");
+        *gpu_monitor_thread() = Some(handle);
+        return;
+    }
+
+    if handle.join().is_err() {
+        warn!("GPU display monitor thread panicked during shutdown");
+    }
+}
+
+fn wake_gpu_monitor(message: u32) {
+    let hwnd = HWND(GPU_MONITOR_HWND.load(Ordering::SeqCst) as *mut _);
+    if !hwnd.0.is_null() {
+        let _ = unsafe { PostMessageW(hwnd, message, WPARAM(0), LPARAM(0)) };
+    }
+}
+
+struct GpuMonitorWindow {
+    hwnd: HWND,
+}
+
+impl GpuMonitorWindow {
+    fn create(monitor: &mut GpuDisplayMonitor) -> Option<Self> {
+        create_monitor_window(monitor).map(|hwnd| Self { hwnd })
+    }
+}
+
+impl Drop for GpuMonitorWindow {
+    fn drop(&mut self) {
+        if self.hwnd.0.is_null() {
+            return;
+        }
+
+        if let Err(error) = unsafe { DestroyWindow(self.hwnd) } {
+            warn!(?error, "Failed to destroy GPU display monitor window");
+        }
+    }
+}
+
+fn create_monitor_window(monitor: &mut GpuDisplayMonitor) -> Option<HWND> {
+    unsafe {
+        let wnd_class = WNDCLASSW {
+            style: CS_HREDRAW | CS_VREDRAW,
+            lpfnWndProc: Some(GpuDisplayMonitor::window_procedure),
+            hInstance: HINSTANCE::default(),
+            lpszClassName: monitor.class_name,
+            ..Default::default()
+        };
+        let _ = RegisterClassW(&wnd_class);
+
+        match CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            monitor.class_name,
+            w!("GpuMonitorWindow"),
+            WINDOW_STYLE::default(),
+            0,
+            0,
+            0,
+            0,
+            HWND::default(),
+            None,
+            HINSTANCE::default(),
+            Some(monitor as *mut GpuDisplayMonitor as *const _),
+        ) {
+            Ok(hwnd) => Some(hwnd),
+            Err(error) => {
+                error!(
+                    ?error,
+                    "Failed to create GPU display monitor message window"
+                );
+                None
+            }
+        }
+    }
+}
+
+fn run_gpu_monitor_message_loop() {
+    unsafe {
+        let mut msg = MSG::default();
+        while GPU_MONITOR_RUNNING.load(Ordering::SeqCst)
+            && GetMessageW(&mut msg, HWND::default(), 0, 0).as_bool()
+        {
+            let _ = TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+
+            if msg.message == WM_GPU_MONITOR_STOP {
+                break;
+            }
+        }
+    }
+}
+
+fn store_monitor_pointer(hwnd: HWND, lparam: LPARAM) {
+    let create_struct = lparam.0 as *const CREATESTRUCTW;
+    if !create_struct.is_null() {
+        let this = unsafe { (*create_struct).lpCreateParams as isize };
+        unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, this) };
+    }
+}
+
+fn with_monitor(hwnd: HWND, f: impl FnOnce(&mut GpuDisplayMonitor)) {
+    let user_data = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
+    if user_data != 0 {
+        let monitor = unsafe { &mut *(user_data as *mut GpuDisplayMonitor) };
+        f(monitor);
+    }
+}
+
+fn primary_display_device_name() -> Option<OsString> {
+    unsafe {
+        let h_monitor = MonitorFromWindow(HWND::default(), MONITOR_DEFAULTTOPRIMARY);
+
+        let mut monitor_info = MONITORINFOEXW::default();
+        monitor_info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+
+        GetMonitorInfoW(h_monitor, &mut monitor_info.monitorInfo)
+            .as_bool()
+            .then(|| parse_wchar_slice(&monitor_info.szDevice))
+    }
+}
+
+fn active_gpu_for_display(display_device_name: &OsString) -> WinResult<Option<String>> {
+    let factory = unsafe { CreateDXGIFactory::<IDXGIFactory>()? };
+    let mut adapter_index = 0;
+
+    while let Ok(adapter) = unsafe { factory.EnumAdapters(adapter_index) } {
+        let mut output_index = 0;
+
+        while let Ok(output) = unsafe { adapter.EnumOutputs(output_index) } {
+            if let Ok(output_desc) = unsafe { output.GetDesc() } {
+                let output_name = parse_wchar_slice(&output_desc.DeviceName);
+
+                if &output_name != display_device_name {
+                    continue;
+                }
+
+                if let Ok(adapter_desc) = unsafe { adapter.GetDesc() } {
+                    return Ok(Some(
+                        parse_wchar_slice(&adapter_desc.Description)
+                            .to_string_lossy()
+                            .to_string(),
+                    ));
+                }
+            }
+            output_index += 1;
+        }
+        adapter_index += 1;
+    }
+
+    Ok(None)
+}
+
+fn parse_wchar_slice(slice: &[u16]) -> OsString {
+    let len = slice.iter().position(|&c| c == 0).unwrap_or(slice.len());
+    OsString::from_wide(&slice[..len])
+}
+
+fn should_restart_for_gpu_change(last_display_gpu: &str, new_display_gpu: &str) -> bool {
+    !last_display_gpu.is_empty() && last_display_gpu != new_display_gpu
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        GPU_MONITOR_HWND, GPU_MONITOR_RUNNING, GpuDisplayMonitor, gpu_monitor_thread,
+        join_gpu_monitor_thread, parse_wchar_slice, should_restart_for_gpu_change,
+    };
+    use std::sync::atomic::Ordering;
+    use std::thread;
+
+    #[test]
+    fn parse_wchar_slice_stops_at_nul() {
+        let wide = [
+            'D' as u16, 'G' as u16, 'P' as u16, 'U' as u16, 0, 'X' as u16,
+        ];
+
+        assert_eq!(parse_wchar_slice(&wide).to_string_lossy(), "DGPU");
+    }
+
+    #[test]
+    fn gpu_change_does_not_restart_before_baseline() {
+        assert!(!should_restart_for_gpu_change("", "NVIDIA"));
+    }
+
+    #[test]
+    fn gpu_change_does_not_restart_for_same_gpu() {
+        assert!(!should_restart_for_gpu_change("NVIDIA", "NVIDIA"));
+    }
+
+    #[test]
+    fn gpu_change_restarts_after_baseline_changes() {
+        assert!(should_restart_for_gpu_change("Intel", "NVIDIA"));
+    }
+
+    #[test]
+    fn stop_clears_gpu_monitor_running_flag() {
+        GPU_MONITOR_RUNNING.store(true, Ordering::SeqCst);
+        GPU_MONITOR_HWND.store(0, Ordering::SeqCst);
+
+        GpuDisplayMonitor::stop();
+
+        assert!(!GPU_MONITOR_RUNNING.load(Ordering::SeqCst));
+        assert_eq!(GPU_MONITOR_HWND.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn join_gpu_monitor_thread_drains_handle() {
+        *gpu_monitor_thread() = Some(thread::spawn(|| {}));
+
+        join_gpu_monitor_thread();
+
+        assert!(gpu_monitor_thread().is_none());
     }
 }

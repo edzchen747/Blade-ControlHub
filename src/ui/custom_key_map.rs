@@ -1,10 +1,7 @@
-use std::sync::atomic::Ordering;
-
 /// Data structures for custom key mapping state.
 ///
 /// Extracted from `Settings` to provide a clean, testable domain model
 /// that can be shared across UI components without coupling to egui.
-use crate::core::shared_state::KEYMAP_LISTENING;
 
 #[derive(Default, Clone)]
 #[allow(dead_code)]
@@ -51,7 +48,6 @@ impl CustomKeyMap {
 
     pub fn set_listening_idx(&mut self, idx: Option<usize>) {
         self.listening_idx = idx;
-        KEYMAP_LISTENING.store(idx.is_some(), Ordering::SeqCst);
     }
 
     pub fn get_listening_idx(&self) -> Option<usize> {

@@ -5,7 +5,7 @@
 
 mod mock_device;
 
-use crate::core::traits::DeviceController;
+use crate::hal::DeviceController;
 use crate::razer::config::AppConfig;
 use crate::razer::enums::{BATTERY_LIMITS, PERF_MODES, RGB_EFFECTS};
 use mock_device::MockDeviceController;
@@ -26,7 +26,6 @@ fn mock_device_initialize_records_call() {
 #[test]
 fn mock_device_sleep_records_call() {
     let mock = MockDeviceController::new();
-    mock.sleep();
     assert!(
         mock.sleep().unwrap_or(false),
         "sleep() must set the sleep_called flag"
@@ -70,8 +69,8 @@ fn app_config_battery_limit_cycle_covers_all_items() {
 }
 
 #[test]
-fn perf_modes_constant_has_six_entries() {
-    assert_eq!(PERF_MODES.len(), 6);
+fn perf_modes_constant_has_seven_entries() {
+    assert_eq!(PERF_MODES.len(), 7);
 }
 
 #[test]

@@ -9,8 +9,6 @@ use crate::razer::handlers::{
 use crate::razer::protocol::command;
 use crate::ui::app::app;
 use crate::ui::app_events::OsdEvent;
-use crate::ui::icons::OsdIcon;
-use crate::ui::osd_controller::{OsdController, OsdParams};
 use crate::utils::persist::PersistBuffer;
 use crate::win::display::ambient::AmbientEffect;
 use crate::win::display::brightness::BrightnessWorker;
@@ -52,7 +50,9 @@ impl<'a> Executer<'a> {
     }
     pub fn process_commands(&mut self) {
         while let Ok(cmd) = self.rx.recv() {
-            self.dispatch(cmd);
+            if !self.dispatch(cmd) {
+                break;
+            }
         }
         info!("All DeviceHandle senders dropped; device worker thread exiting");
     }
@@ -79,7 +79,7 @@ impl<'a> Executer<'a> {
             &mut self.battery_cycle_timeout,
         )
     }
-    fn dispatch(&mut self, cmd: DeviceCmd) {
+    fn dispatch(&mut self, cmd: DeviceCmd) -> bool {
         match cmd {
             DeviceCmd::InitializeDevice(notif) => self.initialize(notif),
             DeviceCmd::SleepDevice(tx) => {
@@ -87,6 +87,7 @@ impl<'a> Executer<'a> {
             }
             DeviceCmd::Shutdown(tx) => {
                 let _ = tx.send(self.shutdown());
+                return false;
             }
             DeviceCmd::AdjustKeyboardLight(up) => self.kb().adjust_keyboard_light(up),
             DeviceCmd::CycleRGBMode => self.kb().cycle_rgb_mode(),
@@ -125,6 +126,7 @@ impl<'a> Executer<'a> {
                 crate::config::persist_config(self.app_config, &self.persist_buffer);
             }
         }
+        true
     }
 
     #[instrument(skip(self), fields(notify_startup))]
@@ -161,12 +163,6 @@ impl<'a> Executer<'a> {
         // Restore UI notifications and disk writes
         app(OsdEvent::EnableOSD(true).into());
         if notify_startup {
-            OsdController::show(OsdParams {
-                label: "RazeControlHub".to_string(),
-                total_steps: 0,
-                active_steps: 0,
-                icon: Some(OsdIcon::RazerControlHub),
-            });
             app(OsdEvent::Startup.into());
         }
         PersistBuffer::enable();
@@ -193,6 +189,7 @@ impl<'a> Executer<'a> {
     }
 
     fn shutdown(&mut self) -> bool {
+        AmbientEffect::stop();
         self.kb().restore_fn_keys();
         self.kb().keyboard_control(false);
         self.kb().set_rgb_effect(RGBEffect::Cycle);
