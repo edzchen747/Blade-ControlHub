@@ -44,6 +44,7 @@ pub enum RGBEffect {
     Wave = 1,
     Breathe = 3,
     Ambient = 5,
+    Static = 6,
     Starlight = 25,
     Reactive = 19,
     Unknown = 255,
@@ -56,6 +57,7 @@ impl From<u8> for RGBEffect {
             1 => Self::Wave,
             3 => Self::Breathe,
             5 => Self::Ambient,
+            6 => Self::Static,
             // Firmware on some devices reports Starlight as 0x07
             7 => Self::Starlight,
             25 => Self::Starlight,
@@ -122,11 +124,12 @@ pub enum LidLogoMode {
     Off = 0,
 }
 
-pub const RGB_EFFECTS: [RGBEffect; 6] = [
+pub const RGB_EFFECTS: [RGBEffect; 7] = [
     RGBEffect::Cycle,
     RGBEffect::Wave,
     RGBEffect::Breathe,
     RGBEffect::Ambient,
+    RGBEffect::Static,
     RGBEffect::Starlight,
     RGBEffect::Reactive,
 ];

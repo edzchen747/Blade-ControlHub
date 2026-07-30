@@ -249,12 +249,12 @@ impl TrayManager {
             return None;
         };
 
-        let coloured_svg = include_str!("../../assets/icon.svg")
+        let colored_svg = include_str!("../../assets/icon.svg")
             .replace("#FFFFFF", hex_color)
             .replace("#ffffff", &hex_color.to_lowercase());
 
         let opt = usvg::Options::default();
-        let tree = match usvg::Tree::from_str(&coloured_svg, &opt) {
+        let tree = match usvg::Tree::from_str(&colored_svg, &opt) {
             Ok(tree) => tree,
             Err(error) => {
                 warn!(?error, "Failed to parse tray icon SVG");

@@ -221,6 +221,7 @@ pub enum DeviceCmd {
     AdjustScreenBrightness(i8),
     CycleRefreshRate,
     SetRefreshRate(PowerProfile, u32, mpsc::Sender<AppResult<()>>),
+    DisplayLayoutChanged,
     SetKeyboardBrightness(PowerProfile, u8, mpsc::Sender<AppResult<()>>),
     SetKeyboardColor(u8, u8, u8),
     #[allow(dead_code)]
@@ -353,6 +354,10 @@ impl DeviceHandle {
 
     pub fn set_refresh_rate(&self, profile: PowerProfile, refresh_rate: u32) -> AppResult<()> {
         self.query_result(|tx| DeviceCmd::SetRefreshRate(profile, refresh_rate, tx))
+    }
+
+    pub fn display_layout_changed(&self) {
+        self.send(DeviceCmd::DisplayLayoutChanged);
     }
 
     pub fn cycle_battery_limit(&self) {

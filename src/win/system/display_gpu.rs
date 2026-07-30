@@ -1,14 +1,15 @@
+use crate::razer::device_handle::device;
+use crate::win::display::topology::{
+    DisplayLayout, current_display_layout, display_layout_changed, primary_display_device_name,
+    wide_slice_to_os_string,
+};
 use std::ffi::OsString;
-use std::os::windows::ffi::OsStringExt;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use tracing::{error, info, warn};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory, IDXGIFactory};
-use windows::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, MONITOR_DEFAULTTOPRIMARY, MONITORINFOEXW, MonitorFromWindow,
-};
 use windows::Win32::UI::WindowsAndMessaging::{
     CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow,
     DispatchMessageW, GWLP_USERDATA, GetMessageW, GetWindowLongPtrW, MSG, PostMessageW,
@@ -18,6 +19,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{PCWSTR, Result as WinResult, w};
 
 const WM_GPU_MONITOR_STOP: u32 = WM_USER + 3;
+const WM_GPU_MONITOR_DISPLAY_CHANGE: u32 = WM_USER + 4;
 static GPU_MONITOR_RUNNING: AtomicBool = AtomicBool::new(false);
 static GPU_MONITOR_HWND: AtomicIsize = AtomicIsize::new(0);
 static GPU_MONITOR_THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
@@ -27,6 +29,7 @@ static GPU_MONITOR_THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 pub struct GpuDisplayMonitor {
     class_name: PCWSTR,
     last_display_gpu: String,
+    last_display_layout: Option<DisplayLayout>,
 }
 
 impl GpuDisplayMonitor {
@@ -34,6 +37,7 @@ impl GpuDisplayMonitor {
         Self {
             class_name: w!("GpuMonitorWindowClass"),
             last_display_gpu: String::default(),
+            last_display_layout: None,
         }
     }
 
@@ -66,6 +70,12 @@ impl GpuDisplayMonitor {
         join_gpu_monitor_thread();
     }
 
+    pub fn trigger_display_change() {
+        if !wake_gpu_monitor(WM_GPU_MONITOR_DISPLAY_CHANGE) {
+            device().display_layout_changed();
+        }
+    }
+
     fn run(&mut self) {
         let Some(window) = GpuMonitorWindow::create(self) else {
             GPU_MONITOR_RUNNING.store(false, Ordering::SeqCst);
@@ -74,6 +84,7 @@ impl GpuDisplayMonitor {
         GPU_MONITOR_HWND.store(window.hwnd.0 as isize, Ordering::SeqCst);
 
         // Trigger an explicit baseline check on setup.
+        self.refresh_display_layout_baseline();
         self.sync_current_main_display_and_gpu();
         run_gpu_monitor_message_loop();
         GPU_MONITOR_HWND.store(0, Ordering::SeqCst);
@@ -118,7 +129,11 @@ impl GpuDisplayMonitor {
             };
 
             if GPU_MONITOR_RUNNING.load(Ordering::SeqCst) && msg == WM_DISPLAYCHANGE {
-                with_monitor(hwnd, |monitor| monitor.sync_current_main_display_and_gpu());
+                with_monitor(hwnd, |monitor| monitor.process_display_change(false));
+            }
+
+            if GPU_MONITOR_RUNNING.load(Ordering::SeqCst) && msg == WM_GPU_MONITOR_DISPLAY_CHANGE {
+                with_monitor(hwnd, |monitor| monitor.process_display_change(true));
             }
 
             DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -130,6 +145,26 @@ impl GpuDisplayMonitor {
             info!("Display changed to different graphics adapter; restart is no longer required");
         }
         self.last_display_gpu = new_display_gpu;
+    }
+
+    fn refresh_display_layout_baseline(&mut self) {
+        self.last_display_layout = Some(current_display_layout());
+    }
+
+    fn process_display_change(&mut self, force: bool) {
+        let current_layout = current_display_layout();
+        let changed =
+            force || display_layout_changed(self.last_display_layout.as_ref(), &current_layout);
+        self.last_display_layout = Some(current_layout);
+
+        if changed {
+            info!(
+                force,
+                "Display layout changed; refreshing display-dependent runtime state"
+            );
+            device().display_layout_changed();
+            self.sync_current_main_display_and_gpu();
+        }
     }
 }
 
@@ -166,11 +201,13 @@ fn join_gpu_monitor_thread() {
     }
 }
 
-fn wake_gpu_monitor(message: u32) {
+fn wake_gpu_monitor(message: u32) -> bool {
     let hwnd = HWND(GPU_MONITOR_HWND.load(Ordering::SeqCst) as *mut _);
-    if !hwnd.0.is_null() {
-        let _ = unsafe { PostMessageW(hwnd, message, WPARAM(0), LPARAM(0)) };
+    if hwnd.0.is_null() {
+        return false;
     }
+
+    unsafe { PostMessageW(hwnd, message, WPARAM(0), LPARAM(0)) }.is_ok()
 }
 
 struct GpuMonitorWindow {
@@ -264,19 +301,6 @@ fn with_monitor(hwnd: HWND, f: impl FnOnce(&mut GpuDisplayMonitor)) {
     }
 }
 
-fn primary_display_device_name() -> Option<OsString> {
-    unsafe {
-        let h_monitor = MonitorFromWindow(HWND::default(), MONITOR_DEFAULTTOPRIMARY);
-
-        let mut monitor_info = MONITORINFOEXW::default();
-        monitor_info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
-
-        GetMonitorInfoW(h_monitor, &mut monitor_info.monitorInfo)
-            .as_bool()
-            .then(|| parse_wchar_slice(&monitor_info.szDevice))
-    }
-}
-
 fn active_gpu_for_display(display_device_name: &OsString) -> WinResult<Option<String>> {
     let factory = unsafe { CreateDXGIFactory::<IDXGIFactory>()? };
     let mut adapter_index = 0;
@@ -286,7 +310,7 @@ fn active_gpu_for_display(display_device_name: &OsString) -> WinResult<Option<St
 
         while let Ok(output) = unsafe { adapter.EnumOutputs(output_index) } {
             if let Ok(output_desc) = unsafe { output.GetDesc() } {
-                let output_name = parse_wchar_slice(&output_desc.DeviceName);
+                let output_name = wide_slice_to_os_string(&output_desc.DeviceName);
 
                 if &output_name != display_device_name {
                     continue;
@@ -294,7 +318,7 @@ fn active_gpu_for_display(display_device_name: &OsString) -> WinResult<Option<St
 
                 if let Ok(adapter_desc) = unsafe { adapter.GetDesc() } {
                     return Ok(Some(
-                        parse_wchar_slice(&adapter_desc.Description)
+                        wide_slice_to_os_string(&adapter_desc.Description)
                             .to_string_lossy()
                             .to_string(),
                     ));
@@ -308,11 +332,6 @@ fn active_gpu_for_display(display_device_name: &OsString) -> WinResult<Option<St
     Ok(None)
 }
 
-fn parse_wchar_slice(slice: &[u16]) -> OsString {
-    let len = slice.iter().position(|&c| c == 0).unwrap_or(slice.len());
-    OsString::from_wide(&slice[..len])
-}
-
 fn display_gpu_changed(last_display_gpu: &str, new_display_gpu: &str) -> bool {
     !last_display_gpu.is_empty() && last_display_gpu != new_display_gpu
 }
@@ -321,8 +340,9 @@ fn display_gpu_changed(last_display_gpu: &str, new_display_gpu: &str) -> bool {
 mod tests {
     use super::{
         GPU_MONITOR_HWND, GPU_MONITOR_RUNNING, GpuDisplayMonitor, gpu_monitor_thread,
-        join_gpu_monitor_thread, parse_wchar_slice,
+        join_gpu_monitor_thread,
     };
+    use crate::win::display::topology::wide_slice_to_os_string;
     use std::sync::atomic::Ordering;
     use std::thread;
 
@@ -332,7 +352,7 @@ mod tests {
             'D' as u16, 'G' as u16, 'P' as u16, 'U' as u16, 0, 'X' as u16,
         ];
 
-        assert_eq!(parse_wchar_slice(&wide).to_string_lossy(), "DGPU");
+        assert_eq!(wide_slice_to_os_string(&wide).to_string_lossy(), "DGPU");
     }
 
     #[test]

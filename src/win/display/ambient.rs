@@ -1,4 +1,5 @@
 use crate::razer::device_handle::DeviceHandle;
+use crate::win::display::topology::{primary_display_device_name, wide_slice_to_os_string};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
@@ -6,18 +7,43 @@ use std::time::{Duration, Instant};
 #[cfg(debug_assertions)]
 use tracing::trace;
 use tracing::warn;
-use windows::Win32::Graphics::Gdi::*;
-use windows::Win32::UI::WindowsAndMessaging::*;
+use windows::Win32::Foundation::HMODULE;
+use windows::Win32::Graphics::Direct3D::{
+    D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL_10_0, D3D_FEATURE_LEVEL_11_0,
+};
+use windows::Win32::Graphics::Direct3D11::{
+    D3D11_BOX, D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ,
+    D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
+    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Resource, ID3D11Texture2D,
+};
+use windows::Win32::Graphics::Dxgi::Common::{
+    DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
+    DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, DXGI_SAMPLE_DESC,
+};
+use windows::Win32::Graphics::Dxgi::{
+    CreateDXGIFactory1, DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO, IDXGIAdapter1,
+    IDXGIFactory1, IDXGIOutput1, IDXGIOutputDuplication, IDXGIResource,
+};
+use windows::core::Interface;
 
-const FPS: u64 = 15;
-const CYCLE_SPEED: Duration = Duration::from_secs(3);
-const LERP_BRIGHT_FACTOR: f32 = 0.35;
+const FPS: f64 = 15.0;
+const SAMPLE_WIDTH: u32 = 32;
+const SAMPLE_HEIGHT: u32 = 18;
+const LERP_BRIGHT_FACTOR: f32 = 0.6;
 const LERP_DARK_FACTOR: f32 = 0.15;
-const DARK_MODE_SENSITIVITY: f32 = 0.10;
+const BIN_LEVELS: usize = 16;
+const BIN_COUNT: usize = BIN_LEVELS * BIN_LEVELS * BIN_LEVELS;
 
-const HORIZONTAL_SCAN_LINES: i32 = 8;
-const VERTICAL_SCAN_LINES: i32 = 13;
-const TOTAL_SCAN_LINES: i32 = HORIZONTAL_SCAN_LINES + VERTICAL_SCAN_LINES;
+const BLACK_MAX_CHANNEL: u8 = 16;
+const BLACK_LUMA_CUTOFF: u8 = 45;
+const BLACK_LUMA_MAX_CHANNEL: u8 = 80;
+const BLACK_MAX_SATURATION: f32 = 0.28;
+const DARK_CHROMA_VISIBILITY_FLOOR: f32 = 0.08;
+const FINAL_SATURATION_BOOST: f32 = 1.5;
+const SMOOTHED_CHROMA_FLOOR: f32 = 0.55;
+const SMOOTHED_CHROMA_PULL: f32 = 0.50;
+const BLACK_FALLBACK: Rgb = Rgb { r: 2, g: 2, b: 2 };
+const AMBIENT_RECOVERY_DELAY: Duration = Duration::from_secs(3);
 
 pub static THREAD_GENERATION: AtomicU32 = AtomicU32::new(0);
 static AMBIENT_THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
@@ -71,539 +97,706 @@ fn join_ambient_thread() {
 }
 
 fn run_ambient_loop(device_handle: DeviceHandle, current_generation: u32) {
-    let Some(mut ctx) = ScreenCaptureContext::init() else {
-        warn!("Ambient effect disabled because screen capture could not be initialized");
+    let Ok(mut capture) = DxgiSparseCapture::new() else {
+        warn!("Ambient effect disabled because DXGI screen capture could not be initialized");
+        schedule_ambient_recovery(device_handle, current_generation);
         return;
     };
 
-    let mut engine = ColorEngine::new();
-    let mut scan_data = vec![0u8; ctx.scan_buffer_len()];
-    let mut frame_count: u32 = 0;
+    let mut smoother = ColorSmoother::new();
 
     while THREAD_GENERATION.load(Ordering::SeqCst) == current_generation {
         let start = Instant::now();
-        frame_count = frame_count.wrapping_add(1);
 
-        if ctx.capture_scanlines(frame_count, &mut scan_data) {
-            let (r, g, b) = engine.tick(&scan_data, ctx.s_w, ctx.s_h);
-            print_color_preview(r, g, b);
-            device_handle.set_keyboard_color(r, g, b);
-        } else {
-            warn!("Ambient effect stopped because screen capture failed");
-            break;
+        match capture.sample() {
+            Ok(color) => {
+                let smoothed = smoother.smooth(color.rgb);
+                print_color_preview(color, smoothed);
+                device_handle.set_keyboard_color(smoothed.r, smoothed.g, smoothed.b);
+            }
+            Err(error) => {
+                warn!(%error, "Ambient effect stopped because DXGI screen capture failed");
+                schedule_ambient_recovery(device_handle, current_generation);
+                break;
+            }
         }
 
         sleep_until_next_frame(start);
     }
 }
 
-// --- Screen Capture ---
-
-struct ScreenCaptureContext {
-    _selected_bitmap: ObjectSelection,
-    bitmap: OwnedBitmap,
-    mem_dc: CompatibleDc,
-    screen_dc: DesktopDc,
-    bmi: BITMAPINFO,
-    s_w: i32,
-    s_h: i32,
-    max_dim: i32,
+fn schedule_ambient_recovery(device_handle: DeviceHandle, current_generation: u32) {
+    match thread::Builder::new()
+        .name("blade-ambient-recovery".to_string())
+        .spawn(move || {
+            thread::sleep(AMBIENT_RECOVERY_DELAY);
+            if THREAD_GENERATION.load(Ordering::SeqCst) == current_generation {
+                device_handle.display_layout_changed();
+            }
+        }) {
+        Ok(_handle) => {}
+        Err(error) => {
+            warn!(%error, "Failed to schedule ambient recovery");
+        }
+    }
 }
 
-impl ScreenCaptureContext {
-    fn init() -> Option<Self> {
-        let screen_dc = DesktopDc::acquire()?;
-        let mem_dc = CompatibleDc::create(screen_dc.hdc)?;
+// --- Screen Capture ---
 
-        let s_w = unsafe { GetSystemMetrics(SM_CXSCREEN) };
-        let s_h = unsafe { GetSystemMetrics(SM_CYSCREEN) };
-        let max_dim = s_w.max(s_h);
-        if s_w <= 0 || s_h <= 0 || max_dim <= 0 {
-            return None;
+struct DxgiSparseCapture {
+    _device: ID3D11Device,
+    context: ID3D11DeviceContext,
+    duplication: IDXGIOutputDuplication,
+    staging: ID3D11Texture2D,
+    width: u32,
+    height: u32,
+    format: DXGI_FORMAT,
+    last: Option<AmbientColor>,
+    reducer: AmbientReducer,
+}
+
+impl DxgiSparseCapture {
+    fn new() -> Result<Self, String> {
+        let primary_display = primary_display_device_name()
+            .ok_or_else(|| "primary display device could not be resolved".to_string())?;
+        let factory: IDXGIFactory1 =
+            unsafe { CreateDXGIFactory1().map_err(|err| format!("CreateDXGIFactory1: {err}"))? };
+
+        for adapter_index in 0.. {
+            let Ok(adapter) = (unsafe { factory.EnumAdapters1(adapter_index) }) else {
+                break;
+            };
+
+            for output_index in 0.. {
+                let Ok(output) = (unsafe { adapter.EnumOutputs(output_index) }) else {
+                    break;
+                };
+                let Ok(output1) = output.cast::<IDXGIOutput1>() else {
+                    continue;
+                };
+                let Ok(desc) = (unsafe { output.GetDesc() }) else {
+                    continue;
+                };
+                if !desc.AttachedToDesktop.as_bool() {
+                    continue;
+                }
+                if wide_slice_to_os_string(&desc.DeviceName) != primary_display {
+                    continue;
+                }
+
+                if let Ok(capture) = Self::from_output(adapter.clone(), output1) {
+                    return Ok(capture);
+                }
+            }
         }
 
-        let bitmap = OwnedBitmap::create_compatible(screen_dc.hdc, max_dim, TOTAL_SCAN_LINES)?;
-        let selected_bitmap = ObjectSelection::select(mem_dc.hdc, bitmap.handle)?;
+        Err("no duplicatable primary desktop output found".to_string())
+    }
 
-        let bmi = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: max_dim,
-                biHeight: -TOTAL_SCAN_LINES, // Negative for top-down DIB
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: BI_RGB.0,
-                ..Default::default()
-            },
-            ..Default::default()
+    fn from_output(adapter: IDXGIAdapter1, output: IDXGIOutput1) -> Result<Self, String> {
+        let feature_levels = [D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0];
+        let mut device = None;
+        let mut context = None;
+
+        unsafe {
+            D3D11CreateDevice(
+                &adapter,
+                D3D_DRIVER_TYPE_UNKNOWN,
+                HMODULE::default(),
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                Some(&feature_levels),
+                D3D11_SDK_VERSION,
+                Some(&mut device),
+                None,
+                Some(&mut context),
+            )
+            .map_err(|err| format!("D3D11CreateDevice: {err}"))?;
+        }
+
+        let device = device.ok_or_else(|| "D3D11CreateDevice returned no device".to_string())?;
+        let context = context.ok_or_else(|| "D3D11CreateDevice returned no context".to_string())?;
+        let duplication = unsafe {
+            output
+                .DuplicateOutput(&device)
+                .map_err(|err| format!("DuplicateOutput: {err}"))?
         };
+        let desc = unsafe { duplication.GetDesc() };
+        let width = desc.ModeDesc.Width;
+        let height = desc.ModeDesc.Height;
+        let format = desc.ModeDesc.Format;
+        if width == 0 || height == 0 {
+            return Err("duplicated output has zero dimensions".to_string());
+        }
 
-        Some(Self {
-            _selected_bitmap: selected_bitmap,
-            bitmap,
-            mem_dc,
-            screen_dc,
-            bmi,
-            s_w,
-            s_h,
-            max_dim,
+        let staging_desc = D3D11_TEXTURE2D_DESC {
+            Width: SAMPLE_WIDTH,
+            Height: SAMPLE_HEIGHT,
+            MipLevels: 1,
+            ArraySize: 1,
+            Format: format,
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Usage: D3D11_USAGE_STAGING,
+            BindFlags: 0,
+            CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
+            MiscFlags: 0,
+        };
+        let mut staging = None;
+        unsafe {
+            device
+                .CreateTexture2D(&staging_desc, None, Some(&mut staging))
+                .map_err(|err| format!("CreateTexture2D sparse staging: {err}"))?;
+        }
+        let staging =
+            staging.ok_or_else(|| "CreateTexture2D returned no staging texture".to_string())?;
+
+        Ok(Self {
+            _device: device,
+            context,
+            duplication,
+            staging,
+            width,
+            height,
+            format,
+            last: None,
+            reducer: AmbientReducer::new(),
         })
     }
 
-    fn scan_buffer_len(&self) -> usize {
-        (self.max_dim * TOTAL_SCAN_LINES * 4) as usize
+    fn sample(&mut self) -> Result<AmbientColor, String> {
+        for attempt in 0..5 {
+            match self.capture_frame() {
+                Ok(Some(color))
+                    if self.last.is_none() && attempt < 4 && is_black_fallback(color) =>
+                {
+                    thread::sleep(Duration::from_millis(20));
+                }
+                Ok(Some(color)) => {
+                    self.last = Some(color);
+                    return Ok(color);
+                }
+                Ok(None) if attempt < 4 => thread::sleep(Duration::from_millis(20)),
+                Ok(None) => {
+                    return self
+                        .last
+                        .ok_or_else(|| "DXGI had no first frame ready yet".to_string());
+                }
+                Err(error) => return Err(error),
+            }
+        }
+
+        self.last
+            .ok_or_else(|| "DXGI had no first frame ready yet".to_string())
     }
 
-    fn capture_scanlines(&mut self, frame_count: u32, scan_data: &mut [u8]) -> bool {
-        if scan_data.len() < self.scan_buffer_len() {
-            return false;
-        }
-
-        let mut rng_seed = frame_count;
-
-        let captured_lines = self.capture_horizontal_lines(&mut rng_seed)
-            + self.capture_vertical_lines(&mut rng_seed);
-        if captured_lines == 0 {
-            return false;
-        }
-
-        let copied_lines = unsafe {
-            GetDIBits(
-                self.mem_dc.hdc,
-                self.bitmap.handle,
-                0,
-                TOTAL_SCAN_LINES as u32,
-                Some(scan_data.as_mut_ptr() as *mut _),
-                &mut self.bmi,
-                DIB_RGB_COLORS,
-            )
+    fn capture_frame(&mut self) -> Result<Option<AmbientColor>, String> {
+        let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
+        let mut resource: Option<IDXGIResource> = None;
+        let timeout_ms = if self.last.is_some() { 0 } else { 100 };
+        let acquired = unsafe {
+            self.duplication
+                .AcquireNextFrame(timeout_ms, &mut frame_info, &mut resource)
         };
-        copied_lines == TOTAL_SCAN_LINES
+
+        match acquired {
+            Ok(()) => {}
+            Err(error) if error.code() == DXGI_ERROR_WAIT_TIMEOUT => return Ok(None),
+            Err(error) => return Err(format!("AcquireNextFrame: {error}")),
+        }
+
+        let result = (|| {
+            let resource =
+                resource.ok_or_else(|| "AcquireNextFrame returned no resource".to_string())?;
+            let source = resource
+                .cast::<ID3D11Texture2D>()
+                .map_err(|err| format!("desktop resource cast: {err}"))?;
+
+            self.copy_sample_grid(&source);
+            let color = self.reduce_staging()?;
+            Ok(color)
+        })();
+
+        let _ = unsafe { self.duplication.ReleaseFrame() };
+        result.map(Some)
     }
 
-    fn capture_horizontal_lines(&self, rng_seed: &mut u32) -> usize {
-        let mut captured = 0;
-        for i in 0..HORIZONTAL_SCAN_LINES {
-            *rng_seed = rng_seed.wrapping_mul(1103515245).wrapping_add(12345);
-            let jitter = (*rng_seed % 21) as i32 - 10;
-            let y = ((self.s_h / (HORIZONTAL_SCAN_LINES + 1)) * (i + 1) + jitter)
-                .clamp(0, self.s_h - 1);
-            if unsafe {
-                BitBlt(
-                    self.mem_dc.hdc,
-                    0,
-                    i,
-                    self.s_w,
-                    4,
-                    self.screen_dc.hdc,
-                    0,
-                    y,
-                    SRCCOPY,
-                )
-            }
-            .is_ok()
-            {
-                captured += 1;
+    fn copy_sample_grid(&self, source: &ID3D11Texture2D) {
+        for row in 0..SAMPLE_HEIGHT {
+            let y =
+                (((row * self.height) + (self.height / 2)) / SAMPLE_HEIGHT).min(self.height - 1);
+            for col in 0..SAMPLE_WIDTH {
+                let x =
+                    (((col * self.width) + (self.width / 2)) / SAMPLE_WIDTH).min(self.width - 1);
+                let source_box = D3D11_BOX {
+                    left: x,
+                    top: y,
+                    front: 0,
+                    right: x + 1,
+                    bottom: y + 1,
+                    back: 1,
+                };
+                unsafe {
+                    self.context.CopySubresourceRegion(
+                        &self.staging,
+                        0,
+                        col,
+                        row,
+                        0,
+                        source,
+                        0,
+                        Some(&source_box),
+                    );
+                }
             }
         }
-        captured
     }
 
-    fn capture_vertical_lines(&self, rng_seed: &mut u32) -> usize {
-        let mut captured = 0;
-        for i in 0..VERTICAL_SCAN_LINES {
-            *rng_seed = rng_seed.wrapping_mul(1103515245).wrapping_add(12345);
-            let jitter = (*rng_seed % 21) as i32 - 10;
-            let x =
-                ((self.s_w / (VERTICAL_SCAN_LINES + 1)) * (i + 1) + jitter).clamp(0, self.s_w - 1);
-            if unsafe {
-                BitBlt(
-                    self.mem_dc.hdc,
-                    0,
-                    i + HORIZONTAL_SCAN_LINES,
-                    4,
-                    self.s_h,
-                    self.screen_dc.hdc,
-                    x,
-                    0,
-                    SRCCOPY,
-                )
-            }
-            .is_ok()
-            {
-                captured += 1;
+    fn reduce_staging(&mut self) -> Result<AmbientColor, String> {
+        self.reducer.clear();
+
+        let staging_resource: ID3D11Resource = self
+            .staging
+            .cast()
+            .map_err(|err| format!("staging resource cast: {err}"))?;
+        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+        unsafe {
+            self.context
+                .Map(&staging_resource, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+                .map_err(|err| format!("Map sparse staging texture: {err}"))?;
+        }
+
+        for row in 0..SAMPLE_HEIGHT {
+            for col in 0..SAMPLE_WIDTH {
+                let offset = row as usize * mapped.RowPitch as usize + col as usize * 4;
+                let base = mapped.pData as *const u8;
+                let c0 = unsafe { *base.add(offset) };
+                let c1 = unsafe { *base.add(offset + 1) };
+                let c2 = unsafe { *base.add(offset + 2) };
+                let (r, g, b) = match self.format {
+                    DXGI_FORMAT_R8G8B8A8_UNORM | DXGI_FORMAT_R8G8B8A8_UNORM_SRGB => (c0, c1, c2),
+                    DXGI_FORMAT_B8G8R8A8_UNORM | DXGI_FORMAT_B8G8R8A8_UNORM_SRGB => (c2, c1, c0),
+                    _ => (c2, c1, c0),
+                };
+                self.reducer.add(Rgb { r, g, b });
             }
         }
-        captured
+
+        unsafe {
+            self.context.Unmap(&staging_resource, 0);
+        }
+
+        Ok(self.reducer.finish(SAMPLE_WIDTH * SAMPLE_HEIGHT))
     }
 }
 
-struct DesktopDc {
-    hdc: HDC,
+// --- Color Engine ---
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Rgb {
+    r: u8,
+    g: u8,
+    b: u8,
 }
 
-impl DesktopDc {
-    fn acquire() -> Option<Self> {
-        let hdc = unsafe { GetDC(None) };
-        (!hdc.0.is_null()).then_some(Self { hdc })
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+struct AmbientColor {
+    rgb: Rgb,
+    bin_rgb: Rgb,
+    dominance: f32,
+    ignored_black: f32,
+}
+
+struct ColorSmoother {
+    smooth_rgb: (f32, f32, f32),
+}
+
+impl ColorSmoother {
+    fn new() -> Self {
+        Self {
+            smooth_rgb: (0.0, 0.0, 0.0),
+        }
+    }
+
+    fn smooth(&mut self, target: Rgb) -> Rgb {
+        let factor = if luminance(target) >= tuple_luminance(self.smooth_rgb) {
+            LERP_BRIGHT_FACTOR
+        } else {
+            LERP_DARK_FACTOR
+        };
+
+        let smoothed = preserve_target_chroma(
+            rgb_from_float_tuple(lerp_color(self.smooth_rgb, target, factor)),
+            target,
+        );
+        self.smooth_rgb = (smoothed.r as f32, smoothed.g as f32, smoothed.b as f32);
+        smoothed
     }
 }
 
-impl Drop for DesktopDc {
-    fn drop(&mut self) {
-        let _ = unsafe { ReleaseDC(None, self.hdc) };
+fn preserve_target_chroma(smoothed: Rgb, target: Rgb) -> Rgb {
+    let target_saturation = saturation(target);
+    if target_saturation < 0.35 {
+        return smoothed;
+    }
+
+    let smoothed_saturation = saturation(smoothed);
+    let floor = target_saturation * SMOOTHED_CHROMA_FLOOR;
+    if smoothed_saturation >= floor {
+        return smoothed;
+    }
+
+    let deficit = ((floor - smoothed_saturation) / floor).clamp(0.0, 1.0);
+    mix_rgb(smoothed, target, SMOOTHED_CHROMA_PULL * deficit)
+}
+
+fn rgb_from_float_tuple(rgb: (f32, f32, f32)) -> Rgb {
+    Rgb {
+        r: rgb.0.round().clamp(0.0, 255.0) as u8,
+        g: rgb.1.round().clamp(0.0, 255.0) as u8,
+        b: rgb.2.round().clamp(0.0, 255.0) as u8,
     }
 }
 
-struct CompatibleDc {
-    hdc: HDC,
+struct AmbientReducer {
+    scores: [f32; BIN_COUNT],
+    sum_r: [f32; BIN_COUNT],
+    sum_g: [f32; BIN_COUNT],
+    sum_b: [f32; BIN_COUNT],
+    ignored_black: u32,
 }
 
-impl CompatibleDc {
-    fn create(source: HDC) -> Option<Self> {
-        let hdc = unsafe { CreateCompatibleDC(source) };
-        (!hdc.0.is_null()).then_some(Self { hdc })
+impl AmbientReducer {
+    fn new() -> Self {
+        Self {
+            scores: [0.0; BIN_COUNT],
+            sum_r: [0.0; BIN_COUNT],
+            sum_g: [0.0; BIN_COUNT],
+            sum_b: [0.0; BIN_COUNT],
+            ignored_black: 0,
+        }
     }
-}
 
-impl Drop for CompatibleDc {
-    fn drop(&mut self) {
-        let _ = unsafe { DeleteDC(self.hdc) };
+    fn clear(&mut self) {
+        self.scores.fill(0.0);
+        self.sum_r.fill(0.0);
+        self.sum_g.fill(0.0);
+        self.sum_b.fill(0.0);
+        self.ignored_black = 0;
     }
-}
 
-struct OwnedBitmap {
-    handle: HBITMAP,
-}
+    fn add(&mut self, rgb: Rgb) {
+        if is_ignored_black(rgb) {
+            self.ignored_black += 1;
+            return;
+        }
 
-impl OwnedBitmap {
-    fn create_compatible(source: HDC, width: i32, height: i32) -> Option<Self> {
-        let handle = unsafe { CreateCompatibleBitmap(source, width, height) };
-        (!handle.0.is_null()).then_some(Self { handle })
+        let weight = ambient_weight(rgb);
+        if weight <= 0.0 {
+            return;
+        }
+
+        let bin = rgb_bin(rgb);
+        self.scores[bin] += weight;
+        self.sum_r[bin] += rgb.r as f32 * weight;
+        self.sum_g[bin] += rgb.g as f32 * weight;
+        self.sum_b[bin] += rgb.b as f32 * weight;
     }
-}
 
-impl Drop for OwnedBitmap {
-    fn drop(&mut self) {
-        let _ = unsafe { DeleteObject(self.handle) };
+    fn finish(&self, sampled_total: u32) -> AmbientColor {
+        let considered_score: f32 = self.scores.iter().sum();
+        let ignored_black = if sampled_total == 0 {
+            0.0
+        } else {
+            self.ignored_black as f32 / sampled_total as f32
+        };
+        if considered_score <= f32::EPSILON {
+            return AmbientColor {
+                rgb: BLACK_FALLBACK,
+                bin_rgb: bin_center_rgb(rgb_bin(BLACK_FALLBACK)),
+                dominance: 1.0,
+                ignored_black: 1.0,
+            };
+        }
+
+        let (best_bin, best_score) = self
+            .scores
+            .iter()
+            .copied()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.total_cmp(b))
+            .unwrap_or((0, 0.0));
+        let top = self.bin_average(best_bin);
+        let scene = self.weighted_scene_average().unwrap_or(top);
+        let palette = self.salient_palette_average().unwrap_or(top);
+        let rgb = boost_saturation(mix_rgb(palette, scene, 0.14), FINAL_SATURATION_BOOST);
+
+        AmbientColor {
+            rgb,
+            bin_rgb: bin_center_rgb(rgb_bin(rgb)),
+            dominance: (best_score / considered_score).clamp(0.0, 1.0),
+            ignored_black,
+        }
     }
-}
 
-struct ObjectSelection {
-    hdc: HDC,
-    old_object: HGDIOBJ,
-}
-
-impl ObjectSelection {
-    fn select(hdc: HDC, bitmap: HBITMAP) -> Option<Self> {
-        let old_object = unsafe { SelectObject(hdc, bitmap) };
-        (!old_object.0.is_null()).then_some(Self { hdc, old_object })
+    fn bin_average(&self, bin: usize) -> Rgb {
+        let score = self.scores[bin].max(f32::EPSILON);
+        Rgb {
+            r: (self.sum_r[bin] / score).round().clamp(0.0, 255.0) as u8,
+            g: (self.sum_g[bin] / score).round().clamp(0.0, 255.0) as u8,
+            b: (self.sum_b[bin] / score).round().clamp(0.0, 255.0) as u8,
+        }
     }
-}
 
-impl Drop for ObjectSelection {
-    fn drop(&mut self) {
-        let _ = unsafe { SelectObject(self.hdc, self.old_object) };
+    fn salient_palette_average(&self) -> Option<Rgb> {
+        let max_score = self.scores.iter().copied().fold(0.0f32, f32::max);
+        if max_score <= f32::EPSILON {
+            return None;
+        }
+
+        let mut total = 0.0;
+        let mut r = 0.0;
+        let mut g = 0.0;
+        let mut b = 0.0;
+
+        for (bin, score) in self.scores.iter().copied().enumerate() {
+            if score < max_score * 0.02 {
+                continue;
+            }
+
+            let weight = score.powf(0.18);
+            let avg = self.bin_average(bin);
+            total += weight;
+            r += avg.r as f32 * weight;
+            g += avg.g as f32 * weight;
+            b += avg.b as f32 * weight;
+        }
+
+        if total <= f32::EPSILON {
+            None
+        } else {
+            Some(Rgb {
+                r: (r / total).round().clamp(0.0, 255.0) as u8,
+                g: (g / total).round().clamp(0.0, 255.0) as u8,
+                b: (b / total).round().clamp(0.0, 255.0) as u8,
+            })
+        }
+    }
+
+    fn weighted_scene_average(&self) -> Option<Rgb> {
+        let total: f32 = self.scores.iter().sum();
+        if total <= f32::EPSILON {
+            return None;
+        }
+
+        Some(Rgb {
+            r: (self.sum_r.iter().sum::<f32>() / total)
+                .round()
+                .clamp(0.0, 255.0) as u8,
+            g: (self.sum_g.iter().sum::<f32>() / total)
+                .round()
+                .clamp(0.0, 255.0) as u8,
+            b: (self.sum_b.iter().sum::<f32>() / total)
+                .round()
+                .clamp(0.0, 255.0) as u8,
+        })
     }
 }
 
 fn sleep_until_next_frame(start: Instant) {
-    let delay = Duration::from_millis(1000 / FPS);
+    let delay = Duration::from_secs_f64(1.0 / FPS);
     let elapsed = start.elapsed();
     if elapsed < delay {
         thread::sleep(delay - elapsed);
     }
 }
 
-// --- Color Engine ---
-
-struct ColorEngine {
-    smooth_rgb: (f32, f32, f32),
-    cycle_start: Instant,
-    color_index: usize,
-    prev_avg_rgb: (f32, f32, f32),
-}
-
-struct ScanAnalysis {
-    vibrant_count: usize,
-    sample_count: usize,
-    black_screen: bool,
-    top_colors: [(u8, u8, u8); 3],
-}
-
-impl ColorEngine {
-    fn new() -> Self {
-        Self {
-            smooth_rgb: (0.0, 0.0, 0.0),
-            cycle_start: Instant::now(),
-            color_index: 0,
-            prev_avg_rgb: (0.0, 0.0, 0.0),
-        }
-    }
-
-    fn tick(&mut self, data: &[u8], s_w: i32, s_h: i32) -> (u8, u8, u8) {
-        let analysis = self.analyze_scan_data(data, s_w, s_h);
-        self.apply_smoothing(&analysis);
-
-        (
-            self.smooth_rgb.0 as u8,
-            self.smooth_rgb.1 as u8,
-            self.smooth_rgb.2 as u8,
-        )
-    }
-
-    fn analyze_scan_data(&mut self, data: &[u8], s_w: i32, s_h: i32) -> ScanAnalysis {
-        if s_w <= 0 || s_h <= 0 {
-            self.prev_avg_rgb = (0.0, 0.0, 0.0);
-            return empty_scan_analysis();
-        }
-
-        let stride = (s_w.max(s_h) * 4) as usize;
-        let mut vibrant_count = 0;
-        let mut candidates = [((0u8, 0u8, 0u8), 0.0f32); 4];
-        let mut c_idx = 0;
-        let mut total_r = 0.0;
-        let mut total_g = 0.0;
-        let mut total_b = 0.0;
-        let mut sample_count = 0;
-        let mut black_screen = true;
-
-        for row in 0..TOTAL_SCAN_LINES as usize {
-            let row_offset = row * stride;
-            let limit = if row < HORIZONTAL_SCAN_LINES as usize {
-                s_w as usize * 4
-            } else {
-                s_h as usize * 4
-            };
-
-            for i in (0..limit).step_by(16) {
-                if row_offset + i + 2 >= data.len() {
-                    break;
-                }
-
-                let b = data[row_offset + i];
-                let g = data[row_offset + i + 1];
-                let r = data[row_offset + i + 2];
-
-                total_r += r as f32;
-                total_g += g as f32;
-                total_b += b as f32;
-                sample_count += 1;
-
-                let (_, s, v) = rgb_to_hsv(r, g, b);
-                if v > 0.15 {
-                    black_screen = false;
-                }
-                if v < 0.15 || s < 0.15 {
-                    continue;
-                }
-
-                let perceived_luminance =
-                    (0.2126 * total_r) + (0.7152 * total_g) + (0.0722 * total_b);
-
-                vibrant_count += 1;
-                let weight = s.powi(2) * perceived_luminance;
-                let bucket = (r & 0xF0, g & 0xF0, b & 0xF0);
-
-                let mut found = false;
-                for c in candidates.iter_mut().take(c_idx) {
-                    if c.0 == bucket {
-                        c.1 += weight;
-                        found = true;
-                        break;
-                    }
-                }
-                if !found && c_idx < 4 {
-                    candidates[c_idx] = (bucket, weight);
-                    c_idx += 1;
-                }
-            }
-        }
-
-        if sample_count == 0 {
-            self.prev_avg_rgb = (0.0, 0.0, 0.0);
-            return empty_scan_analysis();
-        }
-
-        self.prev_avg_rgb = (
-            total_r / sample_count as f32,
-            total_g / sample_count as f32,
-            total_b / sample_count as f32,
-        );
-
-        candidates[..c_idx].sort_by(|a, b| b.1.total_cmp(&a.1));
-
-        let mut top_colors = [(0u8, 0u8, 0u8); 3];
-        for (i, candidate) in candidates.iter().take(3).enumerate() {
-            top_colors[i] = candidate.0;
-        }
-
-        ScanAnalysis {
-            vibrant_count,
-            sample_count,
-            black_screen,
-            top_colors,
-        }
-    }
-
-    fn apply_smoothing(&mut self, analysis: &ScanAnalysis) {
-        if analysis.vibrant_count > 0 {
-            let threshold = (analysis.sample_count as f32 * DARK_MODE_SENSITIVITY) as usize;
-            let target_rgb = self.select_target_color(analysis, threshold);
-
-            let (tr, tg, tb) = apply_vibrance(target_rgb.0, target_rgb.1, target_rgb.2);
-            let factor = if analysis.vibrant_count > threshold || analysis.black_screen {
-                LERP_BRIGHT_FACTOR
-            } else {
-                LERP_DARK_FACTOR
-            };
-            self.smooth_rgb = lerp_color(self.smooth_rgb, (tr, tg, tb), factor);
-        } else {
-            // If no colors, set keyboard light to black (2) or grey (130)
-            let v = 2 + !analysis.black_screen as u8 * 128;
-            self.smooth_rgb = lerp_color(self.smooth_rgb, (v, v, v), LERP_BRIGHT_FACTOR);
-        }
-    }
-
-    fn select_target_color(&mut self, analysis: &ScanAnalysis, threshold: usize) -> (u8, u8, u8) {
-        if analysis.vibrant_count < threshold {
-            if self.cycle_start.elapsed() >= CYCLE_SPEED {
-                self.color_index = (self.color_index + 1) % 3;
-                self.cycle_start = Instant::now();
-            }
-            analysis
-                .top_colors
-                .get(self.color_index)
-                .copied()
-                .unwrap_or_default()
-        } else {
-            self.color_index = 0;
-            analysis.top_colors.first().copied().unwrap_or_default()
-        }
-    }
-}
-
-fn empty_scan_analysis() -> ScanAnalysis {
-    ScanAnalysis {
-        vibrant_count: 0,
-        sample_count: 0,
-        black_screen: true,
-        top_colors: [(0, 0, 0); 3],
-    }
-}
-
-// --- Color Utilities ---
-
 #[inline(always)]
-fn lerp_color(cur: (f32, f32, f32), tar: (u8, u8, u8), fac: f32) -> (f32, f32, f32) {
-    let tar_r = tar.0 as f32;
-    let tar_g = tar.1 as f32;
-    let tar_b = tar.2 as f32;
+fn lerp_color(current: (f32, f32, f32), target: Rgb, factor: f32) -> (f32, f32, f32) {
+    let target_r = target.r as f32;
+    let target_g = target.g as f32;
+    let target_b = target.b as f32;
 
     (
-        ((1.0 - fac) * cur.0.powi(2) + fac * tar_r.powi(2)).sqrt(),
-        ((1.0 - fac) * cur.1.powi(2) + fac * tar_g.powi(2)).sqrt(),
-        ((1.0 - fac) * cur.2.powi(2) + fac * tar_b.powi(2)).sqrt(),
+        ((1.0 - factor) * current.0.powi(2) + factor * target_r.powi(2)).sqrt(),
+        ((1.0 - factor) * current.1.powi(2) + factor * target_g.powi(2)).sqrt(),
+        ((1.0 - factor) * current.2.powi(2) + factor * target_b.powi(2)).sqrt(),
     )
 }
 
-fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
-    let r = r as f32 / 255.0;
-    let g = g as f32 / 255.0;
-    let b = b as f32 / 255.0;
+fn luminance(rgb: Rgb) -> f32 {
+    0.2126 * rgb.r as f32 + 0.7152 * rgb.g as f32 + 0.0722 * rgb.b as f32
+}
+
+fn tuple_luminance(rgb: (f32, f32, f32)) -> f32 {
+    0.2126 * rgb.0 + 0.7152 * rgb.1 + 0.0722 * rgb.2
+}
+
+fn saturation(rgb: Rgb) -> f32 {
+    let r = rgb.r as f32 / 255.0;
+    let g = rgb.g as f32 / 255.0;
+    let b = rgb.b as f32 / 255.0;
     let max = r.max(g).max(b);
     let min = r.min(g).min(b);
-    let d = max - min;
-    let s = if max == 0.0 { 0.0 } else { d / max };
-    let mut h = 0.0;
-    if d != 0.0 {
-        if max == r {
-            h = (g - b) / d + (if g < b { 6.0 } else { 0.0 });
-        } else if max == g {
-            h = (b - r) / d + 2.0;
-        } else {
-            h = (r - g) / d + 4.0;
-        }
-        h /= 6.0;
-    }
-    (h, s, max)
-}
-
-#[inline(always)]
-fn apply_vibrance(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
-    let (nr, ng, nb) = saturate_rgb(r, g, b, 2.0);
-    normalize_to_midpoint(nr, ng, nb)
-}
-
-fn saturate_rgb(r: u8, g: u8, b: u8, intensity: f32) -> (u8, u8, u8) {
-    let mut r_f = r as f32 * 1.2 / 255.0;
-    let mut g_f = g as f32 * 1.1 / 255.0;
-    let mut b_f = b as f32 * 0.8 / 255.0;
-
-    let luminance = 0.2126 * r_f + 0.7152 * g_f + 0.0722 * b_f;
-
-    r_f = luminance + (r_f - luminance) * intensity;
-    g_f = luminance + (g_f - luminance) * intensity;
-    b_f = luminance + (b_f - luminance) * intensity;
-
-    let max_val = r_f.max(g_f).max(b_f);
-    let dominant_gamma = 0.6;
-
-    if max_val > 0.0 {
-        if r_f == max_val {
-            r_f = r_f.powf(dominant_gamma);
-        } else if g_f == max_val {
-            g_f = g_f.powf(dominant_gamma);
-        } else {
-            b_f = b_f.powf(dominant_gamma);
-        }
-    }
-
-    (
-        (r_f.clamp(0.0, 1.0) * 255.0) as u8,
-        (g_f.clamp(0.0, 1.0) * 255.0) as u8,
-        (b_f.clamp(0.0, 1.0) * 255.0) as u8,
-    )
-}
-
-fn normalize_to_midpoint(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
-    let r_f = r as f32 / 255.0;
-    let g_f = g as f32 / 255.0;
-    let b_f = b as f32 / 255.0;
-    let lum = (0.2126 * r_f) + (0.7152 * g_f) + (0.0722 * b_f);
-    let target = 0.3;
-
-    let scaling_factor = if lum < target {
-        target / lum.max(0.01)
+    if max <= f32::EPSILON {
+        0.0
     } else {
-        1.0
+        (max - min) / max
+    }
+}
+
+fn ambient_weight(rgb: Rgb) -> f32 {
+    let r = rgb.r as f32 / 255.0;
+    let g = rgb.g as f32 / 255.0;
+    let b = rgb.b as f32 / 255.0;
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let chroma = max - min;
+    let saturation = if max <= f32::EPSILON {
+        0.0
+    } else {
+        chroma / max
+    };
+    let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    let hue = hue_degrees(r, g, b, max, min);
+
+    let colorfulness = saturation.powf(1.65);
+    let chroma_boost = chroma.powf(0.85);
+    let visibility = smoothstep(0.08, 0.55, luma)
+        .max(DARK_CHROMA_VISIBILITY_FLOOR * saturation.powf(1.2) * smoothstep(0.02, 0.18, chroma));
+    let low_sat_penalty = (0.12 + 0.88 * colorfulness).clamp(0.0, 1.0);
+    let white_penalty =
+        1.0 - 0.55 * smoothstep(0.78, 0.96, luma) * (1.0 - saturation).clamp(0.0, 1.0);
+    let warm_pink_boost =
+        1.0 + 0.32 * hue_window(hue, 310.0, 55.0) + 0.18 * hue_window(hue, 25.0, 45.0);
+    let nature_green_boost = 1.0 + 0.16 * hue_window(hue, 135.0, 60.0);
+
+    visibility
+        * white_penalty
+        * (0.10 + 2.65 * colorfulness + 0.90 * chroma_boost)
+        * low_sat_penalty
+        * warm_pink_boost
+        * nature_green_boost
+}
+
+fn hue_degrees(r: f32, g: f32, b: f32, max: f32, min: f32) -> f32 {
+    let chroma = max - min;
+    if chroma <= f32::EPSILON {
+        return 0.0;
+    }
+
+    let hue = if (max - r).abs() <= f32::EPSILON {
+        60.0 * (((g - b) / chroma) % 6.0)
+    } else if (max - g).abs() <= f32::EPSILON {
+        60.0 * (((b - r) / chroma) + 2.0)
+    } else {
+        60.0 * (((r - g) / chroma) + 4.0)
     };
 
-    let mut nr = r_f * scaling_factor;
-    let mut ng = g_f * scaling_factor;
-    let mut nb = b_f * scaling_factor;
+    hue.rem_euclid(360.0)
+}
 
-    let max_channel = nr.max(ng).max(nb);
-    if max_channel > 1.0 {
-        nr /= max_channel;
-        ng /= max_channel;
-        nb /= max_channel;
+fn hue_window(hue: f32, center: f32, width: f32) -> f32 {
+    let delta = ((hue - center + 540.0).rem_euclid(360.0) - 180.0).abs();
+    (1.0 - delta / width).clamp(0.0, 1.0)
+}
+
+fn smoothstep(edge0: f32, edge1: f32, value: f32) -> f32 {
+    let t = ((value - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn is_ignored_black(rgb: Rgb) -> bool {
+    let max_channel = rgb.r.max(rgb.g).max(rgb.b);
+    max_channel <= BLACK_MAX_CHANNEL
+        || (luma8(rgb) <= BLACK_LUMA_CUTOFF
+            && max_channel <= BLACK_LUMA_MAX_CHANNEL
+            && saturation(rgb) <= BLACK_MAX_SATURATION)
+}
+
+fn luma8(rgb: Rgb) -> u8 {
+    ((54u16 * rgb.r as u16 + 183u16 * rgb.g as u16 + 19u16 * rgb.b as u16) >> 8) as u8
+}
+
+fn is_black_fallback(color: AmbientColor) -> bool {
+    color.rgb == BLACK_FALLBACK && color.ignored_black >= 1.0
+}
+
+fn rgb_bin(rgb: Rgb) -> usize {
+    let r = rgb.r as usize * BIN_LEVELS / 256;
+    let g = rgb.g as usize * BIN_LEVELS / 256;
+    let b = rgb.b as usize * BIN_LEVELS / 256;
+    (r * BIN_LEVELS + g) * BIN_LEVELS + b
+}
+
+fn bin_center_rgb(bin: usize) -> Rgb {
+    let step = 256 / BIN_LEVELS;
+    let b = bin % BIN_LEVELS;
+    let g = (bin / BIN_LEVELS) % BIN_LEVELS;
+    let r = (bin / (BIN_LEVELS * BIN_LEVELS)) % BIN_LEVELS;
+    Rgb {
+        r: (r * step + step / 2).min(255) as u8,
+        g: (g * step + step / 2).min(255) as u8,
+        b: (b * step + step / 2).min(255) as u8,
     }
+}
 
-    ((nr * 255.0) as u8, (ng * 255.0) as u8, (nb * 255.0) as u8)
+fn mix_rgb(a: Rgb, b: Rgb, b_amount: f32) -> Rgb {
+    let t = b_amount.clamp(0.0, 1.0);
+    Rgb {
+        r: (a.r as f32 * (1.0 - t) + b.r as f32 * t)
+            .round()
+            .clamp(0.0, 255.0) as u8,
+        g: (a.g as f32 * (1.0 - t) + b.g as f32 * t)
+            .round()
+            .clamp(0.0, 255.0) as u8,
+        b: (a.b as f32 * (1.0 - t) + b.b as f32 * t)
+            .round()
+            .clamp(0.0, 255.0) as u8,
+    }
+}
+
+fn boost_saturation(rgb: Rgb, amount: f32) -> Rgb {
+    let r = rgb.r as f32 / 255.0;
+    let g = rgb.g as f32 / 255.0;
+    let b = rgb.b as f32 / 255.0;
+    let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+
+    Rgb {
+        r: ((luma + (r - luma) * amount) * 255.0)
+            .round()
+            .clamp(0.0, 255.0) as u8,
+        g: ((luma + (g - luma) * amount) * 255.0)
+            .round()
+            .clamp(0.0, 255.0) as u8,
+        b: ((luma + (b - luma) * amount) * 255.0)
+            .round()
+            .clamp(0.0, 255.0) as u8,
+    }
 }
 
 #[cfg(debug_assertions)]
-fn print_color_preview(r: u8, g: u8, b: u8) {
-    trace!(r = r, g = g, b = b, "Ambient color sample");
-    // println!(
-    //     "\x1b[48;2;{};{};{}m    \x1b[0m RGB: {}, {}, {}",
-    //     r, g, b, r, g, b
-    // );
+fn print_color_preview(color: AmbientColor, smoothed: Rgb) {
+    trace!(
+        r = color.rgb.r,
+        g = color.rgb.g,
+        b = color.rgb.b,
+        smoothed_r = smoothed.r,
+        smoothed_g = smoothed.g,
+        smoothed_b = smoothed.b,
+        bin_r = color.bin_rgb.r,
+        bin_g = color.bin_rgb.g,
+        bin_b = color.bin_rgb.b,
+        dominance = color.dominance,
+        ignored_black = color.ignored_black,
+        "Ambient color sample"
+    );
 }
 
 #[cfg(not(debug_assertions))]
-fn print_color_preview(_r: u8, _g: u8, _b: u8) {}
+fn print_color_preview(_color: AmbientColor, _smoothed: Rgb) {}
 
 #[cfg(test)]
 mod tests {
@@ -613,58 +806,156 @@ mod tests {
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
-    fn rgb_to_hsv_identifies_red_hue() {
-        let (h, s, v) = rgb_to_hsv(255, 0, 0);
+    fn reducer_ignores_black_and_uses_visible_color() {
+        let mut reducer = AmbientReducer::new();
 
-        assert!(h <= 0.01 || h >= 0.99);
-        assert!((s - 1.0).abs() < f32::EPSILON);
-        assert!((v - 1.0).abs() < f32::EPSILON);
+        for _ in 0..20 {
+            reducer.add(Rgb { r: 0, g: 0, b: 0 });
+        }
+        for _ in 0..4 {
+            reducer.add(Rgb {
+                r: 220,
+                g: 40,
+                b: 120,
+            });
+        }
+
+        let color = reducer.finish(24);
+
+        assert!(color.rgb.r > color.rgb.g);
+        assert!(color.rgb.b > color.rgb.g);
+        assert!(color.ignored_black > 0.80);
     }
 
     #[test]
-    fn color_engine_handles_black_scan_data_without_panicking() {
-        let s_w = 8;
-        let s_h = 8;
-        let stride = s_w.max(s_h) as usize * 4;
-        let data = vec![0u8; stride * TOTAL_SCAN_LINES as usize];
-        let mut engine = ColorEngine::new();
+    fn reducer_returns_black_fallback_when_no_visible_samples_remain() {
+        let mut reducer = AmbientReducer::new();
 
-        let (r, g, b) = engine.tick(&data, s_w, s_h);
+        reducer.add(Rgb { r: 0, g: 0, b: 0 });
+        reducer.add(Rgb {
+            r: 12,
+            g: 12,
+            b: 12,
+        });
 
-        assert!(r <= 1);
-        assert!(g <= 1);
-        assert!(b <= 1);
+        let color = reducer.finish(2);
+
+        assert_eq!(color.rgb, BLACK_FALLBACK);
+        assert!(is_black_fallback(color));
     }
 
     #[test]
-    fn color_engine_handles_empty_scan_data_without_panicking() {
-        let mut engine = ColorEngine::new();
-
-        let (r, g, b) = engine.tick(&[], 8, 8);
-
-        assert!(r <= 1);
-        assert!(g <= 1);
-        assert!(b <= 1);
+    fn black_filter_keeps_dark_saturated_colors() {
+        assert!(!is_ignored_black(Rgb { r: 24, g: 0, b: 72 }));
+        assert!(is_ignored_black(Rgb {
+            r: 32,
+            g: 32,
+            b: 32
+        }));
     }
 
     #[test]
-    fn color_engine_handles_invalid_dimensions_without_panicking() {
-        let mut engine = ColorEngine::new();
+    fn reducer_keeps_dark_purple_dominant_over_white_ui() {
+        let mut reducer = AmbientReducer::new();
 
-        let (r, g, b) = engine.tick(&[], 0, -1);
+        for _ in 0..360 {
+            reducer.add(Rgb { r: 24, g: 0, b: 72 });
+        }
+        for _ in 0..80 {
+            reducer.add(Rgb {
+                r: 245,
+                g: 245,
+                b: 245,
+            });
+        }
 
-        assert!(r <= 1);
-        assert!(g <= 1);
-        assert!(b <= 1);
+        let color = reducer.finish(440);
+
+        assert!(color.rgb.b > color.rgb.r);
+        assert!(color.rgb.r > color.rgb.g);
+        assert!(saturation(color.rgb) > 0.45);
     }
 
     #[test]
-    fn apply_vibrance_returns_visible_midpoint_color() {
-        let (r, g, b) = apply_vibrance(128, 32, 16);
+    fn ambient_weight_favors_saturated_color_over_white() {
+        let saturated = ambient_weight(Rgb {
+            r: 220,
+            g: 40,
+            b: 120,
+        });
+        let white = ambient_weight(Rgb {
+            r: 240,
+            g: 240,
+            b: 240,
+        });
 
-        assert!(r > g);
-        assert!(g >= b);
-        assert!(r > 70);
+        assert!(saturated > white);
+    }
+
+    #[test]
+    fn color_smoother_eases_toward_target_without_snapping() {
+        let mut smoother = ColorSmoother::new();
+
+        let color = smoother.smooth(Rgb {
+            r: 100,
+            g: 100,
+            b: 100,
+        });
+
+        assert!(color.r > 0);
+        assert!(color.r < 100);
+        assert_eq!(color.r, color.g);
+        assert_eq!(color.g, color.b);
+    }
+
+    #[test]
+    fn color_smoother_preserves_blue_chroma_when_leaving_grey() {
+        let mut smoother = ColorSmoother {
+            smooth_rgb: (180.0, 180.0, 180.0),
+        };
+
+        let color = smoother.smooth(Rgb { r: 0, g: 0, b: 255 });
+
+        assert!(color.b > color.r + 80);
+        assert!(color.b > color.g + 80);
+        assert!(saturation(color) > 0.45);
+    }
+
+    #[test]
+    fn color_smoother_uses_slower_factor_when_dimming() {
+        let mut smoother = ColorSmoother {
+            smooth_rgb: (200.0, 200.0, 200.0),
+        };
+
+        let color = smoother.smooth(Rgb {
+            r: 100,
+            g: 100,
+            b: 100,
+        });
+
+        assert!(color.r > 100);
+        assert!(color.r < 200);
+        assert_eq!(color.r, color.g);
+        assert_eq!(color.g, color.b);
+    }
+
+    #[test]
+    fn rgb_bin_returns_center_for_same_bucket() {
+        let color = Rgb {
+            r: 31,
+            g: 32,
+            b: 33,
+        };
+        let center = bin_center_rgb(rgb_bin(color));
+
+        assert_eq!(
+            center,
+            Rgb {
+                r: 24,
+                g: 40,
+                b: 40
+            }
+        );
     }
 
     #[test]
@@ -678,4 +969,5 @@ mod tests {
 
         assert!(ambient_thread().is_none());
     }
+
 }

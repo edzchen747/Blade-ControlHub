@@ -3,13 +3,12 @@ use std::sync::atomic::Ordering;
 
 use crate::core::shared_state::SHIFT_PRESSED;
 use crate::error::{AppError, AppResult};
+use crate::win::display::topology::{primary_display_device_name_wide, wide_string_until_nul};
 use tracing::info;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Gdi::{
     CDS_UPDATEREGISTRY, ChangeDisplaySettingsExW, DEVMODEW, DISP_CHANGE_SUCCESSFUL,
-    DISPLAY_DEVICE_ATTACHED_TO_DESKTOP, DISPLAY_DEVICE_PRIMARY_DEVICE, DISPLAY_DEVICEW,
-    DM_DISPLAYFREQUENCY, ENUM_CURRENT_SETTINGS, ENUM_DISPLAY_SETTINGS_MODE, EnumDisplayDevicesW,
-    EnumDisplaySettingsW,
+    DM_DISPLAYFREQUENCY, ENUM_CURRENT_SETTINGS, ENUM_DISPLAY_SETTINGS_MODE, EnumDisplaySettingsW,
 };
 use windows::core::PCWSTR;
 
@@ -21,17 +20,17 @@ pub struct DisplayManager {
 
 impl DisplayManager {
     pub fn new() -> Option<Self> {
-        let mut device_index = 0;
-        while let Some(display_device) = enum_display_device(device_index) {
-            if is_target_display(&display_device) {
-                return Some(DisplayManager {
-                    device_name: display_device.DeviceName.to_vec(),
-                });
-            }
+        Self::primary_device_name().map(|device_name| DisplayManager { device_name })
+    }
 
-            device_index += 1;
-        }
-        None
+    pub fn refresh_primary(&mut self) -> AppResult<()> {
+        let device_name = Self::primary_device_name().ok_or(AppError::DisplayNotFound)?;
+        info!(
+            display = %wide_string_until_nul(&device_name),
+            "Refreshing cached primary display"
+        );
+        self.device_name = device_name;
+        Ok(())
     }
 
     /// Helper to get the PCWSTR pointer for Win32 calls
@@ -106,14 +105,10 @@ impl DisplayManager {
         self.set_refresh_rate(next_rate)?;
         Ok(next_rate)
     }
-}
 
-fn initialized_display_device() -> DISPLAY_DEVICEW {
-    // SAFETY: DISPLAY_DEVICEW is a plain C struct. EnumDisplayDevicesW expects
-    // the caller to zero-initialize it and set `cb` before the call.
-    let mut display_device: DISPLAY_DEVICEW = unsafe { std::mem::zeroed() };
-    display_device.cb = std::mem::size_of::<DISPLAY_DEVICEW>() as u32;
-    display_device
+    fn primary_device_name() -> Option<Vec<u16>> {
+        primary_display_device_name_wide()
+    }
 }
 
 fn initialized_dev_mode() -> DEVMODEW {
@@ -124,38 +119,12 @@ fn initialized_dev_mode() -> DEVMODEW {
     dev_mode
 }
 
-fn enum_display_device(device_index: u32) -> Option<DISPLAY_DEVICEW> {
-    let mut display_device = initialized_display_device();
-    unsafe { EnumDisplayDevicesW(None, device_index, &mut display_device, 0).as_bool() }
-        .then_some(display_device)
-}
-
 fn enum_display_settings(
     device_name: PCWSTR,
     mode: ENUM_DISPLAY_SETTINGS_MODE,
 ) -> Option<DEVMODEW> {
     let mut dev_mode = initialized_dev_mode();
     unsafe { EnumDisplaySettingsW(device_name, mode, &mut dev_mode).as_bool() }.then_some(dev_mode)
-}
-
-fn is_target_display(display_device: &DISPLAY_DEVICEW) -> bool {
-    display_matches_target(
-        display_device.StateFlags,
-        &wide_string_until_nul(&display_device.DeviceString),
-    )
-}
-
-fn display_matches_target(flags: u32, device_description: &str) -> bool {
-    let is_active = (flags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) != 0;
-    let is_primary = (flags & DISPLAY_DEVICE_PRIMARY_DEVICE) != 0;
-    let description = device_description.to_lowercase();
-    let is_integrated = description.contains("internal") || description.contains("integrated");
-    is_active && (is_primary || is_integrated)
-}
-
-fn wide_string_until_nul(value: &[u16]) -> String {
-    let end = value.iter().position(|&ch| ch == 0).unwrap_or(value.len());
-    String::from_utf16_lossy(&value[..end])
 }
 
 fn choose_next_rate(supported: &[u32], current: u32, reverse: bool) -> Option<u32> {
@@ -177,10 +146,8 @@ fn choose_next_rate(supported: &[u32], current: u32, reverse: bool) -> Option<u3
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        DISPLAY_DEVICE_ATTACHED_TO_DESKTOP, DISPLAY_DEVICE_PRIMARY_DEVICE, choose_next_rate,
-        display_matches_target, wide_string_until_nul,
-    };
+    use super::choose_next_rate;
+    use crate::win::display::topology::wide_string_until_nul;
 
     #[test]
     fn choose_next_rate_advances_to_higher_rate() {
@@ -205,27 +172,6 @@ mod tests {
     #[test]
     fn choose_next_rate_returns_none_for_empty_rates() {
         assert_eq!(choose_next_rate(&[], 60, false), None);
-    }
-
-    #[test]
-    fn primary_active_display_is_target() {
-        assert!(display_matches_target(
-            DISPLAY_DEVICE_ATTACHED_TO_DESKTOP | DISPLAY_DEVICE_PRIMARY_DEVICE,
-            "Generic PnP Monitor",
-        ));
-    }
-
-    #[test]
-    fn integrated_active_display_is_target() {
-        assert!(display_matches_target(
-            DISPLAY_DEVICE_ATTACHED_TO_DESKTOP,
-            "Internal Display",
-        ));
-    }
-
-    #[test]
-    fn detached_integrated_display_is_not_target() {
-        assert!(!display_matches_target(0, "Internal Display"));
     }
 
     #[test]

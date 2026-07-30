@@ -18,7 +18,7 @@ use crate::win::display::refresh_rate::DisplayManager;
 use librazer::device::Device;
 use std::sync::mpsc::Receiver;
 use std::time::Instant;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 
 pub struct Executer<'a> {
     device: &'a Device,
@@ -115,6 +115,7 @@ impl<'a> Executer<'a> {
             DeviceCmd::SetRefreshRate(profile, refresh_rate, tx) => {
                 let _ = tx.send(self.set_refresh_rate_for_profile(profile, refresh_rate));
             }
+            DeviceCmd::DisplayLayoutChanged => self.display_layout_changed(),
             DeviceCmd::SetMuteIndicator(io, muted) => {
                 AudioHandler::new(self.device).set_mute_indicator(io, muted);
             }
@@ -276,6 +277,17 @@ impl<'a> Executer<'a> {
         Ok(())
     }
 
+    fn display_layout_changed(&mut self) {
+        if let Err(error) = self.display_manager.refresh_primary() {
+            warn!(%error, "Display layout changed but primary display could not be refreshed");
+        }
+
+        let mut state = self.app_config.read();
+        if state.rgb_effect.value() == RGBEffect::Ambient {
+            AmbientEffect::start(crate::razer::device_handle::device());
+        }
+    }
+
     fn set_default_multimedia_keys(&mut self, enabled: bool) -> crate::error::AppResult<()> {
         self.kb().set_default_multimedia_keys(enabled);
         Ok(())
@@ -342,6 +354,7 @@ impl<'a> Executer<'a> {
     }
 
     fn sleep(&mut self) -> bool {
+        self.kb().set_keyboard_color(0, 0, 0);
         self.kb().keyboard_control(false);
         let _ = command(self.device, 0x030a, &[5, 0], None); // reset keyboard effect
         let _ = command(self.device, 0x0303, &[1, 5, 0], None); // turn off keyboard light
