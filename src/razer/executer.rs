@@ -98,7 +98,9 @@ impl<'a> Executer<'a> {
             DeviceCmd::SetUnderGlow(profile, enabled, tx) => {
                 let _ = tx.send(self.set_under_glow_for_profile(profile, enabled));
             }
-            DeviceCmd::SetKeyboardColor(r, g, b) => self.kb().set_keyboard_color(r, g, b),
+            DeviceCmd::SetKeyboardColor(r, g, b, brightness) => {
+                self.kb().set_keyboard_color(r, g, b, brightness)
+            }
             DeviceCmd::SetKeyboardBrightness(profile, brightness, tx) => {
                 let _ = tx.send(self.set_keyboard_brightness_for_profile(profile, brightness));
             }
@@ -354,10 +356,10 @@ impl<'a> Executer<'a> {
     }
 
     fn sleep(&mut self) -> bool {
-        self.kb().set_keyboard_color(0, 0, 0);
+        self.kb().set_keyboard_color(0, 0, 0, 0);
         self.kb().keyboard_control(false);
         let _ = command(self.device, 0x030a, &[5, 0], None); // reset keyboard effect
-        let _ = command(self.device, 0x0303, &[1, 5, 0], None); // turn off keyboard light
+        // let _ = command(self.device, 0x0303, &[1, 5, 0], None); // turn off keyboard light (set_keyboard_color() with brightness 0 already does this)
         let _ = command(self.device, 0x0300, &[1, 38, 0], None); // set underglow brightness to 0
         let _ = command(self.device, 0x0303, &[1, 38, 0], None); // turn off underglow brightness
         let _ = command(self.device, 0x0d02, &[1, 0, 6, 0], None); // reset perf mode

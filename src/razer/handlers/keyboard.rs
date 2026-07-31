@@ -158,7 +158,7 @@ impl<'a> KeyboardHandler<'a> {
         brightness * active
     }
 
-    pub fn set_keyboard_color(&self, r: u8, g: u8, b: u8) {
+    pub fn set_keyboard_color(&mut self, r: u8, g: u8, b: u8, brightness: u8) {
         let width = self.app_config.keyboard_width;
         let mut args = keyboard_color_args(width, r, g, b);
         if args.len() > HID_PACKET_ARGS_LEN {
@@ -169,6 +169,11 @@ impl<'a> KeyboardHandler<'a> {
             );
             return;
         }
+        let kb_brightness = self.app_config.get().key_lvl;
+        let scaled_brightness = (kb_brightness as f32 * brightness as f32 / 255.0)
+            .round()
+            .clamp(0.0, 255.0) as u8;
+        let _ = command(self.device, 0x0303, &[1, 5, scaled_brightness], None);
 
         for row in 0..=6 {
             if let Some(row_arg) = args.get_mut(1) {

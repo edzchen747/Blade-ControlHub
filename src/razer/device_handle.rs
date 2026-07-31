@@ -223,7 +223,7 @@ pub enum DeviceCmd {
     SetRefreshRate(PowerProfile, u32, mpsc::Sender<AppResult<()>>),
     DisplayLayoutChanged,
     SetKeyboardBrightness(PowerProfile, u8, mpsc::Sender<AppResult<()>>),
-    SetKeyboardColor(u8, u8, u8),
+    SetKeyboardColor(u8, u8, u8, u8),
     #[allow(dead_code)]
     SetLidLogo(LidLogoMode),
     PersistConfig,
@@ -299,8 +299,8 @@ impl DeviceHandle {
         self.send(DeviceCmd::AdjustKeyboardLight(false));
     }
 
-    pub fn set_keyboard_color(&self, r: u8, g: u8, b: u8) {
-        self.send(DeviceCmd::SetKeyboardColor(r, g, b));
+    pub fn set_keyboard_color(&self, r: u8, g: u8, b: u8, brightness: u8) {
+        self.send(DeviceCmd::SetKeyboardColor(r, g, b, brightness));
     }
 
     pub fn set_keyboard_brightness(&self, profile: PowerProfile, brightness: u8) -> AppResult<()> {

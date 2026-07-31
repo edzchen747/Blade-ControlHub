@@ -29,8 +29,7 @@ use windows::core::Interface;
 const FPS: f64 = 15.0;
 const SAMPLE_WIDTH: u32 = 32;
 const SAMPLE_HEIGHT: u32 = 18;
-const LERP_BRIGHT_FACTOR: f32 = 0.6;
-const LERP_DARK_FACTOR: f32 = 0.15;
+const LERP_FACTOR: f32 = 0.6;
 const BIN_LEVELS: usize = 16;
 const BIN_COUNT: usize = BIN_LEVELS * BIN_LEVELS * BIN_LEVELS;
 
@@ -40,6 +39,7 @@ const BLACK_LUMA_MAX_CHANNEL: u8 = 80;
 const BLACK_MAX_SATURATION: f32 = 0.28;
 const DARK_CHROMA_VISIBILITY_FLOOR: f32 = 0.08;
 const FINAL_SATURATION_BOOST: f32 = 1.5;
+const RED_SATURATION_BOOST: f32 = 1.5; // Boost red colors to correct keyboard LED inaccuracy
 const SMOOTHED_CHROMA_FLOOR: f32 = 0.55;
 const SMOOTHED_CHROMA_PULL: f32 = 0.50;
 const BLACK_FALLBACK: Rgb = Rgb { r: 2, g: 2, b: 2 };
@@ -110,9 +110,15 @@ fn run_ambient_loop(device_handle: DeviceHandle, current_generation: u32) {
 
         match capture.sample() {
             Ok(color) => {
-                let smoothed = smoother.smooth(color.rgb);
-                print_color_preview(color, smoothed);
-                device_handle.set_keyboard_color(smoothed.r, smoothed.g, smoothed.b);
+                let smoothed_rgb = smoother.smooth(color.rgb);
+                print_color_preview(color, smoothed_rgb);
+                let (saturated_rgb, brightness) = separate_saturated_rgb_brightness(smoothed_rgb);
+                device_handle.set_keyboard_color(
+                    saturated_rgb.r,
+                    saturated_rgb.g,
+                    saturated_rgb.b,
+                    apply_gamma_u8(brightness, 0.5), //  apply gamma transform to make keyboard LEDs slightly brighter
+                );
             }
             Err(error) => {
                 warn!(%error, "Ambient effect stopped because DXGI screen capture failed");
@@ -421,18 +427,18 @@ impl ColorSmoother {
     }
 
     fn smooth(&mut self, target: Rgb) -> Rgb {
-        let factor = if luminance(target) >= tuple_luminance(self.smooth_rgb) {
-            LERP_BRIGHT_FACTOR
-        } else {
-            LERP_DARK_FACTOR
-        };
-
-        let smoothed = preserve_target_chroma(
-            rgb_from_float_tuple(lerp_color(self.smooth_rgb, target, factor)),
+        let smoothed_rgb = preserve_target_chroma(
+            rgb_from_float_tuple(lerp_color(self.smooth_rgb, target, LERP_FACTOR)),
             target,
         );
-        self.smooth_rgb = (smoothed.r as f32, smoothed.g as f32, smoothed.b as f32);
-        smoothed
+
+        self.smooth_rgb = (
+            smoothed_rgb.r as f32,
+            smoothed_rgb.g as f32,
+            smoothed_rgb.b as f32,
+        );
+
+        smoothed_rgb
     }
 }
 
@@ -531,7 +537,10 @@ impl AmbientReducer {
         let top = self.bin_average(best_bin);
         let scene = self.weighted_scene_average().unwrap_or(top);
         let palette = self.salient_palette_average().unwrap_or(top);
-        let rgb = boost_saturation(mix_rgb(palette, scene, 0.14), FINAL_SATURATION_BOOST);
+        let rgb = boost_red_saturation(
+            boost_saturation(mix_rgb(palette, scene, 0.14), FINAL_SATURATION_BOOST),
+            RED_SATURATION_BOOST,
+        );
 
         AmbientColor {
             rgb,
@@ -620,18 +629,14 @@ fn lerp_color(current: (f32, f32, f32), target: Rgb, factor: f32) -> (f32, f32, 
     let target_b = target.b as f32;
 
     (
-        ((1.0 - factor) * current.0.powi(2) + factor * target_r.powi(2)).sqrt(),
-        ((1.0 - factor) * current.1.powi(2) + factor * target_g.powi(2)).sqrt(),
-        ((1.0 - factor) * current.2.powi(2) + factor * target_b.powi(2)).sqrt(),
+        lerp(current.0, target_r, factor),
+        lerp(current.1, target_g, factor),
+        lerp(current.2, target_b, factor),
     )
 }
 
-fn luminance(rgb: Rgb) -> f32 {
-    0.2126 * rgb.r as f32 + 0.7152 * rgb.g as f32 + 0.0722 * rgb.b as f32
-}
-
-fn tuple_luminance(rgb: (f32, f32, f32)) -> f32 {
-    0.2126 * rgb.0 + 0.7152 * rgb.1 + 0.0722 * rgb.2
+fn lerp(current: f32, target: f32, factor: f32) -> f32 {
+    ((1.0 - factor) * current.powi(2) + factor * target.powi(2)).sqrt()
 }
 
 fn saturation(rgb: Rgb) -> f32 {
@@ -758,23 +763,88 @@ fn mix_rgb(a: Rgb, b: Rgb, b_amount: f32) -> Rgb {
     }
 }
 
+fn srgb_to_linear(v: f32) -> f32 {
+    if v <= 0.04045 {
+        v / 12.92
+    } else {
+        ((v + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn linear_to_srgb(v: f32) -> f32 {
+    let v = v.clamp(0.0, 1.0);
+
+    if v <= 0.003_130_8 {
+        v * 12.92
+    } else {
+        1.055 * v.powf(1.0 / 2.4) - 0.055
+    }
+}
+
 fn boost_saturation(rgb: Rgb, amount: f32) -> Rgb {
-    let r = rgb.r as f32 / 255.0;
-    let g = rgb.g as f32 / 255.0;
-    let b = rgb.b as f32 / 255.0;
+    let amount = amount.max(0.0);
+
+    let r = srgb_to_linear(rgb.r as f32 / 255.0);
+    let g = srgb_to_linear(rgb.g as f32 / 255.0);
+    let b = srgb_to_linear(rgb.b as f32 / 255.0);
+
+    // Rec.709 luminance in linear RGB.
     let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
 
     Rgb {
-        r: ((luma + (r - luma) * amount) * 255.0)
+        r: (linear_to_srgb(luma + (r - luma) * amount) * 255.0)
             .round()
             .clamp(0.0, 255.0) as u8,
-        g: ((luma + (g - luma) * amount) * 255.0)
+        g: (linear_to_srgb(luma + (g - luma) * amount) * 255.0)
             .round()
             .clamp(0.0, 255.0) as u8,
-        b: ((luma + (b - luma) * amount) * 255.0)
+        b: (linear_to_srgb(luma + (b - luma) * amount) * 255.0)
             .round()
             .clamp(0.0, 255.0) as u8,
     }
+}
+
+fn boost_red_saturation(rgb: Rgb, boost_factor: f32) -> Rgb {
+    let r = rgb.r as f32 / 255.0;
+    let g = rgb.g as f32 / 255.0;
+    let b = rgb.b as f32 / 255.0;
+    let red_dominance = (r - g.max(b)).max(0.0);
+    let red_mask = red_dominance * red_dominance;
+
+    let g_new = (g * (1.0 - red_mask * boost_factor) * 255.0).round();
+    let b_new = (b * (1.0 - red_mask * boost_factor) * 255.0).round();
+
+    let r_new = ((r + red_mask * boost_factor) * 255.0).round();
+
+    Rgb {
+        r: r_new.clamp(0.0, 255.0) as u8,
+        g: g_new.clamp(0.0, 255.0) as u8,
+        b: b_new.clamp(0.0, 255.0) as u8,
+    }
+}
+
+fn separate_saturated_rgb_brightness(rgb: Rgb) -> (Rgb, u8) {
+    let brightness = rgb.r.max(rgb.g.max(rgb.b));
+    if brightness == 0 {
+        return (rgb, brightness);
+    }
+
+    let scale_factor = 255.0 / brightness as f32;
+    let saturated_rgb = Rgb {
+        r: (rgb.r as f32 * scale_factor).round().clamp(0.0, 255.0) as u8,
+        g: (rgb.g as f32 * scale_factor).round().clamp(0.0, 255.0) as u8,
+        b: (rgb.b as f32 * scale_factor).round().clamp(0.0, 255.0) as u8,
+    };
+    (saturated_rgb, brightness)
+}
+
+pub fn apply_gamma_u8(value: u8, gamma: f32) -> u8 {
+    let normalized = value as f32 / 255.0;
+
+    let gamma_corrected = normalized.powf(gamma);
+
+    let scaled = (gamma_corrected * 255.0 + 0.5) as i32;
+    scaled.clamp(0, 255) as u8
 }
 
 #[cfg(debug_assertions)]
@@ -969,5 +1039,4 @@ mod tests {
 
         assert!(ambient_thread().is_none());
     }
-
 }
