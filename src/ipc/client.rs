@@ -25,9 +25,16 @@ const CONNECT_RETRY: Duration = Duration::from_millis(25);
 
 pub fn get_settings_state() -> AppResult<SettingsState> {
     match send_request(IpcRequest::GetSettingsState)? {
-        IpcResponse::SettingsState(state) => Ok(state),
+        IpcResponse::SettingsState(state) => Ok(*state),
         response => Err(unexpected_response(response)),
     }
+}
+
+pub fn set_settings_window_state(open: bool, focused: bool) -> AppResult<()> {
+    expect_ack(send_request(IpcRequest::SetSettingsWindowOpen {
+        open,
+        focused,
+    })?)
 }
 
 pub fn set_default_multimedia_keys(enabled: bool) -> AppResult<()> {
@@ -38,6 +45,17 @@ pub fn set_default_multimedia_keys(enabled: bool) -> AppResult<()> {
 
 pub fn set_perf_mode(profile: PowerProfile, mode: PerfMode) -> AppResult<()> {
     expect_ack(send_request(IpcRequest::SetPerfMode { profile, mode })?)
+}
+
+pub fn set_custom_mode_config(cpu_level: u8, gpu_level: u8) -> AppResult<()> {
+    expect_ack(send_request(IpcRequest::SetCustomModeConfig {
+        cpu_level,
+        gpu_level,
+    })?)
+}
+
+pub fn set_fan_speed(profile: PowerProfile, speed: u8) -> AppResult<()> {
+    expect_ack(send_request(IpcRequest::SetFanSpeed { profile, speed })?)
 }
 
 pub fn set_refresh_rate(profile: PowerProfile, hz: u32) -> AppResult<()> {
@@ -146,8 +164,11 @@ pub fn send_request(request: IpcRequest) -> AppResult<IpcResponse> {
 fn ipc_request_kind(request: &IpcRequest) -> &'static str {
     match request {
         IpcRequest::GetSettingsState => "GetSettingsState",
+        IpcRequest::SetSettingsWindowOpen { .. } => "SetSettingsWindowOpen",
         IpcRequest::SetDefaultMultimediaKeys { .. } => "SetDefaultMultimediaKeys",
         IpcRequest::SetPerfMode { .. } => "SetPerfMode",
+        IpcRequest::SetCustomModeConfig { .. } => "SetCustomModeConfig",
+        IpcRequest::SetFanSpeed { .. } => "SetFanSpeed",
         IpcRequest::SetRefreshRate { .. } => "SetRefreshRate",
         IpcRequest::SetKeyboardBrightness { .. } => "SetKeyboardBrightness",
         IpcRequest::SetRgbEffect { .. } => "SetRgbEffect",

@@ -148,6 +148,7 @@ fn perf_mode_color_components(mode: PerfMode) -> (&'static str, u8, u8, u8) {
         PerfMode::Performance => ("#FF5D00", 0xff, 0x5d, 0x00),
         PerfMode::Turbo => ("#D50000", 0xd5, 0x00, 0x00),
         PerfMode::Custom => ("#A200FF", 0xa2, 0x00, 0xff),
+        PerfMode::Unsupported => ("#FF00FF", 0xff, 0x00, 0xff),
         PerfMode::Unknown => (DEFAULT_ICON_COLOR, 0x95, 0xa5, 0xa6),
     }
 }

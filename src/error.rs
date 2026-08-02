@@ -6,8 +6,12 @@ pub enum AppError {
     #[error("Hardware device did not respond within the timeout period")]
     HardwareTimeout,
 
-    #[error("Hardware command {command:#06x} failed after {attempts} attempts")]
-    Protocol { command: u16, attempts: u8 },
+    #[error("Hardware command {command:#06x} with args {args:?} failed after {attempts} attempts")]
+    Protocol {
+        command: u16,
+        args: Vec<u8>,
+        attempts: u8,
+    },
 
     #[error("Hardware device disconnected")]
     HardwareDisconnected,

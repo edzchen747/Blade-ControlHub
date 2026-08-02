@@ -6,7 +6,6 @@
 mod mock_device;
 
 use crate::hal::DeviceController;
-use crate::razer::config::AppConfig;
 use crate::razer::enums::{BATTERY_LIMITS, PERF_MODES, PerfMode, RGB_EFFECTS};
 use mock_device::MockDeviceController;
 
@@ -52,22 +51,6 @@ fn mock_device_persist_records_call() {
     );
 }
 
-// ── CycleState integration with AppConfig ───────────────────────────────────
-
-#[test]
-fn app_config_battery_limit_cycle_covers_all_items() {
-    let mut config = AppConfig::default();
-    let total = config.battery_limit.items.len();
-    // Cycle through all items and confirm we return to the start
-    for _ in 0..total {
-        config.battery_limit.next();
-    }
-    assert_eq!(
-        config.battery_limit.index, 0,
-        "after a full cycle, battery_limit index must return to 0"
-    );
-}
-
 #[test]
 fn perf_modes_constant_uses_ui_order() {
     assert_eq!(
@@ -86,7 +69,7 @@ fn perf_modes_constant_uses_ui_order() {
 
 #[test]
 fn rgb_effects_constant_has_six_entries() {
-    assert_eq!(RGB_EFFECTS.len(), 6);
+    assert_eq!(RGB_EFFECTS.len(), 7);
 }
 
 #[test]

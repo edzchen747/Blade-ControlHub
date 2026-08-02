@@ -39,6 +39,19 @@ fn perf_mode_from_invalid_is_unknown() {
     assert_eq!(PerfMode::from(99), PerfMode::Unknown);
 }
 
+#[test]
+fn perf_mode_from_255_is_experimental_unsupported() {
+    assert_eq!(
+        PerfMode::from(u8::MAX),
+        if crate::runtime::debug_mode::is_enabled() {
+            PerfMode::Unsupported
+        } else {
+            PerfMode::Unknown
+        }
+    );
+    assert_eq!(PerfMode::Unsupported as u8, u8::MAX);
+}
+
 // ── RGBEffect ────────────────────────────────────────────────────────────────
 
 #[test]

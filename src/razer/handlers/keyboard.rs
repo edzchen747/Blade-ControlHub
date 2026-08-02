@@ -7,7 +7,7 @@ use crate::{
         config::AppConfig,
         device_handle::device,
         enums::{LidLogoMode, RGBEffect},
-        protocol::{HID_PACKET_ARGS_LEN, command},
+        protocol::{HID_PACKET_ARGS_LEN, command, command_without_settings_update},
     },
     ui::{app::app, app_events::OsdEvent},
     utils::persist::PersistBuffer,
@@ -54,7 +54,10 @@ impl<'a> KeyboardHandler<'a> {
 
     pub fn get_keyboard_brightness(&self) -> u8 {
         // unwrap_or(0): returns 0 on hardware/protocol failure
-        command(self.device, 0x0383, &[1, 5, 0], Some(2)).unwrap_or(0)
+        command(self.device, 0x0383, &[1, 5, 0], Some(&[2]))
+            .ok()
+            .and_then(|result| result.first().copied())
+            .unwrap_or(0)
     }
 
     pub fn get_default_multimedia_keys(&self) -> bool {
@@ -127,7 +130,9 @@ impl<'a> KeyboardHandler<'a> {
 
     pub fn get_rgb_effect(&self) -> RGBEffect {
         // unwrap_or(0): returns RGBEffect 0 on hardware/protocol failure
-        command(self.device, 0x038a, &[0], Some(0))
+        command(self.device, 0x038a, &[0], Some(&[0]))
+            .ok()
+            .and_then(|result| result.first().copied())
             .unwrap_or(0)
             .into()
     }
@@ -153,8 +158,14 @@ impl<'a> KeyboardHandler<'a> {
 
     pub fn get_under_glow_brightness(&self) -> u8 {
         // unwrap_or(0): returns 0 on hardware/protocol failure
-        let brightness = command(self.device, 0x0383, &[1, 38, 0], Some(2)).unwrap_or(0);
-        let active = command(self.device, 0x0380, &[1, 38, 0], Some(2)).unwrap_or(0);
+        let brightness = command(self.device, 0x0383, &[1, 38, 0], Some(&[2]))
+            .ok()
+            .and_then(|result| result.first().copied())
+            .unwrap_or(0);
+        let active = command(self.device, 0x0380, &[1, 38, 0], Some(&[2]))
+            .ok()
+            .and_then(|result| result.first().copied())
+            .unwrap_or(0);
         brightness * active
     }
 
@@ -173,13 +184,14 @@ impl<'a> KeyboardHandler<'a> {
         let scaled_brightness = (kb_brightness as f32 * brightness as f32 / 255.0)
             .round()
             .clamp(0.0, 255.0) as u8;
-        let _ = command(self.device, 0x0303, &[1, 5, scaled_brightness], None);
+        let _ =
+            command_without_settings_update(self.device, 0x0303, &[1, 5, scaled_brightness], None);
 
         for row in 0..=6 {
             if let Some(row_arg) = args.get_mut(1) {
                 *row_arg = row;
             }
-            let _ = command(self.device, 0x030b, &args, None);
+            let _ = command_without_settings_update(self.device, 0x030b, &args, None);
         }
     }
 

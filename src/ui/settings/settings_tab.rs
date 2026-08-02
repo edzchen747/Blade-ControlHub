@@ -6,16 +6,16 @@ use eframe::egui;
 use crate::config::ThemeColor;
 use crate::razer::enums::BatteryLimit;
 
-use super::{Settings, SettingsCommand};
+use super::{Settings, SettingsCommand, THEME_COLOR_COMMIT_DEBOUNCE};
 
 pub fn show(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
             battery_limit_section(ui, ctx, settings);
-            ui.add_space(8.0);
+            ui.add_space(5.0);
             default_func_key_section(ui, ctx, settings);
-            ui.add_space(8.0);
+            ui.add_space(5.0);
             theme_section(ui, ctx, settings);
         });
 }
@@ -40,18 +40,19 @@ fn battery_limit_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut 
             .unwrap_or(0) as u32;
         let max_index = limits.len().saturating_sub(1) as u32;
 
-        ui.horizontal(|ui| {
-            ui.add(
-                egui::Slider::new(&mut index, 0..=max_index)
-                    .show_value(false)
-                    .step_by(1.0),
-            );
-            ui.label(battery_limit_label(current));
-        });
+        let slider_changed = ui
+            .horizontal(|ui| {
+                let response = ui.add(
+                    egui::Slider::new(&mut index, 0..=max_index)
+                        .show_value(false)
+                        .step_by(1.0),
+                );
+                ui.label(battery_limit_label(current));
+                response.changed()
+            })
+            .inner;
 
-        if let Some(limit) = limits.get(index as usize).copied()
-            && limit != current
-        {
+        if let Some(limit) = selected_battery_limit(&limits, current, index, slider_changed) {
             set_battery_limit(settings, limit);
             ctx.request_repaint_of(egui::ViewportId::ROOT);
         }
@@ -86,31 +87,42 @@ pub(super) fn default_func_key_switcher(
 fn theme_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
     section(ui, "Theme", |ui| {
         let mut rgb = theme_color(settings).to_rgb_array();
+        let mut reset_requested = false;
 
         ui.horizontal(|ui| {
             ui.label("Accent Color");
             if ui.color_edit_button_rgb(&mut rgb).changed() {
-                set_theme_color(settings, ThemeColor::from_rgb_array(rgb));
-                ctx.request_repaint_of(egui::ViewportId::ROOT);
-            };
+                settings.preview_theme_color(ThemeColor::from_rgb_array(rgb));
+                ctx.request_repaint_after(THEME_COLOR_COMMIT_DEBOUNCE);
+            }
             if ui.button("Reset").clicked() {
-                set_theme_color(
-                    settings,
-                    ThemeColor::from_rgb_array(ThemeColor::default().to_rgb_array()),
-                );
-                ctx.request_repaint_of(egui::ViewportId::ROOT);
+                reset_requested = true;
             }
         });
+
+        if reset_requested {
+            settings.cancel_pending_theme_color();
+            set_theme_color(
+                settings,
+                ThemeColor::from_rgb_array(ThemeColor::default().to_rgb_array()),
+            );
+            ctx.request_repaint_of(egui::ViewportId::ROOT);
+        } else if settings.commit_pending_theme_color_if_due() {
+            ctx.request_repaint_of(egui::ViewportId::ROOT);
+        }
     });
 }
 
 fn section(ui: &mut egui::Ui, title: &str, add_contents: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::group(ui.style())
-        .inner_margin(egui::Margin::symmetric(8.0, 7.0))
+        .fill(ui.visuals().faint_bg_color)
+        .stroke(ui.visuals().window_stroke)
+        .rounding(egui::Rounding::same(5.0))
+        .inner_margin(egui::Margin::symmetric(10.0, 7.0))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(title);
-            ui.separator();
+            ui.label(egui::RichText::new(title).size(16.0));
+            ui.add_space(3.0);
             add_contents(ui);
         });
 }
@@ -145,6 +157,18 @@ fn set_battery_limit(settings: &mut Settings, limit: BatteryLimit) {
         settings.update = true;
         settings.queue_command(SettingsCommand::SetBatteryLimit(limit));
     }
+}
+
+fn selected_battery_limit(
+    limits: &[BatteryLimit],
+    current: BatteryLimit,
+    index: u32,
+    slider_changed: bool,
+) -> Option<BatteryLimit> {
+    slider_changed
+        .then(|| limits.get(index as usize).copied())
+        .flatten()
+        .filter(|&limit| limit != current)
 }
 
 fn set_theme_color(settings: &mut Settings, color: ThemeColor) {
@@ -194,6 +218,32 @@ mod tests {
         assert_eq!(
             settings.drain_commands(),
             vec![SettingsCommand::SetBatteryLimit(BatteryLimit::Limit80)]
+        );
+    }
+
+    #[test]
+    fn battery_limit_does_not_queue_without_slider_interaction() {
+        assert_eq!(
+            selected_battery_limit(
+                &[BatteryLimit::Off, BatteryLimit::Limit80],
+                BatteryLimit::Unknown,
+                0,
+                false,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn battery_limit_queues_the_changed_slider_value() {
+        assert_eq!(
+            selected_battery_limit(
+                &[BatteryLimit::Off, BatteryLimit::Limit80],
+                BatteryLimit::Off,
+                1,
+                true,
+            ),
+            Some(BatteryLimit::Limit80)
         );
     }
 

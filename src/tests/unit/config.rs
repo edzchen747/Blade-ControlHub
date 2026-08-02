@@ -2,24 +2,9 @@
 //! and `refresh_cycle_items()`.
 
 use crate::razer::config::{AppConfig, PowerProfile, allowed_perf_modes};
-use crate::razer::enums::{BatteryLimit, PerfMode};
+use crate::razer::enums::PerfMode;
 
 // ── Default values ───────────────────────────────────────────────────────────
-
-#[test]
-fn app_config_default_battery_limit_index_is_zero() {
-    let config = AppConfig::default();
-    assert_eq!(config.battery_limit.index, 0);
-}
-
-#[test]
-fn app_config_default_battery_limit_value_is_off() {
-    let config = AppConfig::default();
-    assert_eq!(
-        config.battery_limit.items[config.battery_limit.index],
-        BatteryLimit::Off
-    );
-}
 
 #[test]
 fn app_config_default_multimedia_keys_is_false() {
@@ -64,7 +49,6 @@ fn app_config_deserializes_from_empty_json_object_with_defaults() {
     let json = "{}";
     let config: AppConfig =
         serde_json::from_str(json).expect("empty JSON object must deserialize successfully");
-    assert_eq!(config.battery_limit.index, 0);
     assert!(!config.default_multimedia_keys);
 }
 
@@ -74,11 +58,20 @@ fn app_config_deserializes_with_partial_fields_using_defaults_for_missing() {
     let config: AppConfig =
         serde_json::from_str(json).expect("partial JSON must deserialize with serde(default)");
     assert!(config.default_multimedia_keys);
-    // battery_limit must still have defaults
-    assert_eq!(
-        config.battery_limit.items[config.battery_limit.index],
-        BatteryLimit::Off
-    );
+}
+
+#[test]
+fn app_config_ignores_legacy_battery_limit_on_load() {
+    let json = r#"{
+        "battery_limit": {"index": 7, "items": ["Limit80"]},
+        "default_multimedia_keys": true
+    }"#;
+    let config: AppConfig =
+        serde_json::from_str(json).expect("legacy battery limit must be ignored");
+    let serialized = serde_json::to_string(&config).expect("config must serialize");
+
+    assert!(config.default_multimedia_keys);
+    assert!(!serialized.contains("battery_limit"));
 }
 
 #[test]
@@ -98,11 +91,6 @@ fn app_config_round_trips_through_json() {
     let restored: AppConfig =
         serde_json::from_str(&json).expect("serialized AppConfig must deserialize without error");
     // Verify key structural properties survive the round-trip
-    assert_eq!(restored.battery_limit.index, original.battery_limit.index);
-    assert_eq!(
-        restored.battery_limit.items.len(),
-        original.battery_limit.items.len()
-    );
     assert_eq!(
         restored.default_multimedia_keys,
         original.default_multimedia_keys
@@ -116,8 +104,8 @@ fn app_config_serializes_to_valid_json_without_error() {
     assert!(result.is_ok(), "AppConfig serialization must not fail");
     let json = result.unwrap();
     assert!(
-        json.contains("battery_limit"),
-        "serialized JSON must contain battery_limit key"
+        !json.contains("battery_limit"),
+        "serialized JSON must not contain the device-backed battery limit"
     );
 }
 
@@ -137,15 +125,6 @@ fn app_config_refresh_cycle_items_multiple_times_does_not_panic() {
     config.refresh_cycle_items();
     config.refresh_cycle_items();
     config.refresh_cycle_items();
-}
-
-#[test]
-fn app_config_refresh_cycle_items_preserves_battery_limit() {
-    let mut config = AppConfig::default();
-    let original_index = config.battery_limit.index;
-    config.refresh_cycle_items();
-    // battery_limit should not be affected by refresh_cycle_items
-    assert_eq!(config.battery_limit.index, original_index);
 }
 
 #[test]

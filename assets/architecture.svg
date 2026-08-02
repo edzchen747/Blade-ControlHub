@@ -1,81 +1,53 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 620" font-family="'Segoe UI', system-ui, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 710" font-family="'Segoe UI', system-ui, sans-serif">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#1e1e2e"/>
-      <stop offset="100%" stop-color="#181825"/>
-    </linearGradient>
-    <linearGradient id="ui" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#7c73e3"/>
-      <stop offset="100%" stop-color="#6c63d3"/>
-    </linearGradient>
-    <linearGradient id="event" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#e69f66"/>
-      <stop offset="100%" stop-color="#d48f56"/>
-    </linearGradient>
-    <linearGradient id="mid" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#6ccca1"/>
-      <stop offset="100%" stop-color="#5cb890"/>
-    </linearGradient>
-    <linearGradient id="lib" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#e07a5f"/>
-      <stop offset="100%" stop-color="#cc6a4f"/>
-    </linearGradient>
-    <linearGradient id="hw" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#3da877"/>
-      <stop offset="100%" stop-color="#2d8867"/>
-    </linearGradient>
-    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
-      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000" flood-opacity="0.3"/>
-    </filter>
-    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-      <path d="M0,0 L8,3 L0,6 Z" fill="#a0a0b0"/>
-    </marker>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#1e1e2e"/><stop offset="100%" stop-color="#181825"/></linearGradient>
+    <linearGradient id="ui" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#7c73e3"/><stop offset="100%" stop-color="#6c63d3"/></linearGradient>
+    <linearGradient id="ipc" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#e69f66"/><stop offset="100%" stop-color="#d48f56"/></linearGradient>
+    <linearGradient id="runtime" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#6ccca1"/><stop offset="100%" stop-color="#5cb890"/></linearGradient>
+    <linearGradient id="device" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#4dbbd6"/><stop offset="100%" stop-color="#3ca7c2"/></linearGradient>
+    <linearGradient id="lib" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#e07a5f"/><stop offset="100%" stop-color="#cc6a4f"/></linearGradient>
+    <linearGradient id="hw" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#3da877"/><stop offset="100%" stop-color="#2d8867"/></linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%"><feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000" flood-opacity=".3"/></filter>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#a0a0b0"/></marker>
   </defs>
-  <rect width="900" height="620" rx="12" fill="url(#bg)"/>
-  <text x="450" y="36" text-anchor="middle" fill="#cdd6f4" font-size="20" font-weight="700">Blade ControlHub — Architecture Overview</text>
-  <rect x="60" y="58" width="780" height="100" rx="10" fill="#2a2a3d" stroke="#7c73e3" stroke-width="1.5" filter="url(#shadow)"/>
-  <text x="450" y="82" text-anchor="middle" fill="#7c73e3" font-size="12" font-weight="600" letter-spacing="1">UI LAYER</text>
-  <rect x="110" y="94" width="190" height="50" rx="8" fill="url(#ui)" filter="url(#shadow)"/>
-  <text x="205" y="116" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">Settings Window</text>
-  <text x="205" y="132" text-anchor="middle" fill="#ddd" font-size="10">egui / eframe</text>
-  <rect x="355" y="94" width="190" height="50" rx="8" fill="url(#ui)" filter="url(#shadow)"/>
-  <text x="450" y="116" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">System Tray Icon</text>
-  <text x="450" y="132" text-anchor="middle" fill="#ddd" font-size="10">tray-icon crate</text>
-  <rect x="600" y="94" width="190" height="50" rx="8" fill="url(#ui)" filter="url(#shadow)"/>
-  <text x="695" y="116" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">OSD Overlay</text>
-  <text x="695" y="132" text-anchor="middle" fill="#ddd" font-size="10">Transparent always-on-top</text>
-  <line x1="450" y1="158" x2="450" y2="195" stroke="#a0a0b0" stroke-width="2" marker-end="url(#arrow)"/>
-  <text x="465" y="182" fill="#a0a0b0" font-size="10">mpsc channel</text>
-  <rect x="270" y="195" width="360" height="56" rx="10" fill="url(#event)" filter="url(#shadow)"/>
-  <text x="450" y="219" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">Event Dispatcher</text>
-  <text x="450" y="237" text-anchor="middle" fill="#eee" font-size="11">Routes events to device controls and OSD</text>
-  <line x1="340" y1="251" x2="200" y2="290" stroke="#a0a0b0" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="450" y1="251" x2="450" y2="290" stroke="#a0a0b0" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="560" y1="251" x2="700" y2="290" stroke="#a0a0b0" stroke-width="2" marker-end="url(#arrow)"/>
-  <rect x="60" y="290" width="780" height="120" rx="10" fill="#2a2a3d" stroke="#6ccca1" stroke-width="1.5" filter="url(#shadow)"/>
-  <text x="450" y="314" text-anchor="middle" fill="#6ccca1" font-size="12" font-weight="600" letter-spacing="1">CORE LAYER</text>
-  <rect x="90" y="326" width="220" height="72" rx="8" fill="url(#mid)" filter="url(#shadow)"/>
-  <text x="200" y="350" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">Device Controls</text>
-  <text x="200" y="368" text-anchor="middle" fill="#eee" font-size="10">Perf Mode . RGB . Battery . Brightness</text>
-  <text x="200" y="384" text-anchor="middle" fill="#eee" font-size="10">Refresh Rate . Backlight . GPU Mode</text>
-  <rect x="340" y="326" width="220" height="72" rx="8" fill="url(#mid)" filter="url(#shadow)"/>
-  <text x="450" y="350" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">Windows Services</text>
-  <text x="450" y="368" text-anchor="middle" fill="#eee" font-size="10">Power Monitor . Standby Monitor</text>
-  <text x="450" y="384" text-anchor="middle" fill="#eee" font-size="10">Keyboard Hooks . External Events</text>
-  <rect x="590" y="326" width="220" height="72" rx="8" fill="url(#mid)" filter="url(#shadow)"/>
-  <text x="700" y="350" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">Config Persistence</text>
-  <text x="700" y="368" text-anchor="middle" fill="#eee" font-size="10">Dual Power Profiles (AC / Battery)</text>
-  <text x="700" y="384" text-anchor="middle" fill="#eee" font-size="10">JSON via serde . Key Mappings</text>
-  <line x1="200" y1="398" x2="330" y2="445" stroke="#a0a0b0" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="700" y1="398" x2="570" y2="445" stroke="#a0a0b0" stroke-width="2" marker-end="url(#arrow)"/>
-  <text x="350" y="430" fill="#a0a0b0" font-size="10">HID reports</text>
-  <text x="540" y="430" fill="#a0a0b0" font-size="10">device state</text>
-  <rect x="250" y="445" width="400" height="72" rx="10" fill="url(#lib)" filter="url(#shadow)"/>
-  <text x="450" y="472" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">librazer</text>
-  <text x="450" y="494" text-anchor="middle" fill="#eee" font-size="11">Device Detection . Command Encoding . HID I/O (hidapi)</text>
-  <line x1="450" y1="517" x2="450" y2="548" stroke="#a0a0b0" stroke-width="2" marker-end="url(#arrow)"/>
-  <text x="465" y="540" fill="#a0a0b0" font-size="10">HID (VID 0x1570)</text>
-  <rect x="300" y="548" width="300" height="52" rx="10" fill="url(#hw)" filter="url(#shadow)"/>
-  <text x="450" y="572" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">Razer Blade Hardware</text>
-  <text x="450" y="590" text-anchor="middle" fill="#eee" font-size="11">Embedded Controller via HID Interface</text>
+
+  <rect width="1080" height="710" rx="12" fill="url(#bg)"/>
+  <text x="540" y="37" text-anchor="middle" fill="#cdd6f4" font-size="21" font-weight="700">Blade ControlHub — Runtime Architecture</text>
+
+  <rect x="55" y="58" width="970" height="113" rx="10" fill="#2a2a3d" stroke="#7c73e3" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="540" y="82" text-anchor="middle" fill="#a9a3ff" font-size="12" font-weight="600" letter-spacing="1">USER INTERFACES</text>
+  <rect x="85" y="98" width="225" height="54" rx="8" fill="url(#ui)" filter="url(#shadow)"/>
+  <text x="198" y="120" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">Settings Client</text><text x="198" y="138" text-anchor="middle" fill="#eee" font-size="10">egui / eframe · no HID ownership</text>
+  <rect x="428" y="98" width="225" height="54" rx="8" fill="url(#ui)" filter="url(#shadow)"/>
+  <text x="540" y="120" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">Tray</text><text x="540" y="138" text-anchor="middle" fill="#eee" font-size="10">main runtime UI</text>
+  <rect x="770" y="98" width="225" height="54" rx="8" fill="url(#ui)" filter="url(#shadow)"/>
+  <text x="883" y="120" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">Click-through OSD</text><text x="883" y="138" text-anchor="middle" fill="#eee" font-size="10">dedicated Win32 window thread</text>
+
+  <line x1="198" y1="152" x2="198" y2="207" stroke="#e69f66" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="210" y="186" fill="#e69f66" font-size="10">named-pipe IPC</text>
+  <line x1="540" y1="152" x2="540" y2="207" stroke="#a0a0b0" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="883" y1="152" x2="780" y2="207" stroke="#a0a0b0" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="55" y="207" width="970" height="181" rx="10" fill="#2a2a3d" stroke="#6ccca1" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="540" y="232" text-anchor="middle" fill="#81e2b4" font-size="12" font-weight="600" letter-spacing="1">MAIN RUNTIME — SINGLE HARDWARE OWNER</text>
+  <rect x="82" y="253" width="246" height="111" rx="8" fill="url(#ipc)" filter="url(#shadow)"/>
+  <text x="205" y="278" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">IPC Server + Runtime State</text><text x="205" y="298" text-anchor="middle" fill="#eee" font-size="10">SettingsState snapshot</text><text x="205" y="314" text-anchor="middle" fill="#eee" font-size="10">reactive update notifications</text><text x="205" y="330" text-anchor="middle" fill="#eee" font-size="10">special-key capture events</text>
+  <rect x="417" y="253" width="246" height="111" rx="8" fill="url(#runtime)" filter="url(#shadow)"/>
+  <text x="540" y="278" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">Event Routing + UI</text><text x="540" y="298" text-anchor="middle" fill="#eee" font-size="10">tray · OSD · app events</text><text x="540" y="314" text-anchor="middle" fill="#eee" font-size="10">OSD disable scopes</text><text x="540" y="330" text-anchor="middle" fill="#eee" font-size="10">runtime lifecycle / shutdown</text>
+  <rect x="752" y="253" width="246" height="111" rx="8" fill="url(#runtime)" filter="url(#shadow)"/>
+  <text x="875" y="278" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">Windows Workers</text><text x="875" y="298" text-anchor="middle" fill="#eee" font-size="10">input · power/standby · display/GPU</text><text x="875" y="314" text-anchor="middle" fill="#eee" font-size="10">ambient · brightness · external events</text><text x="875" y="330" text-anchor="middle" fill="#eee" font-size="10">commands/events only — no HID owner</text>
+
+  <line x1="205" y1="364" x2="420" y2="435" stroke="#a0a0b0" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="875" y1="364" x2="660" y2="435" stroke="#a0a0b0" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="360" y="407" fill="#a0a0b0" font-size="10">commands</text><text x="680" y="407" fill="#a0a0b0" font-size="10">normal / urgent commands</text>
+
+  <rect x="245" y="435" width="590" height="94" rx="10" fill="url(#device)" filter="url(#shadow)"/>
+  <text x="540" y="463" text-anchor="middle" fill="#fff" font-size="15" font-weight="700">razer::DeviceHandle → razer::Executer</text><text x="540" y="484" text-anchor="middle" fill="#eefaff" font-size="11">one command channel and one executor own Device, AppConfig, persistence, display helpers, and HID dispatch</text><text x="540" y="504" text-anchor="middle" fill="#eefaff" font-size="11">normal UI/ambient work is separated from urgent pre-sleep cleanup</text>
+
+  <line x1="540" y1="529" x2="540" y2="566" stroke="#a0a0b0" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="320" y="566" width="440" height="59" rx="10" fill="url(#lib)" filter="url(#shadow)"/>
+  <text x="540" y="591" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">librazer::Device</text><text x="540" y="610" text-anchor="middle" fill="#eee" font-size="11">device detection · command encoding · HID I/O</text>
+  <line x1="540" y1="625" x2="540" y2="657" stroke="#a0a0b0" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="370" y="657" width="340" height="36" rx="10" fill="url(#hw)" filter="url(#shadow)"/>
+  <text x="540" y="681" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">Razer Blade embedded controller (HID)</text>
 </svg>

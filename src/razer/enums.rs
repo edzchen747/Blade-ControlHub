@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use strum_macros::Display;
 use tracing::warn;
 
+use crate::runtime::debug_mode;
+
 #[derive(Clone, Copy, Display, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PerfMode {
     #[strum(serialize = "Battery Saver")]
@@ -13,7 +15,9 @@ pub enum PerfMode {
     Performance = 2,
     Turbo = 1,
     Custom = 4,
-    Unknown = 255,
+    /// Experimental raw firmware mode, available only in debug mode.
+    Unsupported = 255,
+    Unknown = 254,
 }
 
 impl From<u8> for PerfMode {
@@ -26,6 +30,7 @@ impl From<u8> for PerfMode {
             2 => Self::Performance,
             1 => Self::Turbo,
             4 => Self::Custom,
+            255 if debug_mode::is_enabled() => Self::Unsupported,
             _ => {
                 warn!(
                     value,

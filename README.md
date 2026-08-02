@@ -42,7 +42,26 @@ A lightweight, native Windows application for Razer Blade laptops that provides 
 | Razer Blade 14 (2024 V2) | `1570:1049` | WIP |
 
 ## Architecture
-![Alt text](./assets/architecture.svg)
+
+![Blade ControlHub architecture](./assets/architecture.svg)
+
+The main runtime is the sole owner of hardware access. It hosts the tray, OSD,
+keyboard and Windows monitors, runtime settings snapshot, and local named-pipe
+IPC server. The settings window is a separate egui client: it reads the runtime
+snapshot and sends explicit commands over IPC; it never opens a HID device or
+persists configuration itself.
+
+- **UI:** the tray and click-through OSD run in the main runtime; the settings
+  client communicates through `ipc::{client,server,protocol}`.
+- **Hardware:** `razer::DeviceHandle` serializes normal and urgent commands to
+  the single `razer::Executer`, which owns `librazer::Device`, config updates,
+  and persistence.
+- **Windows services:** input hooks, power/standby, display/GPU, external
+  monitor, brightness, and ambient workers publish commands or events without
+  becoming additional HID owners.
+- **State:** `runtime::SettingsState` is an IPC-friendly runtime snapshot;
+  persisted `AppConfig` keeps AC and battery profiles while device-backed state
+  is queried by the executor.
 
 ## Hardware Control
 

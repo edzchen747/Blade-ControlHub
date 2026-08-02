@@ -12,12 +12,24 @@ pub const PIPE_NAME: &str = r"\\.\pipe\BladeControlHub";
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IpcRequest {
     GetSettingsState,
+    SetSettingsWindowOpen {
+        open: bool,
+        focused: bool,
+    },
     SetDefaultMultimediaKeys {
         enabled: bool,
     },
     SetPerfMode {
         profile: PowerProfile,
         mode: PerfMode,
+    },
+    SetCustomModeConfig {
+        cpu_level: u8,
+        gpu_level: u8,
+    },
+    SetFanSpeed {
+        profile: PowerProfile,
+        speed: u8,
     },
     SetRefreshRate {
         profile: PowerProfile,
@@ -59,7 +71,7 @@ pub struct RazerKeyEvent {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IpcResponse {
-    SettingsState(SettingsState),
+    SettingsState(Box<SettingsState>),
     RazerKeyCaptureStarted { after_sequence: u64 },
     CapturedRazerKey(Option<RazerKeyEvent>),
     Ack,
@@ -72,9 +84,22 @@ mod tests {
 
     #[test]
     fn profile_setting_request_round_trips_through_json() {
-        let request = IpcRequest::SetPerfMode {
+        let request = IpcRequest::SetFanSpeed {
             profile: PowerProfile::Battery,
-            mode: PerfMode::Silent,
+            speed: 46,
+        };
+
+        let encoded = serde_json::to_string(&request).expect("request must serialize");
+        let decoded: IpcRequest = serde_json::from_str(&encoded).expect("request must deserialize");
+
+        assert_eq!(decoded, request);
+    }
+
+    #[test]
+    fn settings_window_state_request_round_trips_through_json() {
+        let request = IpcRequest::SetSettingsWindowOpen {
+            open: true,
+            focused: true,
         };
 
         let encoded = serde_json::to_string(&request).expect("request must serialize");

@@ -1,33 +1,44 @@
-use eframe::egui::{self};
-use egui::Context;
-use resvg::{tiny_skia, usvg};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tracing::warn;
+use eframe::egui::{self, Context};
+use std::time::Duration;
 
 use crate::config::ThemeColor;
 use crate::razer::{
     config::PowerProfile,
     enums::{BatteryLimit, PerfMode, RGBEffect},
 };
-use crate::runtime::settings_state::SettingsState;
-use crate::ui::custom_key_map::CustomKeyMap;
-use crate::ui::theme::{
-    SETTINGS_ICON_SIZE, SETTINGS_LOADING_ICON_COLOR, scaled_theme_color32, theme_color32,
-    theme_text_color,
-};
+use crate::ui::theme::{theme_color32, theme_text_color};
 
 mod device_tab;
 mod key_mapping_tab;
+mod settings_model;
 mod settings_tab;
 pub mod store;
 
-const UNSUPPORTED_PERF_MODE_NOTICE_DURATION: Duration = Duration::from_millis(2000);
+pub use settings_model::Settings;
+
+pub const THEME_COLOR_COMMIT_DEBOUNCE: Duration = Duration::from_millis(180);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CustomModeSetting {
+    Cpu,
+    Gpu,
+}
+
+impl CustomModeSetting {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Cpu => "CPU",
+            Self::Gpu => "GPU",
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SettingsCommand {
     SetDefaultMultimediaKeys(bool),
     SetPerfMode(PowerProfile, PerfMode),
+    SetCustomModeConfig { cpu_level: u8, gpu_level: u8 },
+    SetFanSpeed(PowerProfile, u8),
     SetRefreshRate(PowerProfile, u32),
     SetKeyboardBrightness(PowerProfile, u8),
     SetRgbEffect(PowerProfile, RGBEffect),
@@ -38,240 +49,57 @@ pub enum SettingsCommand {
     CancelRazerKeyCapture,
 }
 
-pub struct Settings {
-    pub show: bool,
-    pub update: bool,
-    pub current_tab: String,
-    pub key_map_current_tab: String,
-    pub selected_profile: PowerProfile,
-    pub state: Option<SettingsState>,
-    pub custom_key_map: CustomKeyMap,
-    applied_icon_color: Option<ThemeColor>,
-    pending_commands: Vec<SettingsCommand>,
-    unsupported_perf_mode_notice: Option<UnsupportedPerfModeNotice>,
-}
-
-struct UnsupportedPerfModeNotice {
-    mode: PerfMode,
-    shown_at: Instant,
-}
-
-impl Settings {
-    pub fn new() -> Self {
-        Self {
-            show: false,
-            update: false,
-            current_tab: "Device".to_string(),
-            key_map_current_tab: "Multimedia Keys".to_string(),
-            selected_profile: PowerProfile::Ac,
-            state: None,
-            custom_key_map: CustomKeyMap::new(),
-            applied_icon_color: None,
-            pending_commands: Vec::new(),
-            unsupported_perf_mode_notice: None,
-        }
-    }
-
-    pub fn show(&mut self, state: SettingsState) {
-        self.selected_profile = state.current_profile;
-        self.state = Some(state);
-        self.show = true;
-        self.update = true;
-    }
-
-    pub fn update_state(&mut self, state: SettingsState) {
-        if self
-            .state
-            .as_ref()
-            .is_none_or(|previous| previous.model_name.is_empty())
-        {
-            self.selected_profile = state.current_profile;
-        }
-        self.state = Some(state);
-    }
-
-    pub fn toggle(&mut self, state: SettingsState) {
-        self.show = !self.show;
-        if self.show {
-            self.show(state);
-        }
-    }
-
-    pub fn queue_command(&mut self, command: SettingsCommand) {
-        self.pending_commands.push(command);
-    }
-
-    pub fn drain_commands(&mut self) -> Vec<SettingsCommand> {
-        std::mem::take(&mut self.pending_commands)
-    }
-
-    pub fn apply_captured_razer_key(&mut self, key_code: u8) {
-        let Some(idx) = self.custom_key_map.get_listening_idx() else {
-            return;
-        };
-
-        self.custom_key_map.reset_key_code(key_code);
-        if let Some(row) = self.custom_key_map.razer_keys.get_mut(idx) {
-            row.key_code = key_code;
-            self.custom_key_map.set_listening_idx(None);
-        }
-    }
-
-    pub fn flash_unsupported_perf_mode(&mut self, mode: PerfMode) {
-        self.unsupported_perf_mode_notice = Some(UnsupportedPerfModeNotice {
-            mode,
-            shown_at: Instant::now(),
-        });
-    }
-
-    pub fn unsupported_perf_mode_message(&mut self) -> Option<String> {
-        let notice = self.unsupported_perf_mode_notice.as_ref()?;
-        if notice.shown_at.elapsed() >= UNSUPPORTED_PERF_MODE_NOTICE_DURATION {
-            self.unsupported_perf_mode_notice = None;
-            return None;
-        }
-
-        Some(format!("\"{}\" mode not supported", notice.mode))
-    }
-
-    pub fn unsupported_perf_mode_notice_duration() -> Duration {
-        UNSUPPORTED_PERF_MODE_NOTICE_DURATION
-    }
-
-    // Note: The redundant pub fn run(...) has been removed entirely!
-
-    pub fn ui(&mut self, ctx: &Context) {
-        self.apply_current_theme(ctx);
-
-        // Force focus if the tray requested an update pop-to-front
-        if self.update {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-            self.update = false;
-        }
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            if self.state.is_none() {
-                loading_screen(ui, ctx);
-                return;
-            }
-
-            ui.heading(Self::get_model_name(&self.state));
-            ui.separator();
-
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.current_tab, "Device".into(), "Device");
-                ui.selectable_value(&mut self.current_tab, "Settings".into(), "Settings");
-                ui.selectable_value(&mut self.current_tab, "Key Mapping".into(), "Key Mapping");
-            });
-            ui.separator();
-
-            match self.current_tab.as_str() {
-                "Device" => {
-                    device_tab::show(ui, ctx, self);
-                }
-                "Settings" => {
-                    settings_tab::show(ui, ctx, self);
-                }
-                "Key Mapping" => {
-                    key_mapping_tab::show(ui, ctx, self);
-                }
-                _ => {}
-            }
-        });
-    }
-
-    // Make this public so main.rs can access it on startup
-    pub fn load_settings_icon(color: ThemeColor) -> egui::IconData {
-        Self::load_settings_icon_with_size(color, SETTINGS_ICON_SIZE)
-    }
-
-    pub fn load_settings_icon_with_size(color: ThemeColor, size: u32) -> egui::IconData {
-        let Some(mut pixmap) = tiny_skia::Pixmap::new(size, size) else {
-            warn!("Failed to allocate settings icon pixmap; using fallback icon");
-            return Self::fallback_settings_icon(size, color);
-        };
-        let opt = usvg::Options::default();
-        let hex_color = color.to_hex_string();
-
-        let colored_svg = include_str!("../../../assets/settings_icon.svg")
-            .replace("#FFFFFF", &hex_color)
-            .replace("#ffffff", &hex_color.to_lowercase());
-        let tree = match usvg::Tree::from_str(&colored_svg, &opt) {
-            Ok(tree) => tree,
-            Err(error) => {
-                warn!(
-                    ?error,
-                    "Failed to parse settings icon SVG; using fallback icon"
-                );
-                return Self::fallback_settings_icon(size, color);
-            }
-        };
-
-        let svg_size = tree.size();
-        let scale = (size as f32 / svg_size.width()).min(size as f32 / svg_size.height());
-
-        let tx = (size as f32 - (svg_size.width() * scale)) / 2.0;
-        let ty = (size as f32 - (svg_size.height() * scale)) / 2.0;
-        let transform = tiny_skia::Transform::from_scale(scale, scale).post_translate(tx, ty);
-
-        resvg::render(&tree, transform, &mut pixmap.as_mut());
-        let rgba = pixmap.take();
-
-        egui::IconData {
-            rgba,
-            width: size,
-            height: size,
-        }
-    }
-
-    fn fallback_settings_icon(size: u32, color: ThemeColor) -> egui::IconData {
-        let mut rgba = Vec::with_capacity((size * size * 4) as usize);
-        for _ in 0..(size * size) {
-            rgba.extend_from_slice(&[color.r, color.g, color.b, 0xff]);
-        }
-        egui::IconData {
-            rgba,
-            width: size,
-            height: size,
-        }
-    }
-
-    fn get_model_name(state: &Option<SettingsState>) -> String {
-        if let Some(state) = state {
-            state.model_name.clone()
-        } else {
-            // Fallback safely if config isn't populated yet
-            "Blade Laptop".to_string()
-        }
-    }
-
-    fn apply_current_theme(&mut self, ctx: &Context) {
-        let color = self
-            .state
-            .as_ref()
-            .map(|state| state.theme_color)
-            .unwrap_or(SETTINGS_LOADING_ICON_COLOR);
-
-        apply_settings_theme(ctx, color);
-
-        if self.applied_icon_color == Some(color) {
-            return;
-        }
-
-        ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(Arc::new(
-            Self::load_settings_icon(color),
-        ))));
-        self.applied_icon_color = Some(color);
+pub fn custom_mode_level_name(level: u8) -> &'static str {
+    match level {
+        0 => "Low",
+        1 => "Medium",
+        2 => "High",
+        3 => "Max",
+        _ => "Unknown",
     }
 }
 
-fn loading_screen(ui: &mut egui::Ui, ctx: &Context) {
+pub(super) fn primary_tab(ui: &mut egui::Ui, selected_tab: &mut String, label: &str) {
+    let selected = selected_tab == label;
+    let font = egui::FontId::proportional(16.0);
+    let text_color = if selected {
+        ui.visuals().selection.bg_fill
+    } else {
+        ui.visuals().widgets.inactive.fg_stroke.color
+    };
+    let text_width = ui.fonts(|fonts| {
+        fonts
+            .layout_no_wrap(label.to_owned(), font.clone(), text_color)
+            .size()
+            .x
+    });
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(text_width + 14.0, 30.0), egui::Sense::click());
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        label,
+        font,
+        text_color,
+    );
+    if selected {
+        ui.painter().line_segment(
+            [
+                egui::pos2(rect.left() + 3.0, rect.bottom() - 2.0),
+                egui::pos2(rect.right() - 3.0, rect.bottom() - 2.0),
+            ],
+            egui::Stroke::new(3.0_f32, ui.visuals().selection.bg_fill),
+        );
+    }
+    if response.clicked() {
+        *selected_tab = label.to_owned();
+    }
+}
+
+pub(super) fn loading_screen(ui: &mut egui::Ui, ctx: &Context) {
     ctx.request_repaint_after(Duration::from_millis(16));
-
-    let available_size = ui.available_size();
-
     ui.allocate_ui_with_layout(
-        available_size,
+        ui.available_size(),
         egui::Layout::centered_and_justified(egui::Direction::TopDown),
         |ui| {
             ui.add(egui::Spinner::new().size(50.0));
@@ -279,115 +107,15 @@ fn loading_screen(ui: &mut egui::Ui, ctx: &Context) {
     );
 }
 
-fn apply_settings_theme(ctx: &Context, color: ThemeColor) {
-    let accent = theme_color32(color);
-    let accent_soft = scaled_theme_color32(color, 0.45);
-    let accent_hover = scaled_theme_color32(color, 0.65);
-    let selected_text = theme_text_color(color);
-
+pub(super) fn apply_settings_theme(ctx: &Context, color: ThemeColor) {
     let mut style = (*ctx.style()).clone();
-    style.visuals.selection.bg_fill = accent;
-    style.visuals.selection.stroke.color = selected_text;
-    style.visuals.hyperlink_color = accent;
-    style.visuals.widgets.hovered.bg_fill = accent_soft;
-    style.visuals.widgets.hovered.bg_stroke.color = accent;
-    style.visuals.widgets.active.bg_fill = accent_hover;
-    style.visuals.widgets.active.bg_stroke.color = accent;
-    style.visuals.widgets.open.bg_fill = accent_soft;
-    style.visuals.widgets.open.bg_stroke.color = accent;
+    style.spacing.item_spacing = egui::vec2(7.0, 5.0);
+    style.spacing.button_padding = egui::vec2(9.0, 3.0);
+    style.spacing.slider_width = 360.0;
+    style.spacing.slider_rail_height = 8.0;
+    style.visuals.selection.bg_fill = theme_color32(color);
+    style.visuals.selection.stroke.color = theme_text_color(color);
+    style.visuals.slider_trailing_fill = true;
+    style.visuals.hyperlink_color = theme_color32(color);
     ctx.set_style(style);
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::razer::config::AppConfig;
-
-    #[test]
-    fn settings_icon_renderer_honors_requested_native_size() {
-        let icon = Settings::load_settings_icon_with_size(ThemeColor::new(0, 128, 255), 32);
-
-        assert_eq!(icon.width, 32);
-        assert_eq!(icon.height, 32);
-        assert_eq!(icon.rgba.len(), 32 * 32 * 4);
-    }
-
-    #[test]
-    fn settings_icon_renderer_tints_visible_pixels_with_theme_color() {
-        let icon = Settings::load_settings_icon_with_size(ThemeColor::new(255, 0, 0), 64);
-
-        let red_pixels = icon
-            .rgba
-            .chunks_exact(4)
-            .filter(|pixel| pixel[3] > 0 && pixel[0] > pixel[1] && pixel[0] > pixel[2])
-            .count();
-
-        assert!(
-            red_pixels > 0,
-            "settings icon should contain red themed pixels"
-        );
-    }
-
-    #[test]
-    fn unsupported_perf_mode_notice_mentions_selected_mode() {
-        let mut settings = Settings::new();
-
-        settings.flash_unsupported_perf_mode(PerfMode::Performance);
-
-        assert_eq!(
-            settings.unsupported_perf_mode_message(),
-            Some("\"Performance\" mode not supported".to_string())
-        );
-    }
-
-    #[test]
-    fn unsupported_perf_mode_notice_expires() {
-        let mut settings = Settings::new();
-        settings.unsupported_perf_mode_notice = Some(UnsupportedPerfModeNotice {
-            mode: PerfMode::Turbo,
-            shown_at: Instant::now() - UNSUPPORTED_PERF_MODE_NOTICE_DURATION,
-        });
-
-        assert_eq!(settings.unsupported_perf_mode_message(), None);
-        assert!(settings.unsupported_perf_mode_notice.is_none());
-    }
-
-    #[test]
-    fn update_state_reflects_runtime_perf_mode_changes() {
-        let mut settings = Settings::new();
-        let mut initial = SettingsState::from(AppConfig::default());
-        initial.ac_profile.perf_mode = PerfMode::Silent;
-        settings.show(initial);
-
-        let mut refreshed = SettingsState::from(AppConfig::default());
-        refreshed.ac_profile.perf_mode = PerfMode::Turbo;
-        settings.update_state(refreshed);
-
-        assert_eq!(
-            settings
-                .state
-                .as_ref()
-                .expect("settings state should be present")
-                .ac_profile
-                .perf_mode,
-            PerfMode::Turbo
-        );
-    }
-
-    #[test]
-    fn update_state_preserves_user_selected_profile_after_runtime_refresh() {
-        let mut settings = Settings::new();
-        settings.show(SettingsState::from(AppConfig::default()));
-        settings.selected_profile = PowerProfile::Battery;
-
-        settings.update_state(SettingsState::from(AppConfig::default()));
-
-        assert_eq!(settings.selected_profile, PowerProfile::Battery);
-    }
 }

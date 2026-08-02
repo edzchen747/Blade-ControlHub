@@ -90,7 +90,7 @@ pub const TRAY_ICON_SCALE_FACTOR: f32 = 1.2;
 // ── Settings Window Layout ───────────────────────────────────────────────────
 
 /// Fixed inner size of the settings window.
-pub const SETTINGS_WINDOW_SIZE: Vec2 = Vec2::new(450.0, 600.0);
+pub const SETTINGS_WINDOW_SIZE: Vec2 = Vec2::new(745.0, 660.0);
 
 /// Ratio of screen height used for bottom-right padding of the settings window.
 pub const SETTINGS_PADDING_RATIO: f32 = 0.1;

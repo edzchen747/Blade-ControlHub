@@ -1,5 +1,6 @@
 use crate::{
     razer::enums::{BatteryLimit, LidLogoMode, PerfMode, RGBEffect},
+    runtime::debug_mode,
     ui::osd_controller::OsdParams,
 };
 
@@ -31,7 +32,12 @@ impl OsdEvent {
     pub fn as_params(&self) -> Option<OsdParams> {
         match self {
             OsdEvent::Startup => Some(OsdParams {
-                label: "ControlHub".to_string(),
+                label: if debug_mode::is_enabled() {
+                    "Debug"
+                } else {
+                    "ControlHub"
+                }
+                .to_string(),
                 icon: Some(OsdIcon::RazerControlHub),
                 total_steps: 0,
                 active_steps: 0,
@@ -149,10 +155,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn startup_event_maps_to_canonical_controlhub_osd() {
+    fn startup_event_label_reflects_debug_mode() {
         let params = OsdEvent::Startup.as_params().expect("startup has OSD");
 
-        assert_eq!(params.label, "ControlHub");
+        assert_eq!(
+            params.label,
+            if debug_mode::is_enabled() {
+                "Debug"
+            } else {
+                "ControlHub"
+            }
+        );
         assert_eq!(params.icon, Some(OsdIcon::RazerControlHub));
         assert_eq!(params.total_steps, 0);
         assert_eq!(params.active_steps, 0);
