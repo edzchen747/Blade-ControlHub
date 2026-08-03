@@ -3,11 +3,11 @@
 //! These tests use `MockDeviceController` to exercise pipelines that would
 //! otherwise require real hardware.
 
-mod mock_device;
+mod common;
 
-use crate::hal::DeviceController;
-use crate::razer::enums::{BATTERY_LIMITS, PERF_MODES, PerfMode, RGB_EFFECTS};
-use mock_device::MockDeviceController;
+use blade_controlhub::hal::DeviceController;
+use blade_controlhub::razer::enums::{BATTERY_LIMITS, PERF_MODES, PerfMode, RGB_EFFECTS};
+use common::mock_device::MockDeviceController;
 
 // ── MockDeviceController wiring ──────────────────────────────────────────────
 

@@ -1,7 +1,7 @@
 //! Tests for `CycleState<T>` generic cyclic iterator.
 
-use crate::core::shared_state::SHIFT_PRESSED;
-use crate::razer::config::CycleState;
+use blade_controlhub::core::shared_state::SHIFT_PRESSED;
+use blade_controlhub::razer::config::CycleState;
 use std::sync::atomic::Ordering;
 
 // ── Basic initialization ────────────────────────────────────────────────────

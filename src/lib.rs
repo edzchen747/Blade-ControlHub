@@ -8,6 +8,3 @@ pub mod runtime;
 pub mod ui;
 pub mod utils;
 pub mod win;
-
-#[cfg(test)]
-mod tests;

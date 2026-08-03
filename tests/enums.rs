@@ -1,6 +1,6 @@
 //! Tests for `From<u8>` implementations on Razer enums.
 
-use crate::razer::enums::{BatteryLimit, PerfMode, RGBEffect};
+use blade_controlhub::razer::enums::{BatteryLimit, PerfMode, RGBEffect};
 
 // ── PerfMode ─────────────────────────────────────────────────────────────────
 
@@ -43,7 +43,7 @@ fn perf_mode_from_invalid_is_unknown() {
 fn perf_mode_from_255_is_experimental_unsupported() {
     assert_eq!(
         PerfMode::from(u8::MAX),
-        if crate::runtime::debug_mode::is_enabled() {
+        if blade_controlhub::runtime::debug_mode::is_enabled() {
             PerfMode::Unsupported
         } else {
             PerfMode::Unknown

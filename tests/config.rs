@@ -1,8 +1,8 @@
 //! Tests for `AppConfig` default values, JSON deserialization/serialization,
 //! and `refresh_cycle_items()`.
 
-use crate::razer::config::{AppConfig, PowerProfile, allowed_perf_modes};
-use crate::razer::enums::PerfMode;
+use blade_controlhub::razer::config::{AppConfig, PowerProfile, allowed_perf_modes};
+use blade_controlhub::razer::enums::PerfMode;
 
 // ── Default values ───────────────────────────────────────────────────────────
 
