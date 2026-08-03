@@ -50,7 +50,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     KeyCombo::new(&[Key::Unknown(173)]).trigger();
                 }),
                 vec![
-                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
+                    Source::IsXOR(&PRIMARY_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),
@@ -62,7 +62,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     KeyCombo::new(&[Key::Unknown(174)]).trigger();
                 }),
                 vec![
-                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
+                    Source::IsXOR(&PRIMARY_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),
@@ -74,7 +74,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     KeyCombo::new(&[Key::Unknown(175)]).trigger();
                 }),
                 vec![
-                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
+                    Source::IsXOR(&PRIMARY_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),
@@ -86,7 +86,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     KeyCombo::new(&[Key::MetaLeft, Key::KeyP]).trigger();
                 }),
                 vec![
-                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
+                    Source::IsXOR(&PRIMARY_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),
@@ -98,7 +98,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     KeyCombo::new(&[Key::Unknown(177)]).trigger();
                 }),
                 vec![
-                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
+                    Source::IsXOR(&PRIMARY_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),
@@ -110,7 +110,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     KeyCombo::new(&[Key::Unknown(179)]).trigger();
                 }),
                 vec![
-                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
+                    Source::IsXOR(&PRIMARY_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),
@@ -122,7 +122,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     KeyCombo::new(&[Key::Unknown(176)]).trigger();
                 }),
                 vec![
-                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
+                    Source::IsXOR(&PRIMARY_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),
@@ -134,7 +134,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     device().adjust_screen_brightness(-10);
                 }),
                 vec![
-                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
+                    Source::IsXOR(&PRIMARY_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),
@@ -146,7 +146,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     device().adjust_screen_brightness(10);
                 }),
                 vec![
-                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
+                    Source::IsXOR(&PRIMARY_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),
@@ -158,7 +158,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     device().keyboard_light_down();
                 }),
                 vec![
-                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
+                    Source::IsXOR(&PRIMARY_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),
@@ -170,7 +170,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     device().keyboard_light_up();
                 }),
                 vec![
-                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
+                    Source::IsXOR(&PRIMARY_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),
@@ -182,7 +182,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     KeyCombo::new(&[Key::PrintScreen]).trigger();
                 }),
                 vec![
-                    Source::IsXOR(&DEFAULT_MULTIMEDIA_KEYS, &FN_PRESSED),
+                    Source::IsXOR(&PRIMARY_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
             ),

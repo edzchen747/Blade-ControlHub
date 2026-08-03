@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering;
 
-use crate::core::shared_state::{ALT_PRESSED, DEFAULT_MULTIMEDIA_KEYS, FN_PRESSED};
+use crate::core::shared_state::{ALT_PRESSED, FN_PRESSED, PRIMARY_MULTIMEDIA_KEYS};
 use crate::razer::device_handle::device;
 use crate::win::audio::{self, AudioType};
 use crate::win::input::trackpad::toggle_trackpad;

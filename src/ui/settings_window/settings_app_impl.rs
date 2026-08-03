@@ -69,9 +69,9 @@ impl SettingsApp {
 
         for command in commands {
             match command {
-                SettingsCommand::SetDefaultMultimediaKeys(enabled) => {
-                    if let Err(error) = client::set_default_multimedia_keys(enabled) {
-                        warn!(%error, "Failed to update default multimedia key setting");
+                SettingsCommand::SetPrimaryMultimediaKeys(enabled) => {
+                    if let Err(error) = client::set_primary_multimedia_keys(enabled) {
+                        warn!(%error, "Failed to update primary multimedia key setting");
                     } else {
                         command_sent = true;
                     }
@@ -230,8 +230,12 @@ impl SettingsApp {
                 } => {
                     self.razer_key_capture_cancel = None;
                     self.active_razer_key_capture_id = None;
-                    self.settings
+                    let duplicate = self
+                        .settings
                         .with_settings(|settings| settings.apply_captured_razer_key(key_code));
+                    if duplicate {
+                        ctx.request_repaint_after(Settings::duplicate_key_notice_duration());
+                    }
                     ctx.request_repaint();
                 }
             }

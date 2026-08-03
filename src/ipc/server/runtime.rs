@@ -139,7 +139,7 @@ fn ipc_request_kind(request: &IpcRequest) -> &'static str {
     match request {
         IpcRequest::GetSettingsState => "GetSettingsState",
         IpcRequest::SetSettingsWindowOpen { .. } => "SetSettingsWindowOpen",
-        IpcRequest::SetDefaultMultimediaKeys { .. } => "SetDefaultMultimediaKeys",
+        IpcRequest::SetPrimaryMultimediaKeys { .. } => "SetPrimaryMultimediaKeys",
         IpcRequest::SetPerfMode { .. } => "SetPerfMode",
         IpcRequest::SetCustomModeConfig { .. } => "SetCustomModeConfig",
         IpcRequest::SetFanSpeed { .. } => "SetFanSpeed",
@@ -167,8 +167,8 @@ fn dispatch_request(request: IpcRequest, device: &DeviceHandle) -> IpcResponse {
             crate::ui::app::set_settings_window_state(open, focused);
             IpcResponse::Ack
         }
-        IpcRequest::SetDefaultMultimediaKeys { enabled } => {
-            ack(device.set_default_multimedia_keys(enabled))
+        IpcRequest::SetPrimaryMultimediaKeys { enabled } => {
+            ack(device.set_primary_multimedia_keys(enabled))
         }
         IpcRequest::SetPerfMode { profile, mode } => ack(device.set_perf_mode(profile, mode)),
         IpcRequest::SetCustomModeConfig {

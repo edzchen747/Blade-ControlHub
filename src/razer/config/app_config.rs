@@ -15,7 +15,8 @@ pub struct AppConfig {
     power_state: DeviceState,
     battery_state: DeviceState,
     pub custom_mode_config: crate::razer::config::CustomModeConfig,
-    pub default_multimedia_keys: bool,
+    #[serde(alias = "default_multimedia_keys")]
+    pub primary_multimedia_keys: bool,
     pub theme_color: ThemeColor,
     pub keyboard_width: u8,
 }
@@ -28,7 +29,7 @@ impl Default for AppConfig {
             power_state: DeviceState::for_profile(PowerProfile::Ac),
             battery_state: DeviceState::for_profile(PowerProfile::Battery),
             custom_mode_config: Default::default(),
-            default_multimedia_keys: false,
+            primary_multimedia_keys: false,
             theme_color: ThemeColor::default(),
             keyboard_width: 0,
         }

@@ -14,7 +14,7 @@ pub fn show(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Setti
         .show(ui, |ui| {
             battery_limit_section(ui, ctx, settings);
             ui.add_space(5.0);
-            default_func_key_section(ui, ctx, settings);
+            primary_func_key_section(ui, ctx, settings);
             ui.add_space(5.0);
             theme_section(ui, ctx, settings);
         });
@@ -59,27 +59,27 @@ fn battery_limit_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut 
     });
 }
 
-fn default_func_key_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
-    section(ui, "Default Function Key Behaviour", |ui| {
-        default_func_key_switcher(ui, ctx, settings);
+fn primary_func_key_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
+    section(ui, "Primary Function Key Behaviour", |ui| {
+        primary_func_key_switcher(ui, ctx, settings);
     });
 }
 
-pub(super) fn default_func_key_switcher(
+pub(super) fn primary_func_key_switcher(
     ui: &mut eframe::egui::Ui,
     ctx: &egui::Context,
     settings: &mut Settings,
 ) {
-    let current_default = default_multimedia_keys(settings);
-    let mut selected_default = current_default;
+    let current_primary = primary_multimedia_keys(settings);
+    let mut selected_primary = current_primary;
 
     ui.horizontal(|ui| {
-        ui.selectable_value(&mut selected_default, false, "Function");
-        ui.selectable_value(&mut selected_default, true, "Multimedia");
+        ui.selectable_value(&mut selected_primary, false, "Function");
+        ui.selectable_value(&mut selected_primary, true, "Multimedia");
     });
 
-    if selected_default != current_default {
-        set_default_multimedia_keys(settings, selected_default);
+    if selected_primary != current_primary {
+        set_primary_multimedia_keys(settings, selected_primary);
         ctx.request_repaint_of(egui::ViewportId::ROOT);
     }
 }
@@ -127,11 +127,11 @@ fn section(ui: &mut egui::Ui, title: &str, add_contents: impl FnOnce(&mut egui::
         });
 }
 
-fn default_multimedia_keys(settings: &Settings) -> bool {
+fn primary_multimedia_keys(settings: &Settings) -> bool {
     settings
         .state
         .as_ref()
-        .map(|state| state.default_multimedia_keys)
+        .map(|state| state.primary_multimedia_keys)
         .unwrap_or_default()
 }
 
@@ -143,11 +143,11 @@ fn theme_color(settings: &Settings) -> ThemeColor {
         .unwrap_or_default()
 }
 
-fn set_default_multimedia_keys(settings: &mut Settings, enabled: bool) {
+fn set_primary_multimedia_keys(settings: &mut Settings, enabled: bool) {
     if let Some(state) = settings.state.as_mut() {
-        state.default_multimedia_keys = enabled;
+        state.primary_multimedia_keys = enabled;
         settings.update = true;
-        settings.queue_command(SettingsCommand::SetDefaultMultimediaKeys(enabled));
+        settings.queue_command(SettingsCommand::SetPrimaryMultimediaKeys(enabled));
     }
 }
 
@@ -190,17 +190,17 @@ mod tests {
     use crate::runtime::settings_state::SettingsState;
 
     #[test]
-    fn set_default_multimedia_keys_updates_settings_state() {
+    fn set_primary_multimedia_keys_updates_settings_state() {
         let mut settings = Settings::new();
         settings.show(SettingsState::from(AppConfig::default()));
 
-        set_default_multimedia_keys(&mut settings, true);
+        set_primary_multimedia_keys(&mut settings, true);
 
-        assert!(default_multimedia_keys(&settings));
+        assert!(primary_multimedia_keys(&settings));
         assert!(settings.update);
         assert_eq!(
             settings.drain_commands(),
-            vec![SettingsCommand::SetDefaultMultimediaKeys(true)]
+            vec![SettingsCommand::SetPrimaryMultimediaKeys(true)]
         );
     }
 

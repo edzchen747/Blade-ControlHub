@@ -13,7 +13,7 @@ pub static IS_PLUGGED_IN: AtomicBool = AtomicBool::new(false);
 pub static FN_PRESSED: AtomicBool = AtomicBool::new(false);
 pub static ALT_PRESSED: AtomicBool = AtomicBool::new(false);
 pub static SHIFT_PRESSED: AtomicBool = AtomicBool::new(false);
-pub static DEFAULT_MULTIMEDIA_KEYS: AtomicBool = AtomicBool::new(false);
+pub static PRIMARY_MULTIMEDIA_KEYS: AtomicBool = AtomicBool::new(false);
 
 // ── UI State ─────────────────────────────────────────────────────────────────
 pub static KEYMAP_LISTENING: AtomicBool = AtomicBool::new(false);

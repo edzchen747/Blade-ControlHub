@@ -20,7 +20,7 @@ impl<'a> Executer<'a> {
             // --- System Performance & Power ---
             let _ = self.perf().set_perf_mode(state.perf_mode.value());
             // --- Function / Multimedia Key Mapping ---
-            if self.app_config.default_multimedia_keys {
+            if self.app_config.primary_multimedia_keys {
                 self.kb().enable_multimedia_keys();
             } else {
                 self.kb().restore_fn_keys();
@@ -70,6 +70,7 @@ impl<'a> Executer<'a> {
     }
 
     fn sleep(&mut self) -> bool {
+        AmbientEffect::stop();
         self.kb().set_keyboard_color(0, 0, 0, 0);
         self.kb().keyboard_control(false);
         let _ = command(self.device, 0x030a, &[5, 0], None); // reset keyboard effect
@@ -77,7 +78,6 @@ impl<'a> Executer<'a> {
         let _ = command(self.device, 0x0300, &[1, 38, 0], None); // set underglow brightness to 0
         let _ = command(self.device, 0x0303, &[1, 38, 0], None); // turn off underglow brightness
         reset_perf_mode_for_sleep(self.device);
-        AmbientEffect::stop();
         true
     }
 

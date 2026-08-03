@@ -16,7 +16,7 @@ pub enum IpcRequest {
         open: bool,
         focused: bool,
     },
-    SetDefaultMultimediaKeys {
+    SetPrimaryMultimediaKeys {
         enabled: bool,
     },
     SetPerfMode {

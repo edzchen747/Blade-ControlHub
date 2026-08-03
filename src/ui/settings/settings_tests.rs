@@ -105,3 +105,52 @@ fn runtime_refresh_does_not_overwrite_a_pending_theme_preview() {
         Some(preview)
     );
 }
+
+#[test]
+fn captured_hypershift_duplicate_preserves_existing_assignments_and_flashes_an_error() {
+    let mut settings = Settings::new();
+    settings
+        .custom_key_map
+        .hypershift_keys
+        .push(Default::default());
+    settings.custom_key_map.hypershift_keys[0].key_code = Some(0x41);
+    settings.custom_key_map.hypershift_keys[1].key_code = Some(0x42);
+    settings
+        .custom_key_map
+        .set_hypershift_listening_idx(Some(1));
+
+    assert!(settings.apply_captured_hypershift_key(0x41));
+
+    assert_eq!(
+        settings.custom_key_map.hypershift_keys[0].key_code,
+        Some(0x41)
+    );
+    assert_eq!(
+        settings.custom_key_map.hypershift_keys[1].key_code,
+        Some(0x42)
+    );
+    assert_eq!(settings.custom_key_map.hypershift_listening_idx(), None);
+    assert_eq!(
+        settings.duplicate_key_error_message(),
+        Some("This key is already assigned")
+    );
+}
+
+#[test]
+fn captured_razer_duplicate_preserves_existing_assignments_and_flashes_an_error() {
+    let mut settings = Settings::new();
+    settings.custom_key_map.razer_keys.push(Default::default());
+    settings.custom_key_map.razer_keys[0].key_code = 0x41;
+    settings.custom_key_map.razer_keys[1].key_code = 0x42;
+    settings.custom_key_map.set_listening_idx(Some(1));
+
+    assert!(settings.apply_captured_razer_key(0x41));
+
+    assert_eq!(settings.custom_key_map.razer_keys[0].key_code, 0x41);
+    assert_eq!(settings.custom_key_map.razer_keys[1].key_code, 0x42);
+    assert_eq!(settings.custom_key_map.get_listening_idx(), None);
+    assert_eq!(
+        settings.duplicate_key_error_message(),
+        Some("This key is already assigned")
+    );
+}

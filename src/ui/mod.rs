@@ -44,7 +44,7 @@ pub mod prelude {
     pub use crate::ui::app_events::{AppEvent, OsdEvent};
 
     // Key mapping domain model
-    pub use crate::ui::custom_key_map::{CustomKeyMap, FuncKeyMap, RazerKeyMap};
+    pub use crate::ui::custom_key_map::{CustomKeyMap, HypershiftKeyMap, RazerKeyMap};
 
     // Event routing
     pub use crate::ui::event_dispatcher::EventDispatcher;

@@ -35,7 +35,7 @@ impl CustomModeSetting {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SettingsCommand {
-    SetDefaultMultimediaKeys(bool),
+    SetPrimaryMultimediaKeys(bool),
     SetPerfMode(PowerProfile, PerfMode),
     SetCustomModeConfig { cpu_level: u8, gpu_level: u8 },
     SetFanSpeed(PowerProfile, u8),

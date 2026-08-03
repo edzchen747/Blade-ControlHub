@@ -2,7 +2,7 @@ use librazer::device::Device;
 
 use crate::{
     config::persist_config,
-    core::shared_state::DEFAULT_MULTIMEDIA_KEYS,
+    core::shared_state::PRIMARY_MULTIMEDIA_KEYS,
     razer::{
         config::AppConfig,
         device_handle::device,
@@ -60,29 +60,29 @@ impl<'a> KeyboardHandler<'a> {
             .unwrap_or(0)
     }
 
-    pub fn get_default_multimedia_keys(&self) -> bool {
-        let current_default = self.app_config.default_multimedia_keys;
-        DEFAULT_MULTIMEDIA_KEYS.store(current_default, Ordering::SeqCst);
-        current_default
+    pub fn get_primary_multimedia_keys(&self) -> bool {
+        let primary_multimedia_keys = self.app_config.primary_multimedia_keys;
+        PRIMARY_MULTIMEDIA_KEYS.store(primary_multimedia_keys, Ordering::SeqCst);
+        primary_multimedia_keys
     }
 
-    pub fn toggle_default_multimedia_keys(&mut self) -> bool {
-        let current_default = self.app_config.default_multimedia_keys;
-        self.set_default_multimedia_keys(!current_default)
+    pub fn toggle_primary_multimedia_keys(&mut self) -> bool {
+        let primary_multimedia_keys = self.app_config.primary_multimedia_keys;
+        self.set_primary_multimedia_keys(!primary_multimedia_keys)
     }
 
-    pub fn set_default_multimedia_keys(&mut self, enabled: bool) -> bool {
-        if self.app_config.default_multimedia_keys == enabled {
-            return self.get_default_multimedia_keys();
+    pub fn set_primary_multimedia_keys(&mut self, enabled: bool) -> bool {
+        if self.app_config.primary_multimedia_keys == enabled {
+            return self.get_primary_multimedia_keys();
         }
 
-        self.app_config.default_multimedia_keys = enabled;
+        self.app_config.primary_multimedia_keys = enabled;
         match enabled {
             true => self.enable_multimedia_keys(),
             false => self.restore_fn_keys(),
         }
         self.persist_config();
-        self.get_default_multimedia_keys()
+        self.get_primary_multimedia_keys()
     }
 
     // ── RGB & Lighting ──────────────────────────────────────────────────

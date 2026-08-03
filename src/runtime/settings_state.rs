@@ -29,7 +29,7 @@ pub struct SettingsState {
     pub battery_limit: BatteryLimit,
     pub battery_limits: Vec<BatteryLimit>,
     pub fan_speed_limits: FanSpeedLimits,
-    pub default_multimedia_keys: bool,
+    pub primary_multimedia_keys: bool,
     pub theme_color: ThemeColor,
 }
 
@@ -76,7 +76,7 @@ impl SettingsState {
             battery_limit,
             battery_limits: BATTERY_LIMITS.to_vec(),
             fan_speed_limits,
-            default_multimedia_keys: config.default_multimedia_keys,
+            primary_multimedia_keys: config.primary_multimedia_keys,
             theme_color: config.theme_color,
         }
     }
@@ -141,7 +141,7 @@ mod tests {
         let mut config = AppConfig::default();
         config.profile_mut(PowerProfile::Ac).key_lvl = 204;
         config.profile_mut(PowerProfile::Battery).key_lvl = 51;
-        config.default_multimedia_keys = true;
+        config.primary_multimedia_keys = true;
 
         let state = SettingsState::from_config(config, vec![60, 240]);
 
@@ -150,7 +150,7 @@ mod tests {
         assert_eq!(state.ac_profile.supported_refresh_rates, vec![60, 240]);
         assert_eq!(state.battery_profile.supported_refresh_rates, vec![60, 240]);
         assert_eq!(state.fan_speed_limits, FanSpeedLimits::default());
-        assert!(state.default_multimedia_keys);
+        assert!(state.primary_multimedia_keys);
         assert_eq!(state.theme_color, ThemeColor::default());
     }
 

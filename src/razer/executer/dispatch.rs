@@ -63,14 +63,14 @@ impl<'a> Executer<'a> {
             DeviceCmd::GetPerfMode(tx) => {
                 let _ = tx.send(self.perf().get_perf_mode());
             }
-            DeviceCmd::GetDefaultMultimediaKeys(tx) => {
-                let _ = tx.send(self.kb().get_default_multimedia_keys());
+            DeviceCmd::GetPrimaryMultimediaKeys(tx) => {
+                let _ = tx.send(self.kb().get_primary_multimedia_keys());
             }
-            DeviceCmd::ToggleDefaultMultimediaKeys(tx) => {
-                let _ = tx.send(self.kb().toggle_default_multimedia_keys());
+            DeviceCmd::TogglePrimaryMultimediaKeys(tx) => {
+                let _ = tx.send(self.kb().toggle_primary_multimedia_keys());
             }
-            DeviceCmd::SetDefaultMultimediaKeys(enabled, tx) => {
-                let _ = tx.send(self.set_default_multimedia_keys(enabled));
+            DeviceCmd::SetPrimaryMultimediaKeys(enabled, tx) => {
+                let _ = tx.send(self.set_primary_multimedia_keys(enabled));
             }
             DeviceCmd::GetConfig(tx) => {
                 let _ = tx.send(self.app_config.clone());

@@ -4,9 +4,10 @@
 /// that can be shared across UI components without coupling to egui.
 
 #[derive(Default, Clone)]
-#[allow(dead_code)]
-pub struct FuncKeyMap {
-    pub key: String,
+pub struct HypershiftKeyMap {
+    /// Windows virtual-key code for the ordinary keyboard key selected in settings.
+    pub key_code: Option<u8>,
+    /// Reserved for the action editor, which has not been implemented yet.
     pub action: String,
 }
 
@@ -17,40 +18,54 @@ pub struct RazerKeyMap {
     pub action: String,
 }
 
-/// The custom key mapping state, holding both function key and Razer special key rows.
+/// The custom key mapping state, holding both Hypershift and Razer special key rows.
 #[derive(Default)]
 pub struct CustomKeyMap {
-    #[allow(dead_code)]
-    pub func_keys: Vec<FuncKeyMap>,
+    pub hypershift_keys: Vec<HypershiftKeyMap>,
     pub razer_keys: Vec<RazerKeyMap>,
-    listening_idx: Option<usize>,
+    razer_listening_idx: Option<usize>,
+    hypershift_listening_idx: Option<usize>,
     pub special_key: Option<u8>,
 }
 
 impl CustomKeyMap {
     pub fn new() -> Self {
         Self {
-            func_keys: vec![FuncKeyMap::default()],
+            hypershift_keys: vec![HypershiftKeyMap::default()],
             razer_keys: vec![RazerKeyMap::default()],
-            listening_idx: None,
+            razer_listening_idx: None,
+            hypershift_listening_idx: None,
             special_key: None,
         }
     }
 
-    /// Resets a key code in all rows if it's already assigned (prevent duplicates).
-    pub fn reset_key_code(&mut self, key_code: u8) {
-        for row in self.razer_keys.iter_mut() {
-            if row.key_code == key_code {
-                row.key_code = 0;
-            }
-        }
+    pub fn razer_key_code_is_assigned_elsewhere(&self, row_idx: usize, key_code: u8) -> bool {
+        self.razer_keys
+            .iter()
+            .enumerate()
+            .any(|(idx, row)| idx != row_idx && row.key_code == key_code)
     }
 
     pub fn set_listening_idx(&mut self, idx: Option<usize>) {
-        self.listening_idx = idx;
+        self.razer_listening_idx = idx;
     }
 
     pub fn get_listening_idx(&self) -> Option<usize> {
-        self.listening_idx
+        self.razer_listening_idx
+    }
+
+    pub fn hypershift_key_code_is_assigned_elsewhere(&self, row_idx: usize, key_code: u8) -> bool {
+        self.hypershift_keys
+            .iter()
+            .enumerate()
+            .any(|(idx, row)| idx != row_idx && row.key_code == Some(key_code))
+    }
+
+    pub fn set_hypershift_listening_idx(&mut self, idx: Option<usize>) {
+        self.hypershift_listening_idx = idx;
+    }
+
+    pub fn hypershift_listening_idx(&self) -> Option<usize> {
+        self.hypershift_listening_idx
     }
 }

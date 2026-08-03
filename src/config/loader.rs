@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering;
 
-use crate::core::shared_state::DEFAULT_MULTIMEDIA_KEYS;
+use crate::core::shared_state::PRIMARY_MULTIMEDIA_KEYS;
 use crate::razer::config::AppConfig;
 
 use super::constants::CONFIG_PATH;
@@ -43,7 +43,7 @@ fn finalize_config(mut app_config: AppConfig, device_info: &Descriptor) -> AppCo
         device_info.name.to_string(),
     );
 
-    DEFAULT_MULTIMEDIA_KEYS.store(app_config.default_multimedia_keys, Ordering::SeqCst);
+    PRIMARY_MULTIMEDIA_KEYS.store(app_config.primary_multimedia_keys, Ordering::SeqCst);
 
     app_config
 }
@@ -66,7 +66,7 @@ mod tests {
         let json = r#"{
             "model_pid": "0x0000",
             "model_name": "Stale Model",
-            "default_multimedia_keys": true
+            "primary_multimedia_keys": true
         }"#;
         let config: AppConfig = serde_json::from_str(json).expect("test JSON must parse");
 
@@ -75,7 +75,7 @@ mod tests {
 
         assert_eq!(serialized["model_pid"], "0x02c7");
         assert_eq!(finalized.model_name, "Razer Blade Test");
-        assert!(finalized.default_multimedia_keys);
+        assert!(finalized.primary_multimedia_keys);
     }
 
     #[test]

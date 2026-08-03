@@ -151,8 +151,8 @@ impl<'a> Executer<'a> {
         }
     }
 
-    fn set_default_multimedia_keys(&mut self, enabled: bool) -> crate::error::AppResult<()> {
-        self.kb().set_default_multimedia_keys(enabled);
+    fn set_primary_multimedia_keys(&mut self, enabled: bool) -> crate::error::AppResult<()> {
+        self.kb().set_primary_multimedia_keys(enabled);
         Ok(())
     }
 

@@ -9,7 +9,7 @@ A lightweight, native Windows application for Razer Blade laptops that provides 
 ## Features
 
 ### New features
-* **Razer Key Mappings:** Uses keyhooks to allow defaulting $F1 - F12$ keys to multimedia actions, with support for secondary "Razer Hyperboost" functions via the $Fn$ key.
+* **Razer Key Mappings:** Uses keyhooks to set the primary $F1 - F12$ actions to multimedia controls, with support for secondary "Razer Hyperboost" functions via the $Fn$ key.
 * **Ambient Keyboard Lighting Effect:** Dynamically matches the keyboard backlight to the dominant color on your screen.
 * **Adaptive OSD:** Modern, aesthetic design with smooth fade animations. Built on a reusable architecture that supports multiple SVG icons, text labels, and precise indicator levels.
 * **Power Profiles:** Automatically switches settings based on your power state (**On Battery** vs. **AC Power**).

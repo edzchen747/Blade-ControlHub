@@ -9,9 +9,9 @@ pub enum DeviceCmd {
     GetModelName(mpsc::Sender<String>),
     #[allow(dead_code)]
     GetPerfMode(mpsc::Sender<AppResult<PerfMode>>),
-    GetDefaultMultimediaKeys(mpsc::Sender<bool>),
-    ToggleDefaultMultimediaKeys(mpsc::Sender<bool>),
-    SetDefaultMultimediaKeys(bool, mpsc::Sender<AppResult<()>>),
+    GetPrimaryMultimediaKeys(mpsc::Sender<bool>),
+    TogglePrimaryMultimediaKeys(mpsc::Sender<bool>),
+    SetPrimaryMultimediaKeys(bool, mpsc::Sender<AppResult<()>>),
     SetMuteIndicator(AudioType, bool),
     CycleBatteryLimit,
     SetBatteryLimit(BatteryLimit, mpsc::Sender<AppResult<()>>),
@@ -64,16 +64,16 @@ impl DeviceHandle {
     }
 
     #[allow(dead_code)]
-    pub fn get_default_multimedia_keys(&self) -> AppResult<bool> {
-        self.query(DeviceCmd::GetDefaultMultimediaKeys)
+    pub fn get_primary_multimedia_keys(&self) -> AppResult<bool> {
+        self.query(DeviceCmd::GetPrimaryMultimediaKeys)
     }
 
-    pub fn toggle_default_multimedia_keys(&self) -> AppResult<bool> {
-        self.query(DeviceCmd::ToggleDefaultMultimediaKeys)
+    pub fn toggle_primary_multimedia_keys(&self) -> AppResult<bool> {
+        self.query(DeviceCmd::TogglePrimaryMultimediaKeys)
     }
 
-    pub fn set_default_multimedia_keys(&self, enabled: bool) -> AppResult<()> {
-        self.query_result(|tx| DeviceCmd::SetDefaultMultimediaKeys(enabled, tx))
+    pub fn set_primary_multimedia_keys(&self, enabled: bool) -> AppResult<()> {
+        self.query_result(|tx| DeviceCmd::SetPrimaryMultimediaKeys(enabled, tx))
     }
 
     pub fn get_config(&self) -> AppResult<AppConfig> {

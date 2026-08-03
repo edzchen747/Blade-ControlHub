@@ -37,8 +37,8 @@ pub fn set_settings_window_state(open: bool, focused: bool) -> AppResult<()> {
     })?)
 }
 
-pub fn set_default_multimedia_keys(enabled: bool) -> AppResult<()> {
-    expect_ack(send_request(IpcRequest::SetDefaultMultimediaKeys {
+pub fn set_primary_multimedia_keys(enabled: bool) -> AppResult<()> {
+    expect_ack(send_request(IpcRequest::SetPrimaryMultimediaKeys {
         enabled,
     })?)
 }
@@ -165,7 +165,7 @@ fn ipc_request_kind(request: &IpcRequest) -> &'static str {
     match request {
         IpcRequest::GetSettingsState => "GetSettingsState",
         IpcRequest::SetSettingsWindowOpen { .. } => "SetSettingsWindowOpen",
-        IpcRequest::SetDefaultMultimediaKeys { .. } => "SetDefaultMultimediaKeys",
+        IpcRequest::SetPrimaryMultimediaKeys { .. } => "SetPrimaryMultimediaKeys",
         IpcRequest::SetPerfMode { .. } => "SetPerfMode",
         IpcRequest::SetCustomModeConfig { .. } => "SetCustomModeConfig",
         IpcRequest::SetFanSpeed { .. } => "SetFanSpeed",

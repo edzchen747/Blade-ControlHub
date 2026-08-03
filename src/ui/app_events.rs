@@ -24,7 +24,7 @@ pub enum OsdEvent {
     LidLogo(LidLogoMode),
     RefreshRate(u32, u8, u8),
     BatteryLimit(u8, u8, u8),
-    ToggleDefaultMultimediaKeys(bool),
+    TogglePrimaryMultimediaKeys(bool),
     CloseGPUApps(bool),
 }
 
@@ -105,7 +105,7 @@ impl OsdEvent {
                 total_steps: *total as usize,
                 active_steps: *level as usize,
             }),
-            OsdEvent::ToggleDefaultMultimediaKeys(is_multimedia) => {
+            OsdEvent::TogglePrimaryMultimediaKeys(is_multimedia) => {
                 let label = if *is_multimedia {
                     "Multimedia".to_string()
                 } else {

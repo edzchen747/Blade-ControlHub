@@ -7,9 +7,9 @@ use blade_controlhub::razer::enums::PerfMode;
 // ── Default values ───────────────────────────────────────────────────────────
 
 #[test]
-fn app_config_default_multimedia_keys_is_false() {
+fn app_config_primary_multimedia_keys_is_false() {
     let config = AppConfig::default();
-    assert!(!config.default_multimedia_keys);
+    assert!(!config.primary_multimedia_keys);
 }
 
 #[test]
@@ -49,28 +49,36 @@ fn app_config_deserializes_from_empty_json_object_with_defaults() {
     let json = "{}";
     let config: AppConfig =
         serde_json::from_str(json).expect("empty JSON object must deserialize successfully");
-    assert!(!config.default_multimedia_keys);
+    assert!(!config.primary_multimedia_keys);
 }
 
 #[test]
-fn app_config_deserializes_with_partial_fields_using_defaults_for_missing() {
-    let json = r#"{"default_multimedia_keys": true}"#;
+fn app_config_deserializes_primary_multimedia_keys() {
+    let json = r#"{"primary_multimedia_keys": true}"#;
     let config: AppConfig =
         serde_json::from_str(json).expect("partial JSON must deserialize with serde(default)");
-    assert!(config.default_multimedia_keys);
+    assert!(config.primary_multimedia_keys);
+}
+
+#[test]
+fn app_config_accepts_legacy_default_multimedia_keys() {
+    let json = r#"{"default_multimedia_keys": true}"#;
+    let config: AppConfig =
+        serde_json::from_str(json).expect("legacy configuration must deserialize successfully");
+    assert!(config.primary_multimedia_keys);
 }
 
 #[test]
 fn app_config_ignores_legacy_battery_limit_on_load() {
     let json = r#"{
         "battery_limit": {"index": 7, "items": ["Limit80"]},
-        "default_multimedia_keys": true
+        "primary_multimedia_keys": true
     }"#;
     let config: AppConfig =
         serde_json::from_str(json).expect("legacy battery limit must be ignored");
     let serialized = serde_json::to_string(&config).expect("config must serialize");
 
-    assert!(config.default_multimedia_keys);
+    assert!(config.primary_multimedia_keys);
     assert!(!serialized.contains("battery_limit"));
 }
 
@@ -92,8 +100,8 @@ fn app_config_round_trips_through_json() {
         serde_json::from_str(&json).expect("serialized AppConfig must deserialize without error");
     // Verify key structural properties survive the round-trip
     assert_eq!(
-        restored.default_multimedia_keys,
-        original.default_multimedia_keys
+        restored.primary_multimedia_keys,
+        original.primary_multimedia_keys
     );
 }
 
@@ -107,6 +115,7 @@ fn app_config_serializes_to_valid_json_without_error() {
         !json.contains("battery_limit"),
         "serialized JSON must not contain the device-backed battery limit"
     );
+    assert!(json.contains("primary_multimedia_keys"));
 }
 
 // ── refresh_cycle_items() preserves indices ───────────────────────────────────

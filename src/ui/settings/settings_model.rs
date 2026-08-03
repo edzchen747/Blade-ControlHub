@@ -14,6 +14,8 @@ use crate::ui::settings::{
 use crate::ui::theme::{SETTINGS_ICON_SIZE, SETTINGS_LOADING_ICON_COLOR};
 
 const UNSUPPORTED_PERF_MODE_NOTICE_DURATION: Duration = Duration::from_millis(2000);
+const DUPLICATE_KEY_NOTICE_DURATION: Duration = Duration::from_millis(2000);
+const DUPLICATE_KEY_MESSAGE: &str = "This key is already assigned";
 
 pub struct Settings {
     pub show: bool,
@@ -26,11 +28,15 @@ pub struct Settings {
     applied_icon_color: Option<ThemeColor>,
     pending_commands: Vec<SettingsCommand>,
     unsupported_perf_mode_notice: Option<UnsupportedPerfModeNotice>,
+    duplicate_key_notice: Option<DuplicateKeyNotice>,
     pending_theme_color: Option<PendingThemeColor>,
 }
 
 struct UnsupportedPerfModeNotice {
     mode: PerfMode,
+    shown_at: Instant,
+}
+struct DuplicateKeyNotice {
     shown_at: Instant,
 }
 struct PendingThemeColor {
@@ -44,13 +50,14 @@ impl Settings {
             show: false,
             update: false,
             current_tab: "Device".to_string(),
-            key_map_current_tab: "Multimedia Keys".to_string(),
+            key_map_current_tab: "Hypershift".to_string(),
             selected_profile: PowerProfile::Ac,
             state: None,
             custom_key_map: CustomKeyMap::new(),
             applied_icon_color: None,
             pending_commands: Vec::new(),
             unsupported_perf_mode_notice: None,
+            duplicate_key_notice: None,
             pending_theme_color: None,
         }
     }
@@ -110,15 +117,59 @@ impl Settings {
     pub fn cancel_pending_theme_color(&mut self) {
         self.pending_theme_color = None;
     }
-    pub fn apply_captured_razer_key(&mut self, key_code: u8) {
+    /// Returns whether the captured key is already assigned to another row.
+    pub fn apply_captured_razer_key(&mut self, key_code: u8) -> bool {
         let Some(idx) = self.custom_key_map.get_listening_idx() else {
-            return;
+            return false;
         };
-        self.custom_key_map.reset_key_code(key_code);
+        if self
+            .custom_key_map
+            .razer_key_code_is_assigned_elsewhere(idx, key_code)
+        {
+            self.flash_duplicate_key_error();
+            self.custom_key_map.set_listening_idx(None);
+            return true;
+        }
         if let Some(row) = self.custom_key_map.razer_keys.get_mut(idx) {
             row.key_code = key_code;
             self.custom_key_map.set_listening_idx(None);
         }
+        false
+    }
+    /// Returns whether the captured key is already assigned to another row.
+    pub fn apply_captured_hypershift_key(&mut self, key_code: u8) -> bool {
+        let Some(idx) = self.custom_key_map.hypershift_listening_idx() else {
+            return false;
+        };
+        if self
+            .custom_key_map
+            .hypershift_key_code_is_assigned_elsewhere(idx, key_code)
+        {
+            self.flash_duplicate_key_error();
+            self.custom_key_map.set_hypershift_listening_idx(None);
+            return true;
+        }
+        if let Some(row) = self.custom_key_map.hypershift_keys.get_mut(idx) {
+            row.key_code = Some(key_code);
+            self.custom_key_map.set_hypershift_listening_idx(None);
+        }
+        false
+    }
+    fn flash_duplicate_key_error(&mut self) {
+        self.duplicate_key_notice = Some(DuplicateKeyNotice {
+            shown_at: Instant::now(),
+        });
+    }
+    pub fn duplicate_key_error_message(&mut self) -> Option<&'static str> {
+        let notice = self.duplicate_key_notice.as_ref()?;
+        if notice.shown_at.elapsed() >= DUPLICATE_KEY_NOTICE_DURATION {
+            self.duplicate_key_notice = None;
+            return None;
+        }
+        Some(DUPLICATE_KEY_MESSAGE)
+    }
+    pub fn duplicate_key_notice_duration() -> Duration {
+        DUPLICATE_KEY_NOTICE_DURATION
     }
     pub fn flash_unsupported_perf_mode(&mut self, mode: PerfMode) {
         self.unsupported_perf_mode_notice = Some(UnsupportedPerfModeNotice {
