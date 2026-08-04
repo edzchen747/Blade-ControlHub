@@ -249,10 +249,19 @@ fn run_sleep_cleanup(source: &'static str) {
 }
 
 fn recover_from_system_wake(source: &'static str, refresh_display: bool) {
-    razer::device_handle::device().initialize(false);
+    match razer::device_handle::device().reinitialize() {
+        Ok(device_pid) => {
+            if let Err(error) = crate::win::input::reinitialize_keyboard_hooks(device_pid) {
+                warn!(%error, source, "Failed to restart keyboard and HID listeners after system wake");
+            }
+        }
+        Err(error) => {
+            warn!(%error, source, "Failed to reopen Razer HID device after system wake");
+        }
+    }
     if refresh_display {
         GpuDisplayMonitor::trigger_display_change();
     }
-    info!(source, "System waking from sleep; re-initialising hardware");
+    info!(source, "System waking from sleep; re-initialised hardware handles");
 }
 

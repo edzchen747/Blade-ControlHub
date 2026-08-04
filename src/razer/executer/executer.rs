@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 use tracing::{debug, info, instrument, warn};
 
 pub struct Executer<'a> {
-    device: &'a Device,
+    device: &'a mut Device,
     app_config: &'a mut AppConfig,
     persist_buffer: PersistBuffer,
     rx: Receiver<DeviceCmd>,

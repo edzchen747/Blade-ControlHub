@@ -5,6 +5,9 @@ impl<'a> Executer<'a> {
             DeviceCmd::SleepDevice(tx) => {
                 let _ = tx.send(self.sleep());
             }
+            DeviceCmd::ReinitializeDevice(tx) => {
+                let _ = tx.send(self.reinitialize());
+            }
             DeviceCmd::Shutdown(tx) => {
                 let _ = tx.send(self.shutdown());
                 return false;

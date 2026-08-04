@@ -1,6 +1,6 @@
 impl<'a> Executer<'a> {
     pub fn new(
-        device: &'a Device,
+        device: &'a mut Device,
         app_config: &'a mut AppConfig,
         persist_buffer: PersistBuffer,
         rx: Receiver<DeviceCmd>,

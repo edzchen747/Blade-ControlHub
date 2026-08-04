@@ -4,6 +4,7 @@
 pub enum DeviceCmd {
     InitializeDevice(bool),
     SleepDevice(mpsc::Sender<bool>),
+    ReinitializeDevice(mpsc::Sender<AppResult<u16>>),
     AdjustKeyboardLight(bool),
     GetPID(mpsc::Sender<u16>),
     GetModelName(mpsc::Sender<String>),
@@ -90,6 +91,12 @@ impl DeviceHandle {
 
     pub fn sleep(&self) -> AppResult<bool> {
         self.query_urgent(DeviceCmd::SleepDevice)
+    }
+
+    /// Reopens the Razer HID device on the hardware owner thread, reapplies
+    /// the active configuration, and returns the freshly detected PID.
+    pub fn reinitialize(&self) -> AppResult<u16> {
+        self.query_urgent_result(DeviceCmd::ReinitializeDevice)
     }
 
     // ── Fire-and-forget commands ────────────────────────────────────
@@ -240,6 +247,28 @@ impl DeviceHandle {
 
         match resp_rx.recv_timeout(Duration::from_secs(5)) {
             Ok(value) => Ok(value),
+            Err(RecvTimeoutError::Timeout) => Err(AppError::HardwareTimeout),
+            Err(RecvTimeoutError::Disconnected) => Err(device_worker_unavailable()),
+        }
+    }
+
+    fn query_urgent_result<T, F>(&self, make_query: F) -> AppResult<T>
+    where
+        F: FnOnce(mpsc::Sender<AppResult<T>>) -> DeviceCmd,
+    {
+        let (resp_tx, resp_rx) = mpsc::channel::<AppResult<T>>();
+        let cmd = make_query(resp_tx);
+
+        if let Err(error) = self.urgent_sender.send(cmd) {
+            warn!(
+                ?error,
+                "Device worker is unavailable; urgent query cannot be delivered"
+            );
+            return Err(device_worker_unavailable());
+        }
+
+        match resp_rx.recv_timeout(Duration::from_secs(5)) {
+            Ok(result) => result,
             Err(RecvTimeoutError::Timeout) => Err(AppError::HardwareTimeout),
             Err(RecvTimeoutError::Disconnected) => Err(device_worker_unavailable()),
         }

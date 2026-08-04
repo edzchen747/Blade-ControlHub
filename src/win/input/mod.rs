@@ -17,6 +17,13 @@ pub fn stop_keyboard_hooks() {
     hidapi::HidApiListener::stop();
 }
 
+/// Drops input listeners opened before sleep and recreates them for the
+/// freshly enumerated Razer PID after resume.
+pub fn reinitialize_keyboard_hooks(device_pid: u16) -> AppResult<()> {
+    stop_keyboard_hooks();
+    start_keyboard_hooks(device_pid)
+}
+
 #[derive(PartialEq, Eq, Hash)]
 pub enum KeyType {
     VKey(vkey::Key),

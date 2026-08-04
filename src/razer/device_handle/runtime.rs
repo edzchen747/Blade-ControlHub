@@ -148,7 +148,7 @@ fn wait_for_device_channel_monitor(duration: Duration) {
 }
 
 fn run_device_worker(rx: mpsc::Receiver<DeviceCmd>, urgent_rx: mpsc::Receiver<DeviceCmd>) {
-    let device = match get_razer_device() {
+    let mut device = match get_razer_device() {
         Ok(device) => device,
         Err(error) => {
             error!(%error, "No compatible Razer device found; worker thread exiting");
@@ -157,7 +157,7 @@ fn run_device_worker(rx: mpsc::Receiver<DeviceCmd>, urgent_rx: mpsc::Receiver<De
     };
     let mut app_config = config::load_config(&device.info);
     let persist_buffer = PersistBuffer::new(CONFIG_PATH.to_string());
-    let mut executer = match Executer::new(&device, &mut app_config, persist_buffer, rx, urgent_rx)
+    let mut executer = match Executer::new(&mut device, &mut app_config, persist_buffer, rx, urgent_rx)
     {
         Ok(e) => e,
         Err(e) => {
@@ -168,7 +168,7 @@ fn run_device_worker(rx: mpsc::Receiver<DeviceCmd>, urgent_rx: mpsc::Receiver<De
     executer.process_commands();
 }
 
-fn get_razer_device() -> AppResult<Device> {
+pub(crate) fn get_razer_device() -> AppResult<Device> {
     match Device::detect() {
         Ok(d) => Ok(d),
         Err(e) => {

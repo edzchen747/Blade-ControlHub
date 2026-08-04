@@ -1,4 +1,17 @@
 impl<'a> Executer<'a> {
+    fn reinitialize(&mut self) -> Result<u16, AppError> {
+        let device = crate::razer::device_handle::get_razer_device()?;
+        let pid = device.info.pid;
+        let model_name = device.info.name.to_string();
+
+        *self.device = device;
+        self.app_config
+            .set_device_model(format!("0x{pid:04x}"), model_name);
+        self.initialize(false);
+        info!(pid = format_args!("0x{pid:04x}"), "Reopened Razer HID device after system wake");
+        Ok(pid)
+    }
+
     #[instrument(skip(self), fields(notify_startup))]
     fn initialize(&mut self, notify_startup: bool) {
         PersistBuffer::disable();
