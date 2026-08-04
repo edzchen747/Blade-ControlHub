@@ -1,3 +1,5 @@
+use crate::config::ThemeColor;
+
 fn get_svg_options() -> &'static resvg::usvg::Options<'static> {
     SVG_OPTIONS.get_or_init(|| {
         let mut opt = resvg::usvg::Options::default();
@@ -79,61 +81,82 @@ fn generate_progress_svg(total_steps: usize, active_steps: usize) -> String {
     svg_string
 }
 
-fn render_svg_to_bytes(
-    width: u32,
-    height: u32,
-    total_steps: usize,
-    active_steps: usize,
-    label: &str,
-    icon_bytes: Option<Cow<'static, [u8]>>,
-) -> Option<Vec<u8>> {
-    let opt = get_svg_options();
+/// Parsed SVG layers for one card. Parsing is the expensive part of rendering;
+/// the trees are resolution-independent, so the same layers can be re-rasterized
+/// at any size while the card animates. The frame is theme-colored, so it is
+/// re-parsed whenever the runtime theme changes.
+struct SvgLayers {
+    theme: ThemeColor,
+    frame: resvg::usvg::Tree,
+    text: resvg::usvg::Tree,
+    progress: resvg::usvg::Tree,
+    icon: Option<resvg::usvg::Tree>,
+}
 
-    let frame_svg = include_str!("../../../assets/frame.svg").replace(
-        "#F1C40F",
-        &crate::ui::theme::runtime_theme_color().to_hex_string(),
-    );
-    let bg_tree = match resvg::usvg::Tree::from_data(frame_svg.as_bytes(), opt) {
-        Ok(tree) => tree,
-        Err(error) => {
-            warn!(?error, "Failed to parse OSD frame SVG");
-            return None;
-        }
-    };
+impl SvgLayers {
+    fn parse(
+        label: &str,
+        total_steps: usize,
+        active_steps: usize,
+        icon_bytes: Option<Cow<'static, [u8]>>,
+    ) -> Option<Self> {
+        let opt = get_svg_options();
+        let theme = crate::ui::theme::runtime_theme_color();
 
-    let text_svg = generate_text_layer_svg(label, icon_bytes.is_none());
-    let text_tree = match resvg::usvg::Tree::from_data(text_svg.as_bytes(), opt) {
-        Ok(tree) => tree,
-        Err(error) => {
-            warn!(?error, "Failed to parse generated OSD text SVG");
-            return None;
-        }
-    };
+        let frame_svg = include_str!("../../../assets/frame.svg")
+            .replace("#F1C40F", &theme.to_hex_string());
+        let frame = match resvg::usvg::Tree::from_data(frame_svg.as_bytes(), opt) {
+            Ok(tree) => tree,
+            Err(error) => {
+                warn!(?error, "Failed to parse OSD frame SVG");
+                return None;
+            }
+        };
 
-    let progress_svg = generate_progress_svg(total_steps, active_steps);
-    let progress_tree = match resvg::usvg::Tree::from_data(progress_svg.as_bytes(), opt) {
-        Ok(tree) => tree,
-        Err(error) => {
-            warn!(?error, "Failed to parse generated OSD progress SVG");
-            return None;
-        }
-    };
+        let text_svg = generate_text_layer_svg(label, icon_bytes.is_none());
+        let text = match resvg::usvg::Tree::from_data(text_svg.as_bytes(), opt) {
+            Ok(tree) => tree,
+            Err(error) => {
+                warn!(?error, "Failed to parse generated OSD text SVG");
+                return None;
+            }
+        };
 
+        let progress_svg = generate_progress_svg(total_steps, active_steps);
+        let progress = match resvg::usvg::Tree::from_data(progress_svg.as_bytes(), opt) {
+            Ok(tree) => tree,
+            Err(error) => {
+                warn!(?error, "Failed to parse generated OSD progress SVG");
+                return None;
+            }
+        };
+
+        let icon = icon_bytes.and_then(|bytes| resvg::usvg::Tree::from_data(&bytes, opt).ok());
+
+        Some(Self {
+            theme,
+            frame,
+            text,
+            progress,
+            icon,
+        })
+    }
+}
+
+fn render_layers_to_bytes(layers: &SvgLayers, width: u32, height: u32) -> Option<Vec<u8>> {
     let Some(mut pixmap) = tiny_skia::Pixmap::new(width, height) else {
         warn!(width, height, "Failed to allocate OSD pixmap");
         return None;
     };
 
-    let view_scale_x = width as f32 / bg_tree.size().width();
-    let view_scale_y = height as f32 / bg_tree.size().height();
+    let view_scale_x = width as f32 / layers.frame.size().width();
+    let view_scale_y = height as f32 / layers.frame.size().height();
     let base_transform = tiny_skia::Transform::from_scale(view_scale_x, view_scale_y);
 
-    resvg::render(&bg_tree, base_transform, &mut pixmap.as_mut());
+    resvg::render(&layers.frame, base_transform, &mut pixmap.as_mut());
 
-    if let Some(icon_tree) =
-        icon_bytes.and_then(|bytes| resvg::usvg::Tree::from_data(&bytes, opt).ok())
-    {
-        let bg_width_coords = bg_tree.size().width();
+    if let Some(icon_tree) = &layers.icon {
+        let bg_width_coords = layers.frame.size().width();
         let icon_scale_x = ICON_TARGET_WIDTH / icon_tree.size().width();
         let icon_scale_y = ICON_TARGET_HEIGHT / icon_tree.size().height();
         let icon_pos_x = (bg_width_coords - ICON_TARGET_WIDTH) / 2.0;
@@ -143,11 +166,11 @@ fn render_svg_to_bytes(
             .post_translate(icon_pos_x, icon_pos_y)
             .post_scale(view_scale_x, view_scale_y);
 
-        resvg::render(&icon_tree, icon_transform, &mut pixmap.as_mut());
+        resvg::render(icon_tree, icon_transform, &mut pixmap.as_mut());
     }
 
-    resvg::render(&text_tree, base_transform, &mut pixmap.as_mut());
-    resvg::render(&progress_tree, base_transform, &mut pixmap.as_mut());
+    resvg::render(&layers.text, base_transform, &mut pixmap.as_mut());
+    resvg::render(&layers.progress, base_transform, &mut pixmap.as_mut());
 
     let mut bgra_pixels = pixmap.data().to_vec();
     for chunk in bgra_pixels.chunks_exact_mut(4) {
@@ -159,4 +182,3 @@ fn render_svg_to_bytes(
 
     Some(bgra_pixels)
 }
-

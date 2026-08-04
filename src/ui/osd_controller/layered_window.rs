@@ -71,72 +71,157 @@ impl Drop for ObjectSelection {
     }
 }
 
-fn update_window_bitmap(hwnd: HWND, state: &OsdWindowState, alpha: u8) {
-    let dpi = unsafe { GetDpiForWindow(hwnd) };
-    let scale_factor = dpi as f32 / 96.0;
+/// Cached DIB section backing one card's layered window. Rebuilt only when the
+/// card's physical size changes; alpha and position updates reuse the buffer.
+/// Field order matters: `selection` restores the DC's old object first, then
+/// the bitmap is deleted, then the DC is released.
+///
+/// `selection` and `bitmap` are held solely for their RAII drop order.
+#[allow(dead_code)]
+struct CardRendering {
+    selection: ObjectSelection,
+    bitmap: OwnedBitmap,
+    dc: CompatibleDc,
+    bits: *mut std::ffi::c_void,
+    size: (u32, u32),
+}
 
-    let physical_width = (BASE_SIZE * scale_factor).round() as u32;
-    let physical_height = (BASE_SIZE * scale_factor).round() as u32;
+impl CardRendering {
+    fn create(hdc_screen: HDC, width: u32, height: u32, pixel_data: &[u8]) -> Option<Self> {
+        let dc = CompatibleDc::create(hdc_screen)?;
 
-    if physical_width == 0 || physical_height == 0 {
-        return;
+        let bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width as i32,
+                biHeight: -(height as i32),
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
+        let bitmap = OwnedBitmap::create_dib_section(dc.hdc, &bmi, &mut bits)?;
+        let selection = ObjectSelection::select(dc.hdc, bitmap.handle)?;
+
+        unsafe {
+            std::ptr::copy_nonoverlapping(pixel_data.as_ptr(), bits as *mut u8, pixel_data.len());
+        }
+
+        Some(Self {
+            selection,
+            bitmap,
+            dc,
+            bits,
+            size: (width, height),
+        })
     }
 
-    let icon_bytes = state.params.icon.map(|token| token.as_bytes());
+    fn write_pixels(&mut self, pixel_data: &[u8]) {
+        if !self.bits.is_null() {
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    pixel_data.as_ptr(),
+                    self.bits as *mut u8,
+                    pixel_data.len(),
+                );
+            }
+        }
+    }
+}
 
-    let Some(pixel_data) = render_svg_to_bytes(
-        physical_width,
-        physical_height,
-        state.params.total_steps,
-        state.params.active_steps,
-        &state.params.label,
-        icon_bytes,
-    ) else {
+fn update_card_window(hwnd: HWND, card: &mut OsdCard) {
+    let dpi = unsafe { GetDpiForWindow(hwnd) };
+    let scale_factor = dpi as f32 / 96.0;
+    let depth_scale = DEPTH_SCALE.powf(card.depth);
+
+    let physical_width = ((BASE_SIZE * depth_scale * scale_factor / RENDER_GRID as f32)
+        .round()
+        .max(1.0) as u32)
+        * RENDER_GRID;
+    let physical_height = ((BASE_SIZE * depth_scale * scale_factor / RENDER_GRID as f32)
+        .round()
+        .max(1.0) as u32)
+        * RENDER_GRID;
+
+    let size_changed = card
+        .render
+        .as_ref()
+        .is_none_or(|rendering| rendering.size != (physical_width, physical_height));
+    let alpha_changed = card.last_alpha != card.alpha;
+    let depth_changed = (card.last_depth - card.depth).abs() > 0.0001;
+    let theme_changed = card
+        .layers
+        .as_ref()
+        .is_none_or(|layers| layers.theme != crate::ui::theme::runtime_theme_color());
+
+    if !card.dirty && !size_changed && !alpha_changed && !depth_changed && !theme_changed {
         return;
-    };
+    }
 
     let Some(screen_dc) = DesktopDc::acquire() else {
         return;
     };
-    let Some(mem_dc) = CompatibleDc::create(screen_dc.hdc) else {
-        return;
-    };
 
-    let bmi = BITMAPINFO {
-        bmiHeader: BITMAPINFOHEADER {
-            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: physical_width as i32,
-            biHeight: -(physical_height as i32),
-            biPlanes: 1,
-            biBitCount: 32,
-            biCompression: BI_RGB.0,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+    if card.dirty || size_changed || theme_changed {
+        if card.dirty || theme_changed {
+            let icon_bytes = card.params.icon.map(|token| token.as_bytes());
+            let Some(layers) = SvgLayers::parse(
+                &card.params.label,
+                card.params.total_steps,
+                card.params.active_steps,
+                icon_bytes,
+            ) else {
+                return;
+            };
+            card.layers = Some(layers);
+        }
 
-    let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
-    let Some(bitmap) = OwnedBitmap::create_dib_section(mem_dc.hdc, &bmi, &mut bits) else {
-        return;
-    };
-    if bits.is_null() {
-        return;
+        let Some(layers) = card.layers.as_ref() else {
+            return;
+        };
+        let Some(pixel_data) = render_layers_to_bytes(layers, physical_width, physical_height)
+        else {
+            return;
+        };
+
+        match card.render.as_mut() {
+            Some(rendering) if rendering.size == (physical_width, physical_height) => {
+                rendering.write_pixels(&pixel_data);
+            }
+            _ => {
+                let Some(rendering) = CardRendering::create(
+                    screen_dc.hdc,
+                    physical_width,
+                    physical_height,
+                    &pixel_data,
+                ) else {
+                    return;
+                };
+                card.render = Some(rendering);
+            }
+        }
     }
-    let Some(_selection) = ObjectSelection::select(mem_dc.hdc, bitmap.handle) else {
+    card.dirty = false;
+
+    let Some(rendering) = card.render.as_ref() else {
         return;
     };
 
-    unsafe {
-        std::ptr::copy_nonoverlapping(pixel_data.as_ptr(), bits as *mut u8, pixel_data.len());
-    }
+    // Depth 0 matches the previous centered placement; deeper cards rise and
+    // shrink towards the top of the stack.
+    let screen_width = unsafe { GetSystemMetrics(SM_CXSCREEN) };
+    let screen_height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
+    let base_px = (BASE_SIZE * scale_factor).round() as i32;
+    let base_y = ((screen_height - base_px) * 5) / 6;
+    let depth_offset_px = (DEPTH_OFFSET * scale_factor * card.depth).round() as i32;
 
-    let mut window_rect = RECT::default();
-    if unsafe { GetWindowRect(hwnd, &mut window_rect) }.is_err() {
-        return;
-    }
     let ppt_dst = POINT {
-        x: window_rect.left,
-        y: window_rect.top,
+        x: (screen_width - physical_width as i32) / 2,
+        y: base_y - depth_offset_px,
     };
     let size = SIZE {
         cx: physical_width as i32,
@@ -147,7 +232,7 @@ fn update_window_bitmap(hwnd: HWND, state: &OsdWindowState, alpha: u8) {
     let blend = BLENDFUNCTION {
         BlendOp: AC_SRC_OVER as u8,
         BlendFlags: 0,
-        SourceConstantAlpha: alpha,
+        SourceConstantAlpha: card.alpha,
         AlphaFormat: AC_SRC_ALPHA as u8,
     };
 
@@ -157,57 +242,16 @@ fn update_window_bitmap(hwnd: HWND, state: &OsdWindowState, alpha: u8) {
             screen_dc.hdc,
             Some(&ppt_dst),
             Some(&size),
-            mem_dc.hdc,
+            rendering.dc.hdc,
             Some(&ppt_src),
             COLORREF(0),
             Some(&blend),
             ULW_ALPHA,
         )
     };
-}
 
-fn center_window(hwnd: HWND) {
-    unsafe {
-        let dpi = GetDpiForWindow(hwnd);
-        let scale = dpi as f32 / 96.0;
-        let size = (BASE_SIZE * scale) as i32;
-
-        let screen_width = GetSystemMetrics(SM_CXSCREEN);
-        let screen_height = GetSystemMetrics(SM_CYSCREEN);
-
-        let x = (screen_width - size) / 2;
-        let y = (screen_height - size) * 5 / 6;
-
-        if let Err(error) = SetWindowPos(hwnd, HWND_TOPMOST, x, y, size, size, SWP_NOACTIVATE) {
-            warn!(?error, "Failed to position OSD window");
-        }
-    }
-}
-
-fn internal_show_ui(hwnd: HWND, state: &mut OsdWindowState) {
-    unsafe {
-        let _ = KillTimer(hwnd, ANIMATION_TIMER);
-        state.animation = AnimState::FadeIn;
-        state.animation_started_at = Some(Instant::now());
-        state.alpha = 0;
-
-        center_window(hwnd);
-        update_window_bitmap(hwnd, state, 0);
-        let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-
-        if let Err(error) = SetWindowPos(
-            hwnd,
-            HWND_TOPMOST,
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-        ) {
-            warn!(?error, "Failed to show OSD window without activation");
-        }
-        let _ = SetTimer(hwnd, ANIMATION_TIMER, 10, None);
-    }
+    card.last_alpha = card.alpha;
+    card.last_depth = card.depth;
 }
 
 #[cfg(test)]

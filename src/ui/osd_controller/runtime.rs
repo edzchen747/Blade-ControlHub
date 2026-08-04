@@ -42,7 +42,7 @@ fn post_osd_stop(hwnd: HWND) {
 fn run_osd_window_thread(tx: Sender<Option<SendableHwnd>>) {
     let _ = get_svg_options();
 
-    let hwnd = match create_osd_window() {
+    let hwnd = match create_controller_window() {
         Some(hwnd) => hwnd,
         None => {
             let _ = tx.send(None);
@@ -50,13 +50,10 @@ fn run_osd_window_thread(tx: Sender<Option<SendableHwnd>>) {
         }
     };
 
-    let state = Box::new(OsdWindowState::default());
+    let state = Box::new(OsdStackState::default());
     unsafe {
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as isize);
     }
-
-    center_window(hwnd);
-    let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
 
     OSD_RUNNING.store(true, Ordering::SeqCst);
     let _ = tx.send(Some(SendableHwnd(hwnd)));
@@ -64,7 +61,8 @@ fn run_osd_window_thread(tx: Sender<Option<SendableHwnd>>) {
     OSD_RUNNING.store(false, Ordering::SeqCst);
 }
 
-fn create_osd_window() -> Option<HWND> {
+/// Hidden owner window that receives triggers/timers and holds the stack state.
+fn create_controller_window() -> Option<HWND> {
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
@@ -88,6 +86,43 @@ fn create_osd_window() -> Option<HWND> {
         RegisterClassW(&wc);
 
         match CreateWindowExW(
+            WINDOW_EX_STYLE(0),
+            PCWSTR(class_name.as_ptr()),
+            PCWSTR(title.as_ptr()),
+            WS_POPUP,
+            0,
+            0,
+            BASE_SIZE as i32,
+            BASE_SIZE as i32,
+            None,
+            None,
+            instance,
+            None,
+        ) {
+            Ok(hwnd) => Some(hwnd),
+            Err(error) => {
+                warn!(?error, "Failed to create OSD controller window");
+                None
+            }
+        }
+    }
+}
+
+/// Visible layered window for one stacked card. Never shown directly; it is
+/// positioned and painted exclusively through `UpdateLayeredWindow`.
+fn create_card_window() -> Option<HWND> {
+    unsafe {
+        let class_name = to_wstring("RustOSD_SVG");
+        let title = to_wstring("Rust OSD");
+        let instance: HINSTANCE = match GetModuleHandleW(None) {
+            Ok(handle) => handle.into(),
+            Err(error) => {
+                warn!(?error, "Failed to acquire module handle for OSD card");
+                return None;
+            }
+        };
+
+        match CreateWindowExW(
             OSD_EX_STYLE,
             PCWSTR(class_name.as_ptr()),
             PCWSTR(title.as_ptr()),
@@ -103,7 +138,7 @@ fn create_osd_window() -> Option<HWND> {
         ) {
             Ok(hwnd) => Some(hwnd),
             Err(error) => {
-                warn!(?error, "Failed to create OSD layered window");
+                warn!(?error, "Failed to create OSD card window");
                 None
             }
         }
@@ -124,20 +159,21 @@ fn to_wstring(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-fn with_osd_state<R>(hwnd: HWND, action: impl FnOnce(&mut OsdWindowState) -> R) -> Option<R> {
-    let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut OsdWindowState };
+fn with_osd_stack<R>(action: impl FnOnce(&mut OsdStackState) -> R) -> Option<R> {
+    let controller = OSD_INSTANCE.get().and_then(|instance| instance.as_ref())?;
+    let ptr = unsafe { GetWindowLongPtrW(controller.hwnd, GWLP_USERDATA) as *mut OsdStackState };
     if ptr.is_null() {
         return None;
     }
 
     // SAFETY: The pointer is installed from a Box in `run_osd_window_thread`
-    // and cleared in `drop_osd_state`. OSD window state is only accessed from
+    // and cleared in `drop_osd_state`. OSD stack state is only accessed from
     // this window procedure on the dedicated OSD thread.
     Some(action(unsafe { &mut *ptr }))
 }
 
 fn drop_osd_state(hwnd: HWND) {
-    let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut OsdWindowState };
+    let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut OsdStackState };
     if !ptr.is_null() {
         unsafe {
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
@@ -146,3 +182,243 @@ fn drop_osd_state(hwnd: HWND) {
     }
 }
 
+// --- Card Stack Logic ---
+
+/// Blends the lifecycle envelope with the depth fade. Recomputing from the
+/// envelope (instead of multiplying the previous tick's alpha) keeps the
+/// background fade stable and lets fade-out start exactly where the card is.
+fn depth_blend(envelope: u8, depth: f32) -> u8 {
+    ((envelope as f32) * DEPTH_ALPHA.powf(depth)).round() as u8
+}
+
+fn handle_osd_params(hwnd: HWND, stack: &mut OsdStackState, params: OsdParams) {
+    let kind = params.kind();
+
+    // Front card already shows this control: replace it in place and restart
+    // the hold (rapid same-control updates never animate).
+    if let Some(front) = stack.cards.first_mut()
+        && front.kind == kind
+    {
+        front.params = params;
+        front.dirty = true;
+        front.animation = AnimState::Hold;
+        front.animation_started_at = Some(Instant::now());
+        front.envelope = TARGET_ALPHA;
+        front.depth = 0.0;
+        front.target_depth = 0.0;
+        front.swap_to = None;
+        update_card_window(front.hwnd, front);
+        ensure_animation_timer(hwnd, stack);
+        return;
+    }
+
+    // A buried card of the same control is being triggered again.
+    if let Some(index) = stack.cards.iter().position(|card| card.kind == kind) {
+        let now = Instant::now();
+
+        // Resolve the pair's settle depths before any swap, so rapid triggers
+        // never compute swap targets from mid-flight animated depths.
+        let front_settle = stack.cards[0].settle_depth();
+        let rear_settle = stack.cards[1].settle_depth();
+        let midpoint = (front_settle + rear_settle) / 2.0;
+
+        if index == 1 {
+            // Front pair: while both cards fade out, only the front card
+            // slides back to the halfway line — the rear card stays put.
+            // While invisible the depths swap, then only the card that lands
+            // at the rear slides back to it during the fade-in. One moving
+            // card per phase, so only one card re-renders at a time. Cards
+            // behind the pair stay untouched (no flash, same timeout).
+            let swapped = &mut stack.cards[0];
+            swapped.animation = AnimState::SwapOut;
+            swapped.animation_started_at = Some(now);
+            swapped.fade_out_from = swapped.envelope;
+            swapped.target_depth = midpoint;
+            swapped.swap_to = Some((midpoint, rear_settle));
+        } else {
+            // Several cards stand in front: they slide one level back (eased)
+            // while the triggered card appears instantly at the front.
+            for card in stack.cards.iter_mut().take(index) {
+                if let Some((_, settle)) = card.swap_to.as_mut() {
+                    *settle += 1.0;
+                } else {
+                    card.target_depth += 1.0;
+                }
+            }
+        }
+
+        let mut triggered = stack.cards.remove(index);
+        triggered.params = params;
+        triggered.dirty = true;
+        triggered.animation = AnimState::SwapOut;
+        triggered.animation_started_at = Some(now);
+        triggered.fade_out_from = triggered.envelope;
+        // Land directly on the front position while invisible; it stays put
+        // during the fade-in (only the rear card moves).
+        triggered.swap_to = Some((0.0, front_settle));
+        stack.cards.insert(0, triggered);
+
+        let front = &mut stack.cards[0];
+        update_card_window(front.hwnd, front);
+        show_card_window(front.hwnd);
+        ensure_animation_timer(hwnd, stack);
+        return;
+    }
+
+    // A new control: push every existing card one level back and create a
+    // fresh front card. Depth is unbounded, so the stack can grow freely.
+    for card in stack.cards.iter_mut() {
+        if let Some((_, settle)) = card.swap_to.as_mut() {
+            *settle += 1.0;
+        } else {
+            card.target_depth += 1.0;
+        }
+    }
+
+    let Some(card) = create_front_card(params) else {
+        warn!("Failed to create OSD card window; dropping OSD update");
+        return;
+    };
+    stack.cards.insert(0, card);
+    let front = &mut stack.cards[0];
+    update_card_window(front.hwnd, front);
+    show_card_window(front.hwnd);
+    ensure_animation_timer(hwnd, stack);
+}
+
+fn create_front_card(params: OsdParams) -> Option<OsdCard> {
+    let hwnd = create_card_window()?;
+    Some(OsdCard {
+        hwnd,
+        kind: params.kind(),
+        params,
+        animation: AnimState::FadeIn,
+        animation_started_at: Some(Instant::now()),
+        envelope: 0,
+        alpha: 0,
+        depth: 0.0,
+        target_depth: 0.0,
+        fade_out_from: 0,
+        swap_to: None,
+        dirty: true,
+        last_alpha: 0,
+        last_depth: 0.0,
+        render: None,
+        layers: None,
+    })
+}
+
+fn show_card_window(hwnd: HWND) {
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        if let Err(error) = SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        ) {
+            warn!(?error, "Failed to bring OSD card to front");
+        }
+    }
+}
+
+fn ensure_animation_timer(hwnd: HWND, stack: &OsdStackState) {
+    if stack.cards.is_empty() {
+        let _ = unsafe { KillTimer(hwnd, ANIMATION_TIMER) };
+    } else {
+        let _ = unsafe { SetTimer(hwnd, ANIMATION_TIMER, 10, None) };
+    }
+}
+
+fn tick_osd_stack(hwnd: HWND, stack: &mut OsdStackState) {
+    if stack.cards.is_empty() {
+        let _ = unsafe { KillTimer(hwnd, ANIMATION_TIMER) };
+        return;
+    }
+
+    let now = Instant::now();
+    let mut finished: Vec<usize> = Vec::new();
+
+    for (index, card) in stack.cards.iter_mut().enumerate() {
+        if (card.target_depth - card.depth).abs() > 0.0005 {
+            card.depth += (card.target_depth - card.depth) * DEPTH_ANIM_RATE;
+        } else {
+            card.depth = card.target_depth;
+        }
+
+        let Some(started_at) = card.animation_started_at else {
+            continue;
+        };
+        let elapsed = now.duration_since(started_at);
+
+        match card.animation {
+            AnimState::FadeIn => {
+                if elapsed >= FADE_IN_DURATION {
+                    card.animation = AnimState::Hold;
+                    card.animation_started_at = Some(now);
+                    card.envelope = TARGET_ALPHA;
+                } else {
+                    let progress = elapsed.as_secs_f32() / FADE_IN_DURATION.as_secs_f32();
+                    card.envelope = (progress * TARGET_ALPHA as f32) as u8;
+                }
+            }
+            AnimState::Hold => {
+                if elapsed >= HOLD_DURATION {
+                    card.animation = AnimState::FadeOut;
+                    card.animation_started_at = Some(now);
+                    card.fade_out_from = card.envelope;
+                }
+            }
+            AnimState::FadeOut => {
+                if elapsed >= FADE_OUT_DURATION {
+                    card.animation = AnimState::Idle;
+                    card.animation_started_at = None;
+                    card.envelope = 0;
+                } else {
+                    let progress = elapsed.as_secs_f32() / FADE_OUT_DURATION.as_secs_f32();
+                    card.envelope = ((1.0 - progress) * card.fade_out_from as f32) as u8;
+                }
+            }
+            AnimState::SwapOut => {
+                if elapsed >= SWAP_FADE_OUT_DURATION {
+                    card.animation = AnimState::FadeIn;
+                    card.animation_started_at = Some(now);
+                    card.envelope = 0;
+                    // Appear at the landing depth while invisible, then ease
+                    // to the swapped depth during the fade-in.
+                    if let Some((landing, settle)) = card.swap_to.take() {
+                        card.depth = landing;
+                        card.target_depth = settle;
+                    }
+                } else {
+                    let progress =
+                        elapsed.as_secs_f32() / SWAP_FADE_OUT_DURATION.as_secs_f32();
+                    card.envelope = ((1.0 - progress) * card.fade_out_from as f32) as u8;
+                }
+            }
+            AnimState::Idle => {}
+        }
+
+        // Background cards are dimmer, but the fade is stable: it always stems
+        // from the lifecycle envelope, never from the previous tick's alpha.
+        card.alpha = depth_blend(card.envelope, card.depth);
+
+        if card.animation == AnimState::Idle {
+            finished.push(index);
+        } else {
+            update_card_window(card.hwnd, card);
+        }
+    }
+
+    for index in finished.into_iter().rev() {
+        let card = stack.cards.remove(index);
+        let _ = unsafe { DestroyWindow(card.hwnd) };
+    }
+
+    if stack.cards.is_empty() {
+        let _ = unsafe { KillTimer(hwnd, ANIMATION_TIMER) };
+    }
+}

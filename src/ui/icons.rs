@@ -49,6 +49,25 @@ fn with_strikethrough(base_svg: &[u8]) -> Cow<'static, [u8]> {
 }
 
 impl OsdIcon {
+    /// Stable identity key for the control this icon represents. Boolean state
+    /// variants (e.g. mic on/off) share a key so toggling the same control does
+    /// not create a new OSD card.
+    pub fn kind_key(&self) -> u8 {
+        match self {
+            Self::RazerControlHub => 0,
+            Self::Brightness => 1,
+            Self::KeyboardBrightness => 2,
+            Self::MicMute(_) => 3,
+            Self::Trackpad(_) => 4,
+            Self::RGBEffect => 5,
+            Self::UnderGlow(_) => 6,
+            Self::RefreshRate => 7,
+            Self::BatteryLimit(_) => 8,
+            Self::FunctionKey => 9,
+            Self::GPU => 10,
+        }
+    }
+
     /// Returns the `(uri, bytes)` pair for embedding the icon in the OSD.
     ///
     /// For "off" states the icon is generated dynamically by overlaying a red
