@@ -6,6 +6,8 @@ use tracing::{error, warn};
 use crate::runtime::launch_args::is_settings_mode_arg;
 
 const APP_PROCESS_NAMES: &[&str] = &["blade-controlhub", "blade-controlhub.exe"];
+/// Restart code reserved for recovery paths that must not show the startup OSD.
+pub const SILENT_RESTART_CODE: i32 = 1;
 const SILENT_RESTART_ARGS: &[&str] = &["--silent"];
 const DEFAULT_RESTART_ARGS: &[&str] = &[];
 const DETACHED_PROCESS: u32 = 0x0000_0008;
@@ -28,7 +30,7 @@ pub fn spawn_replacement_app(code: i32) -> std::io::Result<()> {
 }
 
 fn restart_args(code: i32) -> &'static [&'static str] {
-    if code == 1 {
+    if code == SILENT_RESTART_CODE {
         SILENT_RESTART_ARGS
     } else {
         DEFAULT_RESTART_ARGS
@@ -95,7 +97,7 @@ mod tests {
 
     #[test]
     fn restart_code_one_uses_silent_startup() {
-        assert_eq!(restart_args(1), ["--silent"]);
+        assert_eq!(restart_args(SILENT_RESTART_CODE), ["--silent"]);
     }
 
     #[test]

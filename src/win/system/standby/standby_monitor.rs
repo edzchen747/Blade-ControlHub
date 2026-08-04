@@ -257,6 +257,11 @@ fn recover_from_system_wake(source: &'static str, refresh_display: bool) {
         }
         Err(error) => {
             warn!(%error, source, "Failed to reopen Razer HID device after system wake");
+            info!(source, "Restarting silently because wake-time hardware reinitialization failed");
+            crate::ui::prelude::app(crate::ui::app_events::AppEvent::Restart(
+                crate::utils::reload::SILENT_RESTART_CODE,
+            ));
+            return;
         }
     }
     if refresh_display {
