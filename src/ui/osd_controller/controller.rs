@@ -16,7 +16,6 @@ use windows::{
 
 use crate::ui::icons::OsdIcon;
 
-// Global instance manager allowing static methods to access the internal background thread
 static OSD_INSTANCE: OnceLock<Option<OsdController>> = OnceLock::new();
 static OSD_RUNNING: AtomicBool = AtomicBool::new(false);
 static OSD_THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
@@ -38,113 +37,93 @@ const FADE_IN_DURATION: Duration = Duration::from_millis(150);
 const HOLD_DURATION: Duration = Duration::from_millis(1500);
 const FADE_OUT_DURATION: Duration = Duration::from_millis(500);
 const SWAP_FADE_OUT_DURATION: Duration = Duration::from_millis(180);
-/// Delay after the swap fade-out before the new front card fades in.
-const SWAP_IN_DELAY: Duration = Duration::from_millis(30);
-/// The front card's stage-1 slide to the halfway line runs on the swap's own
-/// timeline, landing on the midpoint exactly when the depths swap — it must
-/// never overlap stage 2's slide-in.
-const DEPTH_SWAP_SLIDE_DURATION: Duration = Duration::from_millis(
-    SWAP_FADE_OUT_DURATION.as_millis() as u64 + SWAP_IN_DELAY.as_millis() as u64,
+const SWAP_SHOW_NEW_DELAY: Duration = Duration::from_millis(30);
+const FRONT_CARD_MIDPOINT_DURATION: Duration = Duration::from_millis(
+    SWAP_FADE_OUT_DURATION.as_millis() as u64 + SWAP_SHOW_NEW_DELAY.as_millis() as u64,
 );
-/// Envelope level the sliding front card dims to during a swap (swap-only).
-const SWAP_BACK_ALPHA: u8 = 140;
-/// Distance (96-dpi px) the new front card rises while fading in during the
-/// swap's second stage.
-const SWAP_IN_SLIDE_PX: f32 = 24.0;
+const RECEDING_CARD_ALPHA: u8 = 140;
+const PROMOTED_CARD_Y_OFFSET: f32 = 24.0;
 
 const BASE_SIZE: f32 = 200.0;
 const ICON_TARGET_WIDTH: f32 = 60.0;
 const ICON_TARGET_HEIGHT: f32 = 60.0;
 
-// Card-stack depth tuning: every background level shrinks, darkens and rises.
-const DEPTH_SCALE: f32 = 0.85;
-const DEPTH_ALPHA: f32 = 0.3;
-const DEPTH_OFFSET: f32 = 22.0;
+const STACK_DEPTH_SCALE: f32 = 0.85;
+const STACK_DEPTH_ALPHA: f32 = 0.3;
+const STACK_DEPTH_Y_OFFSET: f32 = 22.0;
 
-// Every OSD animation (depth slides, swap slide-up, fade envelopes) is a
-// duration-based tween driven by a smooth ease-in-out curve: slow start,
-// fastest in the middle, slow landing.
-const DEPTH_EASE_DURATION: Duration = Duration::from_millis(500);
+const CARD_TRANSITION_DURATION: Duration = Duration::from_millis(400);
 
-// Rasterization size grid (physical px). Size-animation ticks only re-render
-// when the card crosses a grid line, so easing stays cheap; the window size
-// always matches the rendered size.
-const RENDER_GRID: u32 = 4;
+const RENDER_SIZE_GRID_PX: u32 = 4;
 
 #[derive(Clone, Copy, PartialEq)]
-enum AnimState {
-    FadeIn,
-    Hold,
-    FadeOut,
-    /// Stage timing for a pair swap: during `SWAP_FADE_OUT_DURATION` the rear
-    /// card fades out (`swap_fade`) while the front card slides to the
-    /// midpoint; after an additional `SWAP_IN_DELAY` beat the depths swap
-    /// (`swap_to`) and the rear card fades back in at the front while the
-    /// front card continues sliding to the rear.
-    SwapOut,
-    Idle,
+enum CardLifecycle {
+    FadingIn,
+    Holding,
+    FadingOut,
+    Swapping,
+    Expired,
 }
 
-/// A single stacked OSD card. `depth`/`target_depth` animate towards the
-/// card's resting place in the stack: 0 is the front card, growing values
-/// recede (smaller, higher, more transparent). `envelope` tracks the
-/// fade-in/hold/fade-out lifecycle; `alpha` is the envelope blended with the
-/// depth fade and is recomputed from scratch every tick.
+struct SwapDestination {
+    hidden_stack_depth: f32,
+    final_stack_depth: f32,
+}
+
 struct OsdCard {
     hwnd: HWND,
-    kind: Option<u8>,
+    identity: Option<u8>,
     params: OsdParams,
-    animation: AnimState,
-    animation_started_at: Option<Instant>,
-    envelope: u8,
-    alpha: u8,
-    depth: f32,
-    target_depth: f32,
-    /// Eased depth transition state: `depth` tweens from `depth_from` toward
-    /// `target_depth` over `depth_tween_duration`. Re-targeting mid-flight
-    /// continues from the current animated value.
-    depth_from: f32,
-    depth_started_at: Option<Instant>,
-    /// Duration of the current depth tween. Defaults to `DEPTH_EASE_DURATION`;
-    /// the pair swap's stage-1 slide uses `DEPTH_SWAP_SLIDE_DURATION`.
-    depth_tween_duration: Duration,
-    /// Envelope value captured when a fade-out phase starts, so quick and slow
-    /// fades begin exactly where the card is instead of jumping.
-    fade_out_from: u8,
-    /// (landing, final) depth pair applied when the current `SwapOut`
-    /// completes: the card appears at `landing` while invisible, then eases
-    /// to `final` during the fade-in. Pair swaps move at most one card per
-    /// phase so only one card re-renders at a time.
-    swap_to: Option<(f32, f32)>,
-    /// Whether the card fades out during `SwapOut`. The rear card of a pair
-    /// swap fades (then fades back in at the front); the front card stays
-    /// visible, dims to `SWAP_BACK_ALPHA` while sliding back, and only slides.
-    swap_fade: bool,
-    /// Vertical rise (96-dpi px) of the new front card while it fades in at
-    /// the swap's second stage: tweens from `SWAP_IN_SLIDE_PX` to 0 over
-    /// `DEPTH_EASE_DURATION`.
-    slide_up: f32,
-    slide_up_target: f32,
-    slide_up_from: f32,
-    slide_up_started_at: Option<Instant>,
+    lifecycle: CardLifecycle,
+    lifecycle_started_at: Option<Instant>,
+    lifecycle_alpha: u8,
+    composited_alpha: u8,
+    stack_depth: f32,
+    target_stack_depth: f32,
+    stack_depth_start: f32,
+    stack_depth_started_at: Option<Instant>,
+    stack_depth_transition_duration: Duration,
+    fade_out_start_alpha: u8,
+    swap_destination: Option<SwapDestination>,
+    is_promoted_during_swap: bool,
+    promotion_y_offset: f32,
+    promotion_y_offset_target: f32,
+    promotion_y_offset_start: f32,
+    promotion_y_offset_started_at: Option<Instant>,
     dirty: bool,
-    last_alpha: u8,
-    last_depth: f32,
+    last_composited_alpha: u8,
+    last_stack_depth: f32,
     render: Option<CardRendering>,
     layers: Option<SvgLayers>,
 }
 
 impl OsdCard {
-    /// The stack depth this card is settling at, resolving any in-flight
-    /// swap. Swap math must use settle depths (not the animated `depth`) so
-    /// rapid consecutive triggers keep whole levels instead of landing on
-    /// fractional depths that look like one unstacked card.
-    fn settle_depth(&self) -> f32 {
-        self.swap_to.map_or(self.target_depth, |(_, settle)| settle)
+    fn final_stack_depth(&self) -> f32 {
+        self.swap_destination
+            .as_ref()
+            .map_or(self.target_stack_depth, |destination| {
+                destination.final_stack_depth
+            })
+    }
+
+    fn fade_in_duration(&self) -> Duration {
+        if self.is_promoted_during_swap {
+            CARD_TRANSITION_DURATION
+        } else {
+            FADE_IN_DURATION
+        }
+    }
+
+    fn fade_in_progress(&self, elapsed: Duration) -> f32 {
+        let progress = elapsed.as_secs_f32() / self.fade_in_duration().as_secs_f32();
+        if self.is_promoted_during_swap {
+            ease_out(progress)
+        } else {
+            progress
+        }
     }
 }
 
-/// Shared state for all OSD cards, owned by the hidden controller window.
 #[derive(Default)]
 struct OsdStackState {
     cards: Vec<OsdCard>,
@@ -158,16 +137,12 @@ pub struct OsdParams {
 }
 
 impl OsdParams {
-    /// Identity of the control this OSD represents. Updates with the same kind
-    /// replace the front card in place; different kinds stack behind it.
-    fn kind(&self) -> Option<u8> {
+    fn identity(&self) -> Option<u8> {
         self.icon.map(|icon| icon.kind_key())
     }
 }
 
 static SVG_OPTIONS: OnceLock<resvg::usvg::Options<'static>> = OnceLock::new();
-
-// --- ENCAPSULATED OSD CONTROLLER CLASS ---
 
 pub struct OsdController {
     hwnd: HWND,
@@ -186,10 +161,7 @@ unsafe impl Send for OsdController {}
 unsafe impl Sync for OsdController {}
 
 impl OsdController {
-    /// PUBLIC STATIC METHOD: Call this from ANY thread without initializing an instance.
-    /// Example: `OsdController::show(params);`
     pub fn show(params: OsdParams) {
-        // Automatically fetch or initialize the internal static instance safely
         let controller = OSD_INSTANCE.get_or_init(Self::init_internal);
         let Some(controller) = controller.as_ref() else {
             warn!("OSD window is unavailable; dropping OSD update");
@@ -200,7 +172,6 @@ impl OsdController {
             return;
         }
 
-        // Post the cross-thread signal to our dedicated UI window loop
         post_osd_update(controller.hwnd, params);
     }
 
@@ -213,7 +184,6 @@ impl OsdController {
         join_osd_thread();
     }
 
-    /// Internal private initializer that handles background thread setup and affinity constraints
     fn init_internal() -> Option<Self> {
         let (tx, rx) = std::sync::mpsc::channel::<Option<SendableHwnd>>();
 
@@ -228,7 +198,6 @@ impl OsdController {
             }
         };
 
-        // Unwrap our sendable wrapper back into a standard HWND
         let Some(SendableHwnd(hwnd)) = rx.recv_timeout(Duration::from_secs(2)).ok().flatten()
         else {
             warn!("Timed out while creating OSD window thread");
@@ -241,9 +210,6 @@ impl OsdController {
         Some(OsdController { hwnd })
     }
 
-    /// Pure procedural Win32 engine callback handler. The hidden controller
-    /// window owns the stack state; each visible card is a separate layered
-    /// window of the same class with no user data of its own.
     extern "system" fn window_proc(
         hwnd: HWND,
         msg: u32,
@@ -308,7 +274,6 @@ impl OsdController {
                     }
                 }
                 WM_DESTROY => {
-                    // Only the controller window carries the stack in user data.
                     let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
                     if ptr != 0 {
                         drop_osd_state(hwnd);
@@ -342,25 +307,25 @@ mod identity_tests {
     fn boolean_state_does_not_change_osd_identity() {
         let mic_on = params(Some(OsdIcon::MicMute(false)), "");
         let mic_off = params(Some(OsdIcon::MicMute(true)), "");
-        assert_eq!(mic_on.kind(), mic_off.kind());
+        assert_eq!(mic_on.identity(), mic_off.identity());
 
         let trackpad_on = params(Some(OsdIcon::Trackpad(true)), "");
         let trackpad_off = params(Some(OsdIcon::Trackpad(false)), "");
-        assert_eq!(trackpad_on.kind(), trackpad_off.kind());
+        assert_eq!(trackpad_on.identity(), trackpad_off.identity());
     }
 
     #[test]
     fn different_controls_have_distinct_identities() {
         let brightness = params(Some(OsdIcon::Brightness), "");
         let keyboard = params(Some(OsdIcon::KeyboardBrightness), "");
-        assert_ne!(brightness.kind(), keyboard.kind());
+        assert_ne!(brightness.identity(), keyboard.identity());
     }
 
     #[test]
     fn icon_less_osds_share_one_slot() {
         let perf_mode = params(None, "Balanced");
         let rgb_effect = params(None, "Wave");
-        assert_eq!(perf_mode.kind(), rgb_effect.kind());
-        assert_eq!(perf_mode.kind(), None);
+        assert_eq!(perf_mode.identity(), rgb_effect.identity());
+        assert_eq!(perf_mode.identity(), None);
     }
 }

@@ -72,7 +72,7 @@ impl Drop for ObjectSelection {
 }
 
 /// Cached DIB section backing one card's layered window. Rebuilt only when the
-/// card's physical size changes; alpha and position updates reuse the buffer.
+/// card's physical size changes; composited_alpha and position updates reuse the buffer.
 /// Field order matters: `selection` restores the DC's old object first, then
 /// the bitmap is deleted, then the DC is released.
 ///
@@ -136,23 +136,23 @@ impl CardRendering {
 fn update_card_window(hwnd: HWND, card: &mut OsdCard) {
     let dpi = unsafe { GetDpiForWindow(hwnd) };
     let scale_factor = dpi as f32 / 96.0;
-    let depth_scale = DEPTH_SCALE.powf(card.depth);
+    let depth_scale = STACK_DEPTH_SCALE.powf(card.stack_depth);
 
-    let physical_width = ((BASE_SIZE * depth_scale * scale_factor / RENDER_GRID as f32)
+    let physical_width = ((BASE_SIZE * depth_scale * scale_factor / RENDER_SIZE_GRID_PX as f32)
         .round()
         .max(1.0) as u32)
-        * RENDER_GRID;
-    let physical_height = ((BASE_SIZE * depth_scale * scale_factor / RENDER_GRID as f32)
+        * RENDER_SIZE_GRID_PX;
+    let physical_height = ((BASE_SIZE * depth_scale * scale_factor / RENDER_SIZE_GRID_PX as f32)
         .round()
         .max(1.0) as u32)
-        * RENDER_GRID;
+        * RENDER_SIZE_GRID_PX;
 
     let size_changed = card
         .render
         .as_ref()
         .is_none_or(|rendering| rendering.size != (physical_width, physical_height));
-    let alpha_changed = card.last_alpha != card.alpha;
-    let depth_changed = (card.last_depth - card.depth).abs() > 0.0001;
+    let alpha_changed = card.last_composited_alpha != card.composited_alpha;
+    let depth_changed = (card.last_stack_depth - card.stack_depth).abs() > 0.0001;
     let theme_changed = card
         .layers
         .as_ref()
@@ -212,14 +212,14 @@ fn update_card_window(hwnd: HWND, card: &mut OsdCard) {
     };
 
     // Depth 0 matches the previous centered placement; deeper cards rise and
-    // shrink towards the top of the stack. `slide_up` offsets the new front
+    // shrink towards the top of the stack. `promotion_y_offset` offsets the new front
     // card below its spot, then eases up to 0 as it fades in.
     let screen_width = unsafe { GetSystemMetrics(SM_CXSCREEN) };
     let screen_height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
     let base_px = (BASE_SIZE * scale_factor).round() as i32;
     let base_y = ((screen_height - base_px) * 5) / 6;
-    let depth_offset_px = (DEPTH_OFFSET * scale_factor * card.depth).round() as i32;
-    let slide_up_px = (card.slide_up * scale_factor).round() as i32;
+    let depth_offset_px = (STACK_DEPTH_Y_OFFSET * scale_factor * card.stack_depth).round() as i32;
+    let slide_up_px = (card.promotion_y_offset * scale_factor).round() as i32;
 
     let ppt_dst = POINT {
         x: (screen_width - physical_width as i32) / 2,
@@ -234,7 +234,7 @@ fn update_card_window(hwnd: HWND, card: &mut OsdCard) {
     let blend = BLENDFUNCTION {
         BlendOp: AC_SRC_OVER as u8,
         BlendFlags: 0,
-        SourceConstantAlpha: card.alpha,
+        SourceConstantAlpha: card.composited_alpha,
         AlphaFormat: AC_SRC_ALPHA as u8,
     };
 
@@ -252,8 +252,8 @@ fn update_card_window(hwnd: HWND, card: &mut OsdCard) {
         )
     };
 
-    card.last_alpha = card.alpha;
-    card.last_depth = card.depth;
+    card.last_composited_alpha = card.composited_alpha;
+    card.last_stack_depth = card.stack_depth;
 }
 
 #[cfg(test)]
