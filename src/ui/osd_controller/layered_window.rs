@@ -212,16 +212,18 @@ fn update_card_window(hwnd: HWND, card: &mut OsdCard) {
     };
 
     // Depth 0 matches the previous centered placement; deeper cards rise and
-    // shrink towards the top of the stack.
+    // shrink towards the top of the stack. `slide_up` offsets the new front
+    // card below its spot, then eases up to 0 as it fades in.
     let screen_width = unsafe { GetSystemMetrics(SM_CXSCREEN) };
     let screen_height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
     let base_px = (BASE_SIZE * scale_factor).round() as i32;
     let base_y = ((screen_height - base_px) * 5) / 6;
     let depth_offset_px = (DEPTH_OFFSET * scale_factor * card.depth).round() as i32;
+    let slide_up_px = (card.slide_up * scale_factor).round() as i32;
 
     let ppt_dst = POINT {
         x: (screen_width - physical_width as i32) / 2,
-        y: base_y - depth_offset_px,
+        y: base_y - depth_offset_px + slide_up_px,
     };
     let size = SIZE {
         cx: physical_width as i32,

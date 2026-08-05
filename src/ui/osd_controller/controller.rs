@@ -37,7 +37,20 @@ const TARGET_ALPHA: u8 = 230;
 const FADE_IN_DURATION: Duration = Duration::from_millis(150);
 const HOLD_DURATION: Duration = Duration::from_millis(1500);
 const FADE_OUT_DURATION: Duration = Duration::from_millis(500);
-const SWAP_FADE_OUT_DURATION: Duration = Duration::from_millis(120);
+const SWAP_FADE_OUT_DURATION: Duration = Duration::from_millis(180);
+/// Delay after the swap fade-out before the new front card fades in.
+const SWAP_IN_DELAY: Duration = Duration::from_millis(30);
+/// The front card's stage-1 slide to the halfway line runs on the swap's own
+/// timeline, landing on the midpoint exactly when the depths swap — it must
+/// never overlap stage 2's slide-in.
+const DEPTH_SWAP_SLIDE_DURATION: Duration = Duration::from_millis(
+    SWAP_FADE_OUT_DURATION.as_millis() as u64 + SWAP_IN_DELAY.as_millis() as u64,
+);
+/// Envelope level the sliding front card dims to during a swap (swap-only).
+const SWAP_BACK_ALPHA: u8 = 140;
+/// Distance (96-dpi px) the new front card rises while fading in during the
+/// swap's second stage.
+const SWAP_IN_SLIDE_PX: f32 = 24.0;
 
 const BASE_SIZE: f32 = 200.0;
 const ICON_TARGET_WIDTH: f32 = 60.0;
@@ -45,9 +58,13 @@ const ICON_TARGET_HEIGHT: f32 = 60.0;
 
 // Card-stack depth tuning: every background level shrinks, darkens and rises.
 const DEPTH_SCALE: f32 = 0.85;
-const DEPTH_ALPHA: f32 = 0.2;
+const DEPTH_ALPHA: f32 = 0.3;
 const DEPTH_OFFSET: f32 = 22.0;
-const DEPTH_ANIM_RATE: f32 = 0.36;
+
+// Every OSD animation (depth slides, swap slide-up, fade envelopes) is a
+// duration-based tween driven by a smooth ease-in-out curve: slow start,
+// fastest in the middle, slow landing.
+const DEPTH_EASE_DURATION: Duration = Duration::from_millis(500);
 
 // Rasterization size grid (physical px). Size-animation ticks only re-render
 // when the card crosses a grid line, so easing stays cheap; the window size
@@ -59,8 +76,11 @@ enum AnimState {
     FadeIn,
     Hold,
     FadeOut,
-    /// Quick vanish of the card that ends up at the back of an instant pair
-    /// swap; followed by a slower `FadeIn` so the swap reads as a blink.
+    /// Stage timing for a pair swap: during `SWAP_FADE_OUT_DURATION` the rear
+    /// card fades out (`swap_fade`) while the front card slides to the
+    /// midpoint; after an additional `SWAP_IN_DELAY` beat the depths swap
+    /// (`swap_to`) and the rear card fades back in at the front while the
+    /// front card continues sliding to the rear.
     SwapOut,
     Idle,
 }
@@ -80,6 +100,14 @@ struct OsdCard {
     alpha: u8,
     depth: f32,
     target_depth: f32,
+    /// Eased depth transition state: `depth` tweens from `depth_from` toward
+    /// `target_depth` over `depth_tween_duration`. Re-targeting mid-flight
+    /// continues from the current animated value.
+    depth_from: f32,
+    depth_started_at: Option<Instant>,
+    /// Duration of the current depth tween. Defaults to `DEPTH_EASE_DURATION`;
+    /// the pair swap's stage-1 slide uses `DEPTH_SWAP_SLIDE_DURATION`.
+    depth_tween_duration: Duration,
     /// Envelope value captured when a fade-out phase starts, so quick and slow
     /// fades begin exactly where the card is instead of jumping.
     fade_out_from: u8,
@@ -88,6 +116,17 @@ struct OsdCard {
     /// to `final` during the fade-in. Pair swaps move at most one card per
     /// phase so only one card re-renders at a time.
     swap_to: Option<(f32, f32)>,
+    /// Whether the card fades out during `SwapOut`. The rear card of a pair
+    /// swap fades (then fades back in at the front); the front card stays
+    /// visible, dims to `SWAP_BACK_ALPHA` while sliding back, and only slides.
+    swap_fade: bool,
+    /// Vertical rise (96-dpi px) of the new front card while it fades in at
+    /// the swap's second stage: tweens from `SWAP_IN_SLIDE_PX` to 0 over
+    /// `DEPTH_EASE_DURATION`.
+    slide_up: f32,
+    slide_up_target: f32,
+    slide_up_from: f32,
+    slide_up_started_at: Option<Instant>,
     dirty: bool,
     last_alpha: u8,
     last_depth: f32,

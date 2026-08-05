@@ -188,7 +188,48 @@ fn drop_osd_state(hwnd: HWND) {
 /// envelope (instead of multiplying the previous tick's alpha) keeps the
 /// background fade stable and lets fade-out start exactly where the card is.
 fn depth_blend(envelope: u8, depth: f32) -> u8 {
-    ((envelope as f32) * DEPTH_ALPHA.powf(depth)).round() as u8
+    ((envelope as f32) * DEPTH_ALPHA.powf(depth))
+        .round()
+        .clamp(0.0, 255.0) as u8
+}
+
+/// Ease-out curve for sliding animations: start at full speed and decelerate
+/// into a slow, soft landing so cards look like they arrive and click into
+/// place (easeOutQuart).
+fn ease_out(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    (1.0 - (t - 1.0).powf(2.0)).sqrt()
+}
+
+fn tween_progress(started_at: Instant, now: Instant, duration: Duration) -> f32 {
+    (now.duration_since(started_at).as_secs_f32() / duration.as_secs_f32()).min(1.0)
+}
+
+/// Starts an eased depth transition toward `target`, continuing from the
+/// card's current animated depth. No-op when already at the target.
+fn retarget_depth(card: &mut OsdCard, target_depth: f32, now: Instant) {
+    if (card.depth - target_depth).abs() < 0.0001 {
+        card.depth = target_depth;
+        card.target_depth = target_depth;
+        card.depth_started_at = None;
+        return;
+    }
+    card.depth_from = card.depth;
+    card.target_depth = target_depth;
+    card.depth_started_at = Some(now);
+}
+
+/// Starts the eased slide-up of the new front card toward `target`.
+fn retarget_slide_up(card: &mut OsdCard, target: f32, now: Instant) {
+    if (card.slide_up - target).abs() < 0.01 {
+        card.slide_up = target;
+        card.slide_up_target = target;
+        card.slide_up_started_at = None;
+        return;
+    }
+    card.slide_up_from = card.slide_up;
+    card.slide_up_target = target;
+    card.slide_up_started_at = Some(now);
 }
 
 fn handle_osd_params(hwnd: HWND, stack: &mut OsdStackState, params: OsdParams) {
@@ -199,14 +240,21 @@ fn handle_osd_params(hwnd: HWND, stack: &mut OsdStackState, params: OsdParams) {
     if let Some(front) = stack.cards.first_mut()
         && front.kind == kind
     {
+        let now = Instant::now();
         front.params = params;
         front.dirty = true;
         front.animation = AnimState::Hold;
-        front.animation_started_at = Some(Instant::now());
+        front.animation_started_at = Some(now);
         front.envelope = TARGET_ALPHA;
         front.depth = 0.0;
         front.target_depth = 0.0;
+        front.depth_from = 0.0;
+        front.depth_started_at = None;
+        front.depth_tween_duration = DEPTH_EASE_DURATION;
         front.swap_to = None;
+        front.slide_up = 0.0;
+        front.slide_up_target = 0.0;
+        front.slide_up_started_at = None;
         update_card_window(front.hwnd, front);
         ensure_animation_timer(hwnd, stack);
         return;
@@ -223,17 +271,22 @@ fn handle_osd_params(hwnd: HWND, stack: &mut OsdStackState, params: OsdParams) {
         let midpoint = (front_settle + rear_settle) / 2.0;
 
         if index == 1 {
-            // Front pair: while both cards fade out, only the front card
-            // slides back to the halfway line — the rear card stays put.
-            // While invisible the depths swap, then only the card that lands
-            // at the rear slides back to it during the fade-in. One moving
-            // card per phase, so only one card re-renders at a time. Cards
-            // behind the pair stay untouched (no flash, same timeout).
+            // Front pair, stage 1: the rear card fades out while the front
+            // card stays visible and slides to the halfway line. Stage 2:
+            // depths swap while the rear is invisible, then the rear card
+            // fades back in at the front while the front card continues
+            // sliding to the rear. One moving card per phase, so only one
+            // card re-renders at a time. Cards behind the pair stay
+            // untouched (no flash, same timeout).
             let swapped = &mut stack.cards[0];
             swapped.animation = AnimState::SwapOut;
             swapped.animation_started_at = Some(now);
-            swapped.fade_out_from = swapped.envelope;
-            swapped.target_depth = midpoint;
+            swapped.swap_fade = false;
+            swapped.envelope = TARGET_ALPHA;
+            // The stage-1 slide must land on the midpoint exactly when the
+            // depths swap, so it runs on the swap's own timeline.
+            swapped.depth_tween_duration = DEPTH_SWAP_SLIDE_DURATION;
+            retarget_depth(swapped, midpoint, now);
             swapped.swap_to = Some((midpoint, rear_settle));
         } else {
             // Several cards stand in front: they slide one level back (eased)
@@ -242,7 +295,7 @@ fn handle_osd_params(hwnd: HWND, stack: &mut OsdStackState, params: OsdParams) {
                 if let Some((_, settle)) = card.swap_to.as_mut() {
                     *settle += 1.0;
                 } else {
-                    card.target_depth += 1.0;
+                    retarget_depth(card, card.target_depth + 1.0, now);
                 }
             }
         }
@@ -252,10 +305,16 @@ fn handle_osd_params(hwnd: HWND, stack: &mut OsdStackState, params: OsdParams) {
         triggered.dirty = true;
         triggered.animation = AnimState::SwapOut;
         triggered.animation_started_at = Some(now);
+        triggered.swap_fade = true;
         triggered.fade_out_from = triggered.envelope;
-        // Land directly on the front position while invisible; it stays put
-        // during the fade-in (only the rear card moves).
+        // Land directly on the front position while invisible; it fades back
+        // in there (rising into place) while the old front card slides to the
+        // rear.
         triggered.swap_to = Some((0.0, front_settle));
+        triggered.slide_up = SWAP_IN_SLIDE_PX;
+        triggered.slide_up_target = SWAP_IN_SLIDE_PX;
+        triggered.slide_up_from = SWAP_IN_SLIDE_PX;
+        triggered.slide_up_started_at = None;
         stack.cards.insert(0, triggered);
 
         let front = &mut stack.cards[0];
@@ -267,11 +326,12 @@ fn handle_osd_params(hwnd: HWND, stack: &mut OsdStackState, params: OsdParams) {
 
     // A new control: push every existing card one level back and create a
     // fresh front card. Depth is unbounded, so the stack can grow freely.
+    let now = Instant::now();
     for card in stack.cards.iter_mut() {
         if let Some((_, settle)) = card.swap_to.as_mut() {
             *settle += 1.0;
         } else {
-            card.target_depth += 1.0;
+            retarget_depth(card, card.target_depth + 1.0, now);
         }
     }
 
@@ -298,8 +358,16 @@ fn create_front_card(params: OsdParams) -> Option<OsdCard> {
         alpha: 0,
         depth: 0.0,
         target_depth: 0.0,
+        depth_from: 0.0,
+        depth_started_at: None,
+        depth_tween_duration: DEPTH_EASE_DURATION,
         fade_out_from: 0,
         swap_to: None,
+        swap_fade: false,
+        slide_up: 0.0,
+        slide_up_target: 0.0,
+        slide_up_from: 0.0,
+        slide_up_started_at: None,
         dirty: true,
         last_alpha: 0,
         last_depth: 0.0,
@@ -343,10 +411,28 @@ fn tick_osd_stack(hwnd: HWND, stack: &mut OsdStackState) {
     let mut finished: Vec<usize> = Vec::new();
 
     for (index, card) in stack.cards.iter_mut().enumerate() {
-        if (card.target_depth - card.depth).abs() > 0.0005 {
-            card.depth += (card.target_depth - card.depth) * DEPTH_ANIM_RATE;
-        } else {
-            card.depth = card.target_depth;
+        // Depth transition: duration-based ease-out (fast start, slow
+        // landing). Re-targets continue from the current value.
+        if let Some(started) = card.depth_started_at {
+            let progress = tween_progress(started, now, card.depth_tween_duration);
+            card.depth =
+                card.depth_from + (card.target_depth - card.depth_from) * ease_out(progress);
+            if progress >= 1.0 {
+                card.depth = card.target_depth;
+                card.depth_started_at = None;
+            }
+        }
+
+        // Vertical slide of the new front card rising into place. Runs on the
+        // ease-out curve: fast start, smooth landing.
+        if let Some(started) = card.slide_up_started_at {
+            let progress = tween_progress(started, now, DEPTH_EASE_DURATION);
+            card.slide_up = card.slide_up_from
+                + (card.slide_up_target - card.slide_up_from) * ease_out(progress);
+            if progress >= 1.0 {
+                card.slide_up = card.slide_up_target;
+                card.slide_up_started_at = None;
+            }
         }
 
         let Some(started_at) = card.animation_started_at else {
@@ -362,7 +448,15 @@ fn tick_osd_stack(hwnd: HWND, stack: &mut OsdStackState) {
                     card.envelope = TARGET_ALPHA;
                 } else {
                     let progress = elapsed.as_secs_f32() / FADE_IN_DURATION.as_secs_f32();
-                    card.envelope = (progress * TARGET_ALPHA as f32) as u8;
+                    // The swap's foreground card fades in with the soft slide
+                    // curve (fast start, gentle landing); brand-new cards
+                    // stay linear.
+                    let curve = if card.swap_fade {
+                        ease_out(progress)
+                    } else {
+                        progress
+                    };
+                    card.envelope = (curve * TARGET_ALPHA as f32) as u8;
                 }
             }
             AnimState::Hold => {
@@ -383,20 +477,48 @@ fn tick_osd_stack(hwnd: HWND, stack: &mut OsdStackState) {
                 }
             }
             AnimState::SwapOut => {
-                if elapsed >= SWAP_FADE_OUT_DURATION {
-                    card.animation = AnimState::FadeIn;
-                    card.animation_started_at = Some(now);
-                    card.envelope = 0;
-                    // Appear at the landing depth while invisible, then ease
-                    // to the swapped depth during the fade-in.
+                if elapsed >= SWAP_FADE_OUT_DURATION + SWAP_IN_DELAY {
+                    // Land on the swapped depth while invisible, then ease to
+                    // it during the next stage.
                     if let Some((landing, settle)) = card.swap_to.take() {
                         card.depth = landing;
-                        card.target_depth = settle;
+                        // Stage-2 slides run at the normal duration again.
+                        card.depth_tween_duration = DEPTH_EASE_DURATION;
+                        retarget_depth(card, settle, now);
                     }
-                } else {
-                    let progress =
-                        elapsed.as_secs_f32() / SWAP_FADE_OUT_DURATION.as_secs_f32();
+                    if card.swap_fade {
+                        // Rear card: invisible after the fade-out, so it fades
+                        // back in at its swapped (front) position, rising into
+                        // place.
+                        card.animation = AnimState::FadeIn;
+                        card.animation_started_at = Some(now);
+                        card.envelope = 0;
+                        retarget_slide_up(card, 0.0, now);
+                    } else {
+                        // Front card: never faded — it just continues its hold
+                        // while sliding to the rear, staying dimmed.
+                        card.animation = AnimState::Hold;
+                        card.animation_started_at = Some(now);
+                        card.envelope = SWAP_BACK_ALPHA;
+                    }
+                } else if elapsed >= SWAP_FADE_OUT_DURATION {
+                    // Fade-out finished; hold the invisible beat before the
+                    // new front card fades in.
+                    if card.swap_fade {
+                        card.envelope = 0;
+                    } else {
+                        card.envelope = SWAP_BACK_ALPHA;
+                    }
+                } else if card.swap_fade {
+                    let progress = elapsed.as_secs_f32() / SWAP_FADE_OUT_DURATION.as_secs_f32();
                     card.envelope = ((1.0 - progress) * card.fade_out_from as f32) as u8;
+                } else {
+                    // The sliding front card dims as soon as it starts moving
+                    // back. Swap-only: normal push-backs dim via depth alone.
+                    let progress = elapsed.as_secs_f32() / SWAP_FADE_OUT_DURATION.as_secs_f32();
+                    card.envelope = (TARGET_ALPHA as f32
+                        - (TARGET_ALPHA as f32 - SWAP_BACK_ALPHA as f32) * progress)
+                        as u8;
                 }
             }
             AnimState::Idle => {}
