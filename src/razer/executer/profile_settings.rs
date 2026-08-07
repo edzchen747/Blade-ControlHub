@@ -156,6 +156,15 @@ impl<'a> Executer<'a> {
         Ok(())
     }
 
+    fn set_advanced_experimental_features(
+        &mut self,
+        enabled: bool,
+    ) -> crate::error::AppResult<()> {
+        self.app_config.advanced_experimental_features = enabled;
+        self.persist_config();
+        Ok(())
+    }
+
     fn set_theme_color(&mut self, color: ThemeColor) -> crate::error::AppResult<()> {
         disable_osd! {
             self.app_config.theme_color = color;

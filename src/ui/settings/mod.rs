@@ -17,6 +17,9 @@ pub mod store;
 pub use settings_model::Settings;
 
 pub const THEME_COLOR_COMMIT_DEBOUNCE: Duration = Duration::from_millis(180);
+pub(super) const SECTION_TITLE_SIZE: f32 = 16.0;
+pub(super) const CHOICE_BUTTON_HEIGHT: f32 = 27.0;
+pub(super) const CHOICE_BUTTONS_PER_ROW: usize = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CustomModeSetting {
@@ -36,6 +39,7 @@ impl CustomModeSetting {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SettingsCommand {
     SetPrimaryMultimediaKeys(bool),
+    SetAdvancedExperimentalFeatures(bool),
     SetPerfMode(PowerProfile, PerfMode),
     SetCustomModeConfig { cpu_level: u8, gpu_level: u8 },
     SetFanSpeed(PowerProfile, u8),
@@ -57,6 +61,111 @@ pub fn custom_mode_level_name(level: u8) -> &'static str {
         3 => "Max",
         _ => "Unknown",
     }
+}
+
+/// The shared heading treatment for every boxed settings section.
+pub(super) fn section_title(title: &str) -> egui::RichText {
+    egui::RichText::new(title).size(SECTION_TITLE_SIZE)
+}
+
+/// The shared selectable-button treatment for settings choices.
+pub(super) fn choice_button(
+    ui: &mut egui::Ui,
+    selected: bool,
+    label: impl Into<String>,
+    width: f32,
+) -> egui::Response {
+    let label = label.into();
+    let accent = ui.visuals().selection.bg_fill;
+    let text_color = if selected {
+        ui.visuals().selection.stroke.color
+    } else {
+        ui.visuals().widgets.inactive.fg_stroke.color
+    };
+    let border = if selected {
+        egui::Stroke::new(1.0_f32, accent)
+    } else {
+        egui::Stroke::new(1.0_f32, egui::Color32::from_gray(82))
+    };
+    let fill = if selected {
+        accent
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(width, CHOICE_BUTTON_HEIGHT),
+        egui::Sense::click(),
+    );
+
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.style().interact(&response);
+        ui.painter().rect(rect, visuals.rounding, fill, border);
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            label,
+            egui::TextStyle::Button.resolve(ui.style()),
+            text_color,
+        );
+    }
+
+    response
+}
+
+/// A compact on/off switch, used for boolean settings instead of a checkbox.
+fn toggle_switch(ui: &mut egui::Ui, enabled: &mut bool) -> egui::Response {
+    let desired_size = egui::vec2(
+        ui.spacing().interact_size.x * 0.75,
+        ui.spacing().interact_size.y * 0.75,
+    );
+    let (rect, mut response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+
+    if response.clicked() {
+        *enabled = !*enabled;
+        response.mark_changed();
+    }
+
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.style().interact_selectable(&response, *enabled);
+        let track_rect = rect.expand(visuals.expansion);
+        let radius = track_rect.height() / 2.0;
+        ui.painter()
+            .rect(track_rect, radius, visuals.bg_fill, visuals.bg_stroke);
+
+        let knob_radius = radius - 2.0;
+        let knob_x = egui::lerp(
+            (track_rect.left() + radius)..=(track_rect.right() - radius),
+            ui.ctx().animate_bool(response.id, *enabled),
+        );
+        ui.painter().circle_filled(
+            egui::pos2(knob_x, track_rect.center().y),
+            knob_radius,
+            visuals.fg_stroke.color,
+        );
+    }
+
+    response
+}
+
+/// A labelled toggle whose control stays aligned to the section's right edge.
+pub(super) fn right_aligned_toggle(
+    ui: &mut egui::Ui,
+    label: impl Into<egui::WidgetText>,
+    enabled: &mut bool,
+) -> egui::Response {
+    let row_size = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
+    ui.allocate_ui_with_layout(
+        row_size,
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.label(label);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                toggle_switch(ui, enabled)
+            })
+            .inner
+        },
+    )
+    .inner
 }
 
 pub(super) fn primary_tab(ui: &mut egui::Ui, selected_tab: &mut String, label: &str) {

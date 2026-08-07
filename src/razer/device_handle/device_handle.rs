@@ -13,6 +13,7 @@ pub enum DeviceCmd {
     GetPrimaryMultimediaKeys(mpsc::Sender<bool>),
     TogglePrimaryMultimediaKeys(mpsc::Sender<bool>),
     SetPrimaryMultimediaKeys(bool, mpsc::Sender<AppResult<()>>),
+    SetAdvancedExperimentalFeatures(bool, mpsc::Sender<AppResult<()>>),
     SetMuteIndicator(AudioType, bool),
     CycleBatteryLimit,
     SetBatteryLimit(BatteryLimit, mpsc::Sender<AppResult<()>>),
@@ -75,6 +76,10 @@ impl DeviceHandle {
 
     pub fn set_primary_multimedia_keys(&self, enabled: bool) -> AppResult<()> {
         self.query_result(|tx| DeviceCmd::SetPrimaryMultimediaKeys(enabled, tx))
+    }
+
+    pub fn set_advanced_experimental_features(&self, enabled: bool) -> AppResult<()> {
+        self.query_result(|tx| DeviceCmd::SetAdvancedExperimentalFeatures(enabled, tx))
     }
 
     pub fn get_config(&self) -> AppResult<AppConfig> {

@@ -10,7 +10,10 @@ use crate::razer::{
 use crate::runtime::settings_state::DeviceProfileState;
 use crate::ui::theme::perf_mode_color32;
 
-use super::{CustomModeSetting, Settings, SettingsCommand, custom_mode_level_name};
+use super::{
+    CHOICE_BUTTONS_PER_ROW, CustomModeSetting, Settings, SettingsCommand, choice_button,
+    custom_mode_level_name, right_aligned_toggle, section_title,
+};
 
 pub fn show(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
     egui::ScrollArea::vertical()
@@ -144,26 +147,32 @@ fn performance_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut Se
                 return;
             };
 
-            ui.horizontal_wrapped(|ui| {
-                let modes = allowed_perf_modes(profile);
-                let width = ((ui.available_width()
-                    - 10.0 * (modes.len().saturating_sub(1) as f32))
-                    / modes.len().max(1) as f32)
-                    .max(112.0);
-                for mode in modes {
-                    let selected = mode == profile_state.perf_mode;
-                    let available = profile_state.perf_modes.contains(&mode);
-                    if available {
-                        if choice_button(ui, selected, mode.to_string(), width).clicked()
-                            && !selected
-                        {
+            let modes = allowed_perf_modes(profile);
+            for row in modes.chunks(CHOICE_BUTTONS_PER_ROW) {
+                ui.columns(CHOICE_BUTTONS_PER_ROW, |columns| {
+                    for (column, mode) in row.iter().copied().enumerate() {
+                        let ui = &mut columns[column];
+                        let width = ui.available_width();
+                        let selected = mode == profile_state.perf_mode;
+                        let available = profile_state.perf_modes.contains(&mode);
+                        if available {
+                            if choice_button(ui, selected, mode.to_string(), width).clicked()
+                                && !selected
+                            {
+                                handle_perf_mode_click(
+                                    settings,
+                                    ctx,
+                                    profile,
+                                    &profile_state,
+                                    mode,
+                                );
+                            }
+                        } else if unsupported_perf_mode_button(ui, profile, mode, width).clicked() {
                             handle_perf_mode_click(settings, ctx, profile, &profile_state, mode);
                         }
-                    } else if unsupported_perf_mode_button(ui, profile, mode, width).clicked() {
-                        handle_perf_mode_click(settings, ctx, profile, &profile_state, mode);
                     }
-                }
-            });
+                });
+            }
 
             if profile == PowerProfile::Ac
                 && profile_state.perf_mode == PerfMode::Custom
@@ -182,29 +191,67 @@ fn custom_mode_config_controls(
     config: &CustomModeConfig,
 ) {
     ui.add_space(6.0);
-    custom_mode_level_controls(ui, ctx, settings, CustomModeSetting::Cpu, config.cpu_level);
-    custom_mode_level_controls(ui, ctx, settings, CustomModeSetting::Gpu, config.gpu_level);
+    custom_mode_level_slider(ui, ctx, settings, CustomModeSetting::Cpu, config.cpu_level);
+    custom_mode_level_slider(ui, ctx, settings, CustomModeSetting::Gpu, config.gpu_level);
 }
 
-fn custom_mode_level_controls(
+fn custom_mode_level_slider(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
     settings: &mut Settings,
     setting: CustomModeSetting,
     selected_level: u8,
 ) {
-    ui.horizontal_wrapped(|ui| {
-        ui.label(setting.label());
-        for level in 0..=3 {
-            let selected = level == selected_level;
-            if choice_button(ui, selected, custom_mode_level_name(level), 145.0).clicked()
-                && !selected
-            {
-                set_custom_mode_config(settings, setting, level);
-                ctx.request_repaint_of(egui::ViewportId::ROOT);
-            }
-        }
+    let mut level = selected_level;
+    let level_label = custom_mode_level_name(level);
+    let row_width = ui.available_width();
+    let setting_label_width = ui.fonts(|fonts| {
+        fonts
+            .layout_no_wrap(
+                setting.label().to_owned(),
+                egui::TextStyle::Body.resolve(ui.style()),
+                ui.visuals().widgets.inactive.fg_stroke.color,
+            )
+            .size()
+            .x
     });
+    let level_label_width = ui.fonts(|fonts| {
+        fonts
+            .layout_no_wrap(
+                level_label.to_owned(),
+                egui::TextStyle::Body.resolve(ui.style()),
+                ui.visuals().widgets.inactive.fg_stroke.color,
+            )
+            .size()
+            .x
+    });
+    let slider_width = (row_width
+        - setting_label_width
+        - level_label_width
+        - 2.0 * ui.spacing().item_spacing.x)
+        .max(0.0);
+    let row_size = egui::vec2(row_width, ui.spacing().interact_size.y);
+    ui.allocate_ui_with_layout(
+        row_size,
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.label(setting.label());
+            ui.scope(|ui| {
+                ui.spacing_mut().slider_width = slider_width;
+                ui.add(
+                    egui::Slider::new(&mut level, 0_u8..=3_u8)
+                        .show_value(false)
+                        .step_by(1.0),
+                );
+            });
+            ui.label(level_label);
+        },
+    );
+
+    if level != selected_level {
+        set_custom_mode_config(settings, setting, level);
+        ctx.request_repaint_of(egui::ViewportId::ROOT);
+    }
 }
 
 fn fan_speed_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
@@ -221,13 +268,23 @@ fn fan_speed_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut Sett
         };
 
         let fan_speed = profile_state.fan_speeds.get(profile_state.perf_mode);
-        ui.horizontal(|ui| {
-            if choice_button(ui, fan_speed == 0, "Auto", 114.0).clicked() && fan_speed != 0 {
+        ui.columns(CHOICE_BUTTONS_PER_ROW, |columns| {
+            let auto_width = columns[0].available_width();
+            if choice_button(&mut columns[0], fan_speed == 0, "Auto", auto_width).clicked()
+                && fan_speed != 0
+            {
                 set_fan_speed(settings, profile, 0);
                 ctx.request_repaint_of(egui::ViewportId::ROOT);
             }
 
-            if choice_button(ui, fan_speed != 0, "Fixed Fan Speed", 170.0).clicked()
+            let fixed_width = columns[1].available_width();
+            if choice_button(
+                &mut columns[1],
+                fan_speed != 0,
+                "Fixed Fan Speed",
+                fixed_width,
+            )
+            .clicked()
                 && fan_speed == 0
             {
                 set_fan_speed(settings, profile, fan_speed_limits.midpoint());
@@ -269,15 +326,24 @@ fn refresh_rate_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut S
             return;
         }
 
-        ui.horizontal_wrapped(|ui| {
-            for hz in profile_state.supported_refresh_rates {
-                let selected = hz == profile_state.refresh_rate;
-                if choice_button(ui, selected, format!("{hz} Hz"), 130.0).clicked() && !selected {
-                    set_refresh_rate(settings, profile, hz);
-                    ctx.request_repaint_of(egui::ViewportId::ROOT);
+        for row in profile_state
+            .supported_refresh_rates
+            .chunks(CHOICE_BUTTONS_PER_ROW)
+        {
+            ui.columns(CHOICE_BUTTONS_PER_ROW, |columns| {
+                for (column, hz) in row.iter().copied().enumerate() {
+                    let ui = &mut columns[column];
+                    let width = ui.available_width();
+                    let selected = hz == profile_state.refresh_rate;
+                    if choice_button(ui, selected, format!("{hz} Hz"), width).clicked()
+                        && !selected
+                    {
+                        set_refresh_rate(settings, profile, hz);
+                        ctx.request_repaint_of(egui::ViewportId::ROOT);
+                    }
                 }
-            }
-        });
+            });
+        }
     });
 }
 

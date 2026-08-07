@@ -7,28 +7,66 @@ fn lighting_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut Setti
         };
 
         let mut brightness = profile_state.keyboard_brightness;
-        ui.horizontal(|ui| {
-            ui.label("Keyboard Brightness");
-            ui.add(
-                egui::Slider::new(&mut brightness, 0_u8..=255_u8)
-                    .show_value(false)
-                    .step_by(51.0),
-            );
-            ui.label((brightness / 51).to_string());
+        let brightness_label = (brightness / 51).to_string();
+        let row_width = ui.available_width();
+        let brightness_title_width = ui.fonts(|fonts| {
+            fonts
+                .layout_no_wrap(
+                    "Keyboard Brightness".to_owned(),
+                    egui::TextStyle::Body.resolve(ui.style()),
+                    ui.visuals().widgets.inactive.fg_stroke.color,
+                )
+                .size()
+                .x
         });
+        let brightness_label_width = ui.fonts(|fonts| {
+            fonts
+                .layout_no_wrap(
+                    brightness_label.clone(),
+                    egui::TextStyle::Body.resolve(ui.style()),
+                    ui.visuals().widgets.inactive.fg_stroke.color,
+                )
+                .size()
+                .x
+        });
+        let slider_width = (row_width
+            - brightness_title_width
+            - brightness_label_width
+            - 2.0 * ui.spacing().item_spacing.x)
+            .max(0.0);
+        let row_size = egui::vec2(row_width, ui.spacing().interact_size.y);
+        ui.allocate_ui_with_layout(
+            row_size,
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.label("Keyboard Brightness");
+                ui.scope(|ui| {
+                    ui.spacing_mut().slider_width = slider_width;
+                    ui.add(
+                        egui::Slider::new(&mut brightness, 0_u8..=255_u8)
+                            .show_value(false)
+                            .step_by(51.0),
+                    );
+                });
+                ui.label(brightness_label);
+            },
+        );
         if brightness != profile_state.keyboard_brightness {
             set_keyboard_brightness(settings, profile, brightness);
             ctx.request_repaint_of(egui::ViewportId::ROOT);
         }
 
         let mut selected_effect = profile_state.rgb_effect;
-        egui::ComboBox::from_id_source(format!("rgb-effect-{profile:?}"))
-            .selected_text(selected_effect.to_string())
-            .show_ui(ui, |ui| {
-                for effect in &profile_state.rgb_effects {
-                    ui.selectable_value(&mut selected_effect, *effect, effect.to_string());
-                }
-            });
+        ui.horizontal(|ui| {
+            ui.label("Keyboard Effect");
+            egui::ComboBox::from_id_source(format!("rgb-effect-{profile:?}"))
+                .selected_text(selected_effect.to_string())
+                .show_ui(ui, |ui| {
+                    for effect in &profile_state.rgb_effects {
+                        ui.selectable_value(&mut selected_effect, *effect, effect.to_string());
+                    }
+                });
+        });
 
         if selected_effect != profile_state.rgb_effect {
             set_rgb_effect(settings, profile, selected_effect);
@@ -46,7 +84,7 @@ fn other_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut Settings
         };
 
         let mut enabled = profile_state.underglow_enabled;
-        if ui.checkbox(&mut enabled, "Vapour Chamber Light").changed() {
+        if right_aligned_toggle(ui, "Vapour Chamber Light", &mut enabled).changed() {
             set_under_glow(settings, profile, enabled);
             ctx.request_repaint_of(egui::ViewportId::ROOT);
         }
@@ -57,7 +95,7 @@ fn section(ui: &mut egui::Ui, title: &str, add_contents: impl FnOnce(&mut egui::
     section_with_header(
         ui,
         |ui| {
-            ui.label(title);
+            ui.label(section_title(title));
         },
         add_contents,
     );
@@ -80,7 +118,7 @@ fn section_with_header(
 
 fn performance_header(ui: &mut egui::Ui, perf_mode: PerfMode, unsupported_message: Option<&str>) {
     ui.horizontal(|ui| {
-        ui.label("Performance");
+        ui.label(section_title("Performance"));
         if let Some(message) = unsupported_message {
             ui.label(egui::RichText::new(message).color(ui.visuals().warn_fg_color));
         }
@@ -104,36 +142,6 @@ fn unsupported_perf_mode_button(
         disabled_response.rect,
         ui.make_persistent_id(format!("unsupported-perf-mode-{profile:?}-{mode:?}")),
         egui::Sense::click(),
-    )
-}
-
-fn choice_button(
-    ui: &mut egui::Ui,
-    selected: bool,
-    label: impl Into<String>,
-    width: f32,
-) -> egui::Response {
-    let accent = ui.visuals().selection.bg_fill;
-    let text_color = if selected {
-        ui.visuals().selection.stroke.color
-    } else {
-        ui.visuals().widgets.inactive.fg_stroke.color
-    };
-    let border = if selected {
-        egui::Stroke::new(1.0_f32, accent)
-    } else {
-        egui::Stroke::new(1.0_f32, egui::Color32::from_gray(82))
-    };
-    let fill = if selected {
-        accent
-    } else {
-        egui::Color32::TRANSPARENT
-    };
-    ui.add(
-        egui::Button::new(egui::RichText::new(label.into()).color(text_color))
-            .min_size(egui::vec2(width, 27.0))
-            .fill(fill)
-            .stroke(border),
     )
 }
 

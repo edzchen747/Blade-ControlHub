@@ -43,6 +43,12 @@ pub fn set_primary_multimedia_keys(enabled: bool) -> AppResult<()> {
     })?)
 }
 
+pub fn set_advanced_experimental_features(enabled: bool) -> AppResult<()> {
+    expect_ack(send_request(IpcRequest::SetAdvancedExperimentalFeatures {
+        enabled,
+    })?)
+}
+
 pub fn set_perf_mode(profile: PowerProfile, mode: PerfMode) -> AppResult<()> {
     expect_ack(send_request(IpcRequest::SetPerfMode { profile, mode })?)
 }
@@ -166,6 +172,7 @@ fn ipc_request_kind(request: &IpcRequest) -> &'static str {
         IpcRequest::GetSettingsState => "GetSettingsState",
         IpcRequest::SetSettingsWindowOpen { .. } => "SetSettingsWindowOpen",
         IpcRequest::SetPrimaryMultimediaKeys { .. } => "SetPrimaryMultimediaKeys",
+        IpcRequest::SetAdvancedExperimentalFeatures { .. } => "SetAdvancedExperimentalFeatures",
         IpcRequest::SetPerfMode { .. } => "SetPerfMode",
         IpcRequest::SetCustomModeConfig { .. } => "SetCustomModeConfig",
         IpcRequest::SetFanSpeed { .. } => "SetFanSpeed",

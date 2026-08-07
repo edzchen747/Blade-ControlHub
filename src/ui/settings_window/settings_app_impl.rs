@@ -76,6 +76,13 @@ impl SettingsApp {
                         command_sent = true;
                     }
                 }
+                SettingsCommand::SetAdvancedExperimentalFeatures(enabled) => {
+                    if let Err(error) = client::set_advanced_experimental_features(enabled) {
+                        warn!(%error, "Failed to update advanced experimental features setting");
+                    } else {
+                        command_sent = true;
+                    }
+                }
                 SettingsCommand::SetPerfMode(profile, mode) => {
                     if let Err(error) = client::set_perf_mode(profile, mode) {
                         warn!(%error, "Failed to update performance mode");

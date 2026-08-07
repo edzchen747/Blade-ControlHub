@@ -30,6 +30,7 @@ pub struct SettingsState {
     pub battery_limits: Vec<BatteryLimit>,
     pub fan_speed_limits: FanSpeedLimits,
     pub primary_multimedia_keys: bool,
+    pub advanced_experimental_features: bool,
     pub theme_color: ThemeColor,
 }
 
@@ -77,6 +78,7 @@ impl SettingsState {
             battery_limits: BATTERY_LIMITS.to_vec(),
             fan_speed_limits,
             primary_multimedia_keys: config.primary_multimedia_keys,
+            advanced_experimental_features: config.advanced_experimental_features,
             theme_color: config.theme_color,
         }
     }

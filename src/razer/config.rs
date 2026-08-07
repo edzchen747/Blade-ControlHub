@@ -62,6 +62,11 @@ mod tests {
     }
 
     #[test]
+    fn app_config_defaults_to_enabling_advanced_experimental_features() {
+        assert!(AppConfig::default().advanced_experimental_features);
+    }
+
+    #[test]
     fn profile_mut_updates_only_selected_profile() {
         let mut config = AppConfig::default();
         config.profile_mut(PowerProfile::Battery).key_lvl = 51;

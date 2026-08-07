@@ -19,6 +19,9 @@ pub enum IpcRequest {
     SetPrimaryMultimediaKeys {
         enabled: bool,
     },
+    SetAdvancedExperimentalFeatures {
+        enabled: bool,
+    },
     SetPerfMode {
         profile: PowerProfile,
         mode: PerfMode,
@@ -101,6 +104,16 @@ mod tests {
             open: true,
             focused: true,
         };
+
+        let encoded = serde_json::to_string(&request).expect("request must serialize");
+        let decoded: IpcRequest = serde_json::from_str(&encoded).expect("request must deserialize");
+
+        assert_eq!(decoded, request);
+    }
+
+    #[test]
+    fn advanced_experimental_features_request_round_trips_through_json() {
+        let request = IpcRequest::SetAdvancedExperimentalFeatures { enabled: false };
 
         let encoded = serde_json::to_string(&request).expect("request must serialize");
         let decoded: IpcRequest = serde_json::from_str(&encoded).expect("request must deserialize");

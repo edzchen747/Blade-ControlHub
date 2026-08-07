@@ -75,6 +75,9 @@ impl<'a> Executer<'a> {
             DeviceCmd::SetPrimaryMultimediaKeys(enabled, tx) => {
                 let _ = tx.send(self.set_primary_multimedia_keys(enabled));
             }
+            DeviceCmd::SetAdvancedExperimentalFeatures(enabled, tx) => {
+                let _ = tx.send(self.set_advanced_experimental_features(enabled));
+            }
             DeviceCmd::GetConfig(tx) => {
                 let _ = tx.send(self.app_config.clone());
             }

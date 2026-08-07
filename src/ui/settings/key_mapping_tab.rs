@@ -13,20 +13,12 @@ use crate::ui::theme::{
 
 static NEW_ROW_ERROR_MESSAGE: &str = "Complete current row to add more";
 
-use super::Settings;
-use super::SettingsCommand;
+use super::{Settings, SettingsCommand, primary_tab};
+
 pub fn show(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
     ui.horizontal(|ui| {
-        ui.selectable_value(
-            &mut settings.key_map_current_tab,
-            "Hypershift".into(),
-            "Hypershift",
-        );
-        ui.selectable_value(
-            &mut settings.key_map_current_tab,
-            "Razer Special Keys".into(),
-            "Razer Special Keys",
-        );
+        primary_tab(ui, &mut settings.key_map_current_tab, "Hypershift");
+        primary_tab(ui, &mut settings.key_map_current_tab, "Razer Special Keys");
     });
     ui.separator();
 

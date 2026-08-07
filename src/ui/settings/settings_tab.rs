@@ -6,7 +6,12 @@ use eframe::egui;
 use crate::config::ThemeColor;
 use crate::razer::enums::BatteryLimit;
 
-use super::{Settings, SettingsCommand, THEME_COLOR_COMMIT_DEBOUNCE};
+use super::{
+    CHOICE_BUTTONS_PER_ROW, Settings, SettingsCommand, THEME_COLOR_COMMIT_DEBOUNCE, choice_button,
+    right_aligned_toggle, section_title,
+};
+
+pub(super) const ADVANCED_EXPERIMENTAL_FEATURES_DESCRIPTION: &str = "Advanced experimental features may not work perfectly on every device, and some configurations may cause unexpected behaviour. You can turn these features off at any time if they do not work as expected in the Settings tab.";
 
 pub fn show(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
     egui::ScrollArea::vertical()
@@ -17,6 +22,8 @@ pub fn show(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Setti
             primary_func_key_section(ui, ctx, settings);
             ui.add_space(5.0);
             theme_section(ui, ctx, settings);
+            ui.add_space(5.0);
+            advanced_experimental_features_section(ui, ctx, settings);
         });
 }
 
@@ -73,9 +80,29 @@ pub(super) fn primary_func_key_switcher(
     let current_primary = primary_multimedia_keys(settings);
     let mut selected_primary = current_primary;
 
-    ui.horizontal(|ui| {
-        ui.selectable_value(&mut selected_primary, false, "Function");
-        ui.selectable_value(&mut selected_primary, true, "Multimedia");
+    ui.columns(CHOICE_BUTTONS_PER_ROW, |columns| {
+        let function_width = columns[0].available_width();
+        if choice_button(
+            &mut columns[0],
+            !selected_primary,
+            "Function",
+            function_width,
+        )
+        .clicked()
+        {
+            selected_primary = false;
+        }
+        let multimedia_width = columns[1].available_width();
+        if choice_button(
+            &mut columns[1],
+            selected_primary,
+            "Multimedia",
+            multimedia_width,
+        )
+        .clicked()
+        {
+            selected_primary = true;
+        }
     });
 
     if selected_primary != current_primary {
@@ -113,6 +140,28 @@ fn theme_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut Settings
     });
 }
 
+fn advanced_experimental_features_section(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    settings: &mut Settings,
+) {
+    section(ui, "Advanced Experimental Features", |ui| {
+        ui.label(ADVANCED_EXPERIMENTAL_FEATURES_DESCRIPTION);
+        ui.add_space(3.0);
+
+        let Some(state) = settings.state.as_ref() else {
+            ui.label("Waiting for runtime state...");
+            return;
+        };
+        let mut enabled = state.advanced_experimental_features;
+        if right_aligned_toggle(ui, "Enable Advanced Experimental Features", &mut enabled).changed()
+        {
+            set_advanced_experimental_features(settings, enabled);
+            ctx.request_repaint_of(egui::ViewportId::ROOT);
+        }
+    });
+}
+
 fn section(ui: &mut egui::Ui, title: &str, add_contents: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::group(ui.style())
         .fill(ui.visuals().faint_bg_color)
@@ -121,7 +170,7 @@ fn section(ui: &mut egui::Ui, title: &str, add_contents: impl FnOnce(&mut egui::
         .inner_margin(egui::Margin::symmetric(10.0, 7.0))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(egui::RichText::new(title).size(16.0));
+            ui.label(section_title(title));
             ui.add_space(3.0);
             add_contents(ui);
         });
@@ -156,6 +205,14 @@ fn set_battery_limit(settings: &mut Settings, limit: BatteryLimit) {
         state.battery_limit = limit;
         settings.update = true;
         settings.queue_command(SettingsCommand::SetBatteryLimit(limit));
+    }
+}
+
+fn set_advanced_experimental_features(settings: &mut Settings, enabled: bool) {
+    if let Some(state) = settings.state.as_mut() {
+        state.advanced_experimental_features = enabled;
+        settings.update = true;
+        settings.queue_command(SettingsCommand::SetAdvancedExperimentalFeatures(enabled));
     }
 }
 
@@ -218,6 +275,26 @@ mod tests {
         assert_eq!(
             settings.drain_commands(),
             vec![SettingsCommand::SetBatteryLimit(BatteryLimit::Limit80)]
+        );
+    }
+
+    #[test]
+    fn set_advanced_experimental_features_updates_settings_state() {
+        let mut settings = Settings::new();
+        settings.show(SettingsState::from(AppConfig::default()));
+
+        set_advanced_experimental_features(&mut settings, false);
+
+        assert!(
+            !settings
+                .state
+                .as_ref()
+                .expect("settings state is available")
+                .advanced_experimental_features
+        );
+        assert_eq!(
+            settings.drain_commands(),
+            vec![SettingsCommand::SetAdvancedExperimentalFeatures(false)]
         );
     }
 

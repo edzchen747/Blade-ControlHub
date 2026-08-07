@@ -140,6 +140,7 @@ fn ipc_request_kind(request: &IpcRequest) -> &'static str {
         IpcRequest::GetSettingsState => "GetSettingsState",
         IpcRequest::SetSettingsWindowOpen { .. } => "SetSettingsWindowOpen",
         IpcRequest::SetPrimaryMultimediaKeys { .. } => "SetPrimaryMultimediaKeys",
+        IpcRequest::SetAdvancedExperimentalFeatures { .. } => "SetAdvancedExperimentalFeatures",
         IpcRequest::SetPerfMode { .. } => "SetPerfMode",
         IpcRequest::SetCustomModeConfig { .. } => "SetCustomModeConfig",
         IpcRequest::SetFanSpeed { .. } => "SetFanSpeed",
@@ -169,6 +170,9 @@ fn dispatch_request(request: IpcRequest, device: &DeviceHandle) -> IpcResponse {
         }
         IpcRequest::SetPrimaryMultimediaKeys { enabled } => {
             ack(device.set_primary_multimedia_keys(enabled))
+        }
+        IpcRequest::SetAdvancedExperimentalFeatures { enabled } => {
+            ack(device.set_advanced_experimental_features(enabled))
         }
         IpcRequest::SetPerfMode { profile, mode } => ack(device.set_perf_mode(profile, mode)),
         IpcRequest::SetCustomModeConfig {
