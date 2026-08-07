@@ -13,7 +13,9 @@ use windows_sys::Win32::Storage::FileSystem::{
 use crate::config::ThemeColor;
 use crate::error::{AppError, AppResult};
 use crate::ipc::framing::{PipeHandle, read_json_frame, wide_null, write_json_frame};
-use crate::ipc::protocol::{IpcRequest, IpcResponse, PIPE_NAME, RazerKeyEvent};
+use crate::ipc::protocol::{
+    CommandLabRecordingState, IpcRequest, IpcResponse, PIPE_NAME, RazerKeyEvent,
+};
 use crate::razer::{
     config::PowerProfile,
     enums::{BatteryLimit, PerfMode, RGBEffect},
@@ -109,6 +111,21 @@ pub fn poll_captured_razer_key(after_sequence: u64) -> AppResult<Option<RazerKey
     }
 }
 
+pub fn begin_command_lab_record() -> AppResult<()> {
+    expect_ack(send_request(IpcRequest::BeginCommandLabRecord)?)
+}
+
+pub fn cancel_command_lab_record() -> AppResult<()> {
+    expect_ack(send_request(IpcRequest::CancelCommandLabRecord)?)
+}
+
+pub fn poll_command_lab_recording() -> AppResult<CommandLabRecordingState> {
+    match send_request(IpcRequest::PollCommandLabRecording)? {
+        IpcResponse::CommandLabRecordingState(state) => Ok(state),
+        response => Err(unexpected_response(response)),
+    }
+}
+
 pub fn send_request(request: IpcRequest) -> AppResult<IpcResponse> {
     let started = Instant::now();
     let request_kind = ipc_request_kind(&request);
@@ -185,6 +202,9 @@ fn ipc_request_kind(request: &IpcRequest) -> &'static str {
         IpcRequest::BeginRazerKeyCapture { .. } => "BeginRazerKeyCapture",
         IpcRequest::CancelRazerKeyCapture => "CancelRazerKeyCapture",
         IpcRequest::PollCapturedRazerKey { .. } => "PollCapturedRazerKey",
+        IpcRequest::BeginCommandLabRecord => "BeginCommandLabRecord",
+        IpcRequest::CancelCommandLabRecord => "CancelCommandLabRecord",
+        IpcRequest::PollCommandLabRecording => "PollCommandLabRecording",
     }
 }
 

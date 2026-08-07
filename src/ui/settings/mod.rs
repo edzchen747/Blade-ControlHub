@@ -8,6 +8,7 @@ use crate::razer::{
 };
 use crate::ui::theme::{theme_color32, theme_text_color};
 
+mod command_lab_tab;
 mod device_tab;
 mod key_mapping_tab;
 mod settings_model;
@@ -51,6 +52,8 @@ pub enum SettingsCommand {
     SetThemeColor(ThemeColor),
     BeginRazerKeyCapture { row_idx: usize },
     CancelRazerKeyCapture,
+    BeginCommandLabRecord { row_idx: usize },
+    CancelCommandLabRecord,
 }
 
 pub fn custom_mode_level_name(level: u8) -> &'static str {

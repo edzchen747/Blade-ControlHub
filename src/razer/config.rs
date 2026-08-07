@@ -62,8 +62,8 @@ mod tests {
     }
 
     #[test]
-    fn app_config_defaults_to_enabling_advanced_experimental_features() {
-        assert!(AppConfig::default().advanced_experimental_features);
+    fn app_config_disables_advanced_experimental_features_by_default() {
+        assert!(!AppConfig::default().advanced_experimental_features);
     }
 
     #[test]

@@ -8,5 +8,10 @@ impl Drop for SettingsApp {
             cancel.store(true, Ordering::SeqCst);
             let _ = client::cancel_razer_key_capture();
         }
+
+        if let Some(cancel) = self.command_lab_record_cancel.take() {
+            cancel.store(true, Ordering::SeqCst);
+            let _ = client::cancel_command_lab_record();
+        }
     }
 }

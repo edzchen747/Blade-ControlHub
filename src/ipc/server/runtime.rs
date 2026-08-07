@@ -54,6 +54,7 @@ pub fn start(device: DeviceHandle) {
 pub fn stop() {
     IPC_SERVER_RUNNING.store(false, Ordering::SeqCst);
     let _ = crate::ipc::client::send_request(IpcRequest::CancelRazerKeyCapture);
+    cancel_command_lab_record();
     join_server_thread();
 }
 
@@ -153,6 +154,9 @@ fn ipc_request_kind(request: &IpcRequest) -> &'static str {
         IpcRequest::BeginRazerKeyCapture { .. } => "BeginRazerKeyCapture",
         IpcRequest::CancelRazerKeyCapture => "CancelRazerKeyCapture",
         IpcRequest::PollCapturedRazerKey { .. } => "PollCapturedRazerKey",
+        IpcRequest::BeginCommandLabRecord => "BeginCommandLabRecord",
+        IpcRequest::CancelCommandLabRecord => "CancelCommandLabRecord",
+        IpcRequest::PollCommandLabRecording => "PollCommandLabRecording",
     }
 }
 
@@ -196,6 +200,17 @@ fn dispatch_request(request: IpcRequest, device: &DeviceHandle) -> IpcResponse {
         IpcRequest::CancelRazerKeyCapture => cancel_razer_key_capture(),
         IpcRequest::PollCapturedRazerKey { after_sequence } => {
             poll_captured_razer_key(after_sequence)
+        }
+        IpcRequest::BeginCommandLabRecord => {
+            begin_command_lab_record();
+            IpcResponse::Ack
+        }
+        IpcRequest::CancelCommandLabRecord => {
+            cancel_command_lab_record();
+            IpcResponse::Ack
+        }
+        IpcRequest::PollCommandLabRecording => {
+            IpcResponse::CommandLabRecordingState(poll_command_lab_recording())
         }
     }
 }

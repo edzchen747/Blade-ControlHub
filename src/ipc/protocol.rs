@@ -63,6 +63,23 @@ pub enum IpcRequest {
     PollCapturedRazerKey {
         after_sequence: u64,
     },
+    BeginCommandLabRecord,
+    CancelCommandLabRecord,
+    PollCommandLabRecording,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CommandLabStatus {
+    Idle,
+    Recording,
+    Done,
+    Cancelled,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommandLabRecordingState {
+    pub status: CommandLabStatus,
+    pub step: u8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,6 +94,7 @@ pub enum IpcResponse {
     SettingsState(Box<SettingsState>),
     RazerKeyCaptureStarted { after_sequence: u64 },
     CapturedRazerKey(Option<RazerKeyEvent>),
+    CommandLabRecordingState(CommandLabRecordingState),
     Ack,
     Error { message: String },
 }
@@ -114,6 +132,30 @@ mod tests {
     #[test]
     fn advanced_experimental_features_request_round_trips_through_json() {
         let request = IpcRequest::SetAdvancedExperimentalFeatures { enabled: false };
+
+        let encoded = serde_json::to_string(&request).expect("request must serialize");
+        let decoded: IpcRequest = serde_json::from_str(&encoded).expect("request must deserialize");
+
+        assert_eq!(decoded, request);
+    }
+
+    #[test]
+    fn command_lab_recording_state_round_trips_through_json() {
+        let state = CommandLabRecordingState {
+            status: CommandLabStatus::Recording,
+            step: 3,
+        };
+
+        let encoded = serde_json::to_string(&state).expect("state must serialize");
+        let decoded: CommandLabRecordingState =
+            serde_json::from_str(&encoded).expect("state must deserialize");
+
+        assert_eq!(decoded, state);
+    }
+
+    #[test]
+    fn command_lab_request_round_trips_through_json() {
+        let request = IpcRequest::BeginCommandLabRecord;
 
         let encoded = serde_json::to_string(&request).expect("request must serialize");
         let decoded: IpcRequest = serde_json::from_str(&encoded).expect("request must deserialize");

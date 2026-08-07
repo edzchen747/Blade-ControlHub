@@ -322,6 +322,14 @@ mod identity_tests {
     }
 
     #[test]
+    fn command_lab_has_its_own_identity() {
+        let command_lab = params(Some(OsdIcon::CommandLab), "Recording");
+        let brightness = params(Some(OsdIcon::Brightness), "");
+        assert_eq!(command_lab.identity(), Some(OsdIcon::CommandLab.kind_key()));
+        assert_ne!(command_lab.identity(), brightness.identity());
+    }
+
+    #[test]
     fn icon_less_osds_share_one_slot() {
         let perf_mode = params(None, "Balanced");
         let rgb_effect = params(None, "Wave");

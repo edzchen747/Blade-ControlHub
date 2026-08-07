@@ -20,6 +20,7 @@
 
 pub mod app;
 pub mod app_events;
+pub mod command_lab;
 pub mod custom_key_map;
 pub mod event_dispatcher;
 pub mod icons;
@@ -45,6 +46,9 @@ pub mod prelude {
 
     // Key mapping domain model
     pub use crate::ui::custom_key_map::{CustomKeyMap, HypershiftKeyMap, RazerKeyMap};
+
+    // Command Lab domain model
+    pub use crate::ui::command_lab::{CommandLab, CommandLabRow};
 
     // Event routing
     pub use crate::ui::event_dispatcher::EventDispatcher;

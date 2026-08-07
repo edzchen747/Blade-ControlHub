@@ -22,6 +22,7 @@ pub enum OsdIcon {
     BatteryLimit(bool),
     FunctionKey,
     GPU,
+    CommandLab,
 }
 
 // ── Strike-through Overlay ──────────────────────────────────────────────────
@@ -65,6 +66,7 @@ impl OsdIcon {
             Self::BatteryLimit(_) => 8,
             Self::FunctionKey => 9,
             Self::GPU => 10,
+            Self::CommandLab => 11,
         }
     }
 
@@ -97,6 +99,7 @@ impl OsdIcon {
             }
             Self::FunctionKey => Cow::Borrowed(include_bytes!("../../assets/function_key.svg")),
             Self::GPU => Cow::Borrowed(include_bytes!("../../assets/gpu.svg")),
+            Self::CommandLab => Cow::Borrowed(include_bytes!("../../assets/command_lab.svg")),
         }
     }
 }

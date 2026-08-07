@@ -2,6 +2,7 @@ impl SettingsApp {
     fn new(state: Option<SettingsState>) -> Self {
         let settings = SettingsStore::new();
         let (razer_key_capture_tx, razer_key_capture_rx) = mpsc::channel();
+        let (command_lab_record_tx, command_lab_record_rx) = mpsc::channel();
         let (settings_update_tx, settings_update_rx) = mpsc::channel();
         let settings_update_shutdown = Arc::new(AtomicBool::new(false));
         if let Some(state) = state.clone() {
@@ -26,6 +27,11 @@ impl SettingsApp {
             razer_key_capture_cancel: None,
             razer_key_capture_id: 0,
             active_razer_key_capture_id: None,
+            command_lab_record_tx,
+            command_lab_record_rx,
+            command_lab_record_cancel: None,
+            command_lab_record_id: 0,
+            active_command_lab_record_id: None,
             applied_window_icon_color: None,
             native_window_icons: None,
             reported_window_focus: None,
@@ -61,6 +67,7 @@ impl SettingsApp {
     fn process_backend(&mut self, ctx: &egui::Context) {
         self.drain_settings_update_messages(ctx);
         self.drain_razer_key_capture_messages(ctx);
+        self.drain_command_lab_record_messages(ctx);
 
         let commands = self
             .settings
@@ -158,6 +165,12 @@ impl SettingsApp {
                 SettingsCommand::CancelRazerKeyCapture => {
                     self.cancel_razer_key_capture(ctx);
                 }
+                SettingsCommand::BeginCommandLabRecord { .. } => {
+                    self.start_command_lab_record(ctx);
+                }
+                SettingsCommand::CancelCommandLabRecord => {
+                    self.cancel_command_lab_record(ctx);
+                }
             }
         }
 
@@ -246,6 +259,72 @@ impl SettingsApp {
                     ctx.request_repaint();
                 }
             }
+        }
+    }
+
+    fn start_command_lab_record(&mut self, ctx: &egui::Context) {
+        if let Some(cancel) = self.command_lab_record_cancel.take() {
+            cancel.store(true, Ordering::SeqCst);
+        }
+
+        self.command_lab_record_id = self.command_lab_record_id.saturating_add(1);
+        let record_id = self.command_lab_record_id;
+        self.active_command_lab_record_id = Some(record_id);
+        ctx.request_repaint();
+
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.command_lab_record_cancel = Some(cancel.clone());
+        let tx = self.command_lab_record_tx.clone();
+        let worker_ctx = ctx.clone();
+
+        if let Err(error) = thread::Builder::new()
+            .name("blade-settings-command-lab-record".to_string())
+            .spawn(move || {
+                run_command_lab_record_worker(record_id, cancel, tx, worker_ctx)
+            })
+        {
+            warn!(%error, "Failed to spawn Command Lab record worker");
+            self.command_lab_record_cancel = None;
+            self.active_command_lab_record_id = None;
+            self.settings
+                .with_settings(|settings| settings.command_lab.set_recording_row_idx(None));
+            ctx.request_repaint();
+        }
+    }
+
+    fn cancel_command_lab_record(&mut self, ctx: &egui::Context) {
+        if let Some(cancel) = self.command_lab_record_cancel.take() {
+            cancel.store(true, Ordering::SeqCst);
+        }
+        self.active_command_lab_record_id = None;
+        ctx.request_repaint();
+
+        let ctx = ctx.clone();
+        if let Err(error) = thread::Builder::new()
+            .name("blade-settings-command-lab-cancel".to_string())
+            .spawn(move || {
+                if let Err(error) = client::cancel_command_lab_record() {
+                    warn!(%error, "Failed to cancel Command Lab record");
+                }
+                ctx.request_repaint();
+            })
+        {
+            warn!(%error, "Failed to spawn Command Lab record cancel worker");
+        }
+    }
+
+    fn drain_command_lab_record_messages(&mut self, ctx: &egui::Context) {
+        while let Ok(message) = self.command_lab_record_rx.try_recv() {
+            let CommandLabRecordMessage::Finished { record_id } = message;
+            if Some(record_id) != self.active_command_lab_record_id {
+                continue;
+            }
+
+            self.command_lab_record_cancel = None;
+            self.active_command_lab_record_id = None;
+            self.settings
+                .with_settings(|settings| settings.command_lab.set_recording_row_idx(None));
+            ctx.request_repaint();
         }
     }
 

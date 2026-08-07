@@ -7,6 +7,7 @@ use tracing::warn;
 use crate::config::ThemeColor;
 use crate::razer::{config::PowerProfile, enums::PerfMode};
 use crate::runtime::settings_state::SettingsState;
+use crate::ui::command_lab::CommandLab;
 use crate::ui::custom_key_map::CustomKeyMap;
 use crate::ui::settings::{
     SettingsCommand, THEME_COLOR_COMMIT_DEBOUNCE, apply_settings_theme, loading_screen, primary_tab,
@@ -25,6 +26,7 @@ pub struct Settings {
     pub selected_profile: PowerProfile,
     pub state: Option<SettingsState>,
     pub custom_key_map: CustomKeyMap,
+    pub command_lab: CommandLab,
     applied_icon_color: Option<ThemeColor>,
     pending_commands: Vec<SettingsCommand>,
     unsupported_perf_mode_notice: Option<UnsupportedPerfModeNotice>,
@@ -54,6 +56,7 @@ impl Settings {
             selected_profile: PowerProfile::Ac,
             state: None,
             custom_key_map: CustomKeyMap::new(),
+            command_lab: CommandLab::new(),
             applied_icon_color: None,
             pending_commands: Vec::new(),
             unsupported_perf_mode_notice: None,
@@ -212,6 +215,7 @@ impl Settings {
                 primary_tab(ui, &mut self.current_tab, "Device");
                 primary_tab(ui, &mut self.current_tab, "Settings");
                 primary_tab(ui, &mut self.current_tab, "Key Mapping");
+                primary_tab(ui, &mut self.current_tab, "Command Lab");
             });
             ui.separator();
             ui.add_space(3.0);
@@ -219,6 +223,7 @@ impl Settings {
                 "Device" => super::device_tab::show(ui, ctx, self),
                 "Settings" => super::settings_tab::show(ui, ctx, self),
                 "Key Mapping" => super::key_mapping_tab::show(ui, ctx, self),
+                "Command Lab" => super::command_lab_tab::show(ui, ctx, self),
                 _ => {}
             }
         });
