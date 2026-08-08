@@ -1,7 +1,5 @@
 pub const DEBUG_MODE_ARG: &str = "--debug";
 
-/// Enables experimental hardware controls for development builds and explicit
-/// release-build debugging sessions.
 pub fn is_enabled() -> bool {
     cfg!(debug_assertions) || std::env::args().any(is_debug_mode_arg)
 }

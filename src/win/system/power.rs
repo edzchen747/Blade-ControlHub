@@ -30,7 +30,6 @@ impl PowerMonitor {
             return;
         }
 
-        // Initial sync so the state is correct before the first event
         sync_power_state();
 
         match thread::Builder::new()
@@ -181,7 +180,6 @@ fn create_power_window(window_class: &[u8], window_title: &[u8]) -> HWND {
     }
 }
 
-/// The callback Windows triggers when the invisible window receives a message
 unsafe extern "system" fn power_wnd_proc(
     hwnd: HWND,
     msg: u32,
@@ -192,10 +190,8 @@ unsafe extern "system" fn power_wnd_proc(
         && msg == WM_POWERBROADCAST
         && wparam as u32 == PBT_APMPOWERSTATUSCHANGE
     {
-        // The OS has sent a broadcast (plugged in, battery low, etc.)
         sync_power_state();
     }
-    // Let Windows handle the rest of the window overhead
     unsafe { DefWindowProcA(hwnd, msg, wparam, lparam) }
 }
 
@@ -212,8 +208,6 @@ fn sync_power_state() {
         if let Err(error) = thread::Builder::new()
             .name("blade-power-reinitialize".to_string())
             .spawn(move || {
-                // Windows resets brightness shortly after AC changes, so delay
-                // to ensure our hardware sync happens last.
                 thread::sleep(Duration::from_millis(500));
                 if POWER_MONITOR_RUNNING.load(Ordering::SeqCst) {
                     device().initialize(false);

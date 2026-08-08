@@ -2,7 +2,6 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AppError {
-    // ── Hardware ────────────────────────────────────────────────────────
     #[error("Hardware device did not respond within the timeout period")]
     HardwareTimeout,
 
@@ -16,21 +15,18 @@ pub enum AppError {
     #[error("Hardware device disconnected")]
     HardwareDisconnected,
 
-    // ── HID / Input ─────────────────────────────────────────────────────
     #[error("Failed to initialise HID API: {0}")]
     HidApi(String),
 
     #[error("No Razer HID interfaces were accessible (all locked by OS or another process)")]
     NoInterfacesAccessible,
 
-    // ── Config ──────────────────────────────────────────────────────────
     #[error("Failed to parse configuration: {0}")]
     ConfigParse(String),
 
     #[error("Invalid internal state: {0}")]
     Internal(String),
 
-    // ── System / OS ─────────────────────────────────────────────────────
     #[error("No compatible display device found")]
     DisplayNotFound,
 

@@ -355,8 +355,6 @@ impl SettingsApp {
                         settings
                             .command_lab
                             .apply_capture_result(state.status, state.commands.clone());
-                        // When the name was already set before recording,
-                        // persist right away once the capture finishes.
                         if state.status == crate::ipc::protocol::CommandLabStatus::Done
                             && let Some(idx) = settings.command_lab.recording_row_idx()
                             && settings.command_lab.row_ready_to_save(idx)

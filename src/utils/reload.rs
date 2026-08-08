@@ -8,7 +8,6 @@ use crate::ui::app::app;
 use crate::ui::app_events::AppEvent;
 
 const APP_PROCESS_NAMES: &[&str] = &["blade-controlhub", "blade-controlhub.exe"];
-/// Restart code reserved for recovery paths that must not show the startup OSD.
 pub const SILENT_RESTART_CODE: i32 = 1;
 const SILENT_RESTART_ARGS: &[&str] = &["--silent"];
 const DEFAULT_RESTART_ARGS: &[&str] = &[];
@@ -19,7 +18,6 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// current process can shut down cleanly
 const ADMIN_TOGGLE_RELAUNCH_DELAY: Duration = Duration::from_millis(500);
 
-/// Restarts the application by spawning a new instance and exiting.
 pub fn restart_app(code: i32) -> ! {
     if let Err(e) = spawn_replacement_app(code) {
         error!(error = %e, "Failed to spawn replacement process");

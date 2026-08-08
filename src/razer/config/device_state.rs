@@ -2,7 +2,6 @@ use crate::razer::config::{CycleState, FanSpeeds, PowerProfile, allowed_perf_mod
 use crate::razer::enums::{PERF_MODES, PerfMode, RGB_EFFECTS, RGBEffect};
 use serde::{Deserialize, Serialize};
 
-/// Hardware settings for a single power state (plugged in or on battery).
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(default)]
 pub struct DeviceState {

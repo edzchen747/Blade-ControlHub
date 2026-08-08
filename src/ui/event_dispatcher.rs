@@ -1,16 +1,6 @@
-//! Event dispatcher: separates app events that require platform side effects
-//! from events that only drive OSD rendering.
-//!
-//! OSD parameter generation lives on `OsdEvent`; this module only answers
-//! whether an incoming event also needs an application-level action.
-
 use crate::razer::enums::PerfMode;
 use crate::ui::app_events::{AppEvent, OsdEvent};
 
-// ── Side Effects ─────────────────────────────────────────────────────────────
-
-/// Actions the application must perform in response to an event,
-/// independent of OSD rendering.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SideEffect {
     ToggleSettings,
@@ -21,14 +11,9 @@ pub enum SideEffect {
     PerfMode(PerfMode),
 }
 
-// ── Event Dispatcher ─────────────────────────────────────────────────────────
-
-/// Routes a single `AppEvent` into an optional `SideEffect`.
-/// Callers process the side effect first, then optionally display OSD output.
 pub struct EventDispatcher;
 
 impl EventDispatcher {
-    /// Dispatches an `AppEvent`, returning the optional side effect.
     pub fn dispatch(event: AppEvent) -> Option<SideEffect> {
         Self::extract_side_effect(&event)
     }

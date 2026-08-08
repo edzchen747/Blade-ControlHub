@@ -45,7 +45,6 @@ impl HidApiListener {
             let iface_num = device_info.interface_number();
 
             if let Ok(device_api) = api.open_path(&path) {
-                // Test if we can read (check for Access Denied)
                 let mut test_buf = [0u8; 16];
                 let read_result = device_api.read_timeout(&mut test_buf, 5);
                 if interface_is_readable_or_not_denied(read_result) {
@@ -132,7 +131,6 @@ fn interface_is_readable_or_not_denied(read_result: hidapi::HidResult<usize>) ->
 
 fn run_special_key_listener(device_api: HidDevice, iface_num: i32, path: String) {
     let mut buf = [0u8; 16];
-    // Close interfaces as soon as we detect they are likely not the target
     while HID_LISTENERS_RUNNING.load(Ordering::SeqCst) {
         match device_api.read_timeout(&mut buf, HID_READ_TIMEOUT_MS) {
             Ok(0) => continue,

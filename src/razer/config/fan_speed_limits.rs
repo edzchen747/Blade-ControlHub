@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-/// Firmware-reported bounds for manually controlled fan speed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FanSpeedLimits {
     pub min: u8,

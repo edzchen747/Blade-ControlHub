@@ -32,11 +32,8 @@ static TRAY_UPDATE_SENDER: Mutex<Option<Sender<PerfMode>>> = Mutex::new(None);
 static TRAY_ICON_THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 static TRAY_CLICK_THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
-// ── Tray Manager Struct ──────────────────────────────────────────────────────
-
 pub struct TrayManager {
     pub tray_icon: TrayIcon,
 }
-
 
 include!("tray_manager_impl.rs");

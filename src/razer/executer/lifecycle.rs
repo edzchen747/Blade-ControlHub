@@ -19,20 +19,16 @@ impl<'a> Executer<'a> {
         let mut state = self.app_config.read();
 
         disable_osd! {
-            // --- Screen Brightness ---
             self.brightness_worker
                 .set_screen_brightness(state.screen_lvl);
 
-            // --- Keyboard Configuration ---
             self.kb().keyboard_control(true);
             self.kb().enable_multimedia_keys();
             self.kb().set_rgb_effect(state.rgb_effect.value());
             self.kb().enable_under_glow(state.vc_lvl);
             self.kb().set_keyboard_brightness(state.key_lvl);
 
-            // --- System Performance & Power ---
             let _ = self.perf().set_perf_mode(state.perf_mode.value());
-            // --- Function / Multimedia Key Mapping ---
             if self.app_config.primary_multimedia_keys {
                 self.kb().enable_multimedia_keys();
             } else {
@@ -45,7 +41,6 @@ impl<'a> Executer<'a> {
         }
         PersistBuffer::enable();
 
-        // --- Display Refresh Rate ---
         if state.screen_refresh != 0 {
             self.display().set_refresh_rate(state.screen_refresh);
         } else {
@@ -87,7 +82,6 @@ impl<'a> Executer<'a> {
         self.kb().set_keyboard_color(0, 0, 0, 0);
         self.kb().keyboard_control(false);
         let _ = command(self.device, 0x030a, &[5, 0], None); // reset keyboard effect
-        // let _ = command(self.device, 0x0303, &[1, 5, 0], None); // turn off keyboard light (set_keyboard_color() with brightness 0 already does this)
         let _ = command(self.device, 0x0300, &[1, 38, 0], None); // set underglow brightness to 0
         let _ = command(self.device, 0x0303, &[1, 38, 0], None); // turn off underglow brightness
         reset_perf_mode_for_sleep(self.device);
@@ -102,7 +96,6 @@ impl<'a> Executer<'a> {
         true
     }
 
-    // ── Internal helpers ────────────────────────────────────────────────
 
     fn persist_config(&mut self) {
         persist_config(self.app_config, &self.persist_buffer);

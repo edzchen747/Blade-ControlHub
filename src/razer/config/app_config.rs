@@ -7,8 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 
-/// Top-level application configuration containing separate hardware states
-/// for plugged-in and battery power modes.
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(default)]
 pub struct AppConfig {

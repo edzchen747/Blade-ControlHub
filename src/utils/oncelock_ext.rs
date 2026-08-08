@@ -2,8 +2,6 @@ use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant};
 
-// ── OnceLock Timeout Extension ──────────────────────────────────────────────
-
 const ONCELOCK_TIMEOUT_MS: u64 = 1000;
 const ONCELOCK_POLL_INTERVAL_MS: u64 = 100;
 
@@ -14,7 +12,6 @@ pub trait OnceLockExt<T> {
 }
 
 impl<T> OnceLockExt<T> for OnceLock<T> {
-    /// Polls until the value is available or the timeout is reached.
     fn get_or_timeout(&self) -> Option<T>
     where
         T: Clone,

@@ -18,14 +18,12 @@ macro_rules! define_keymap {
 }
 
 define_keymap! {
-    // Letters with Fn functions
     B = 0x42,
     P = 0x50,
     R = 0x52,
     T = 0x54,
     V = 0x56,
 
-    // Function Keys
     F1 = 0x70,
     F2 = 0x71,
     F3 = 0x72,

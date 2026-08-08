@@ -27,8 +27,6 @@ static DEVICE_CHANNEL_MONITOR_THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new
 
 type DeviceChannelMonitorWake = (Mutex<()>, Condvar);
 
-// ── Global Singleton ────────────────────────────────────────────────────────
-
 static CMDS_TX: OnceLock<DeviceCommandSenders> = OnceLock::new();
 
 #[derive(Clone)]
@@ -37,8 +35,6 @@ struct DeviceCommandSenders {
     urgent: mpsc::Sender<DeviceCmd>,
 }
 
-/// Returns a `DeviceHandle` connected to the background device thread.
-/// On first call, spawns the worker thread that owns the hardware device.
 pub fn device() -> DeviceHandle {
     let senders = CMDS_TX.get_or_init(|| {
         let (normal_tx, normal_rx) = mpsc::channel::<DeviceCmd>();
@@ -181,7 +177,6 @@ pub(crate) fn get_razer_device() -> AppResult<Device> {
                     warn!("Device PID cache was already initialized");
                 }
 
-                // Loop through all detected Razer PIDs and return the first that responds
                 for pid in &device_pids {
                     let custom_descriptor = Descriptor {
                         model_number_prefix: model,
@@ -192,7 +187,6 @@ pub(crate) fn get_razer_device() -> AppResult<Device> {
                     let Ok(device) = Device::new(custom_descriptor) else {
                         continue;
                     };
-                    // Command to check performance mode
                     if command(&device, 0x0d82, &[0, 0, 0, 0], Some(&[2, 3])).is_ok() {
                         return Ok(device);
                     }

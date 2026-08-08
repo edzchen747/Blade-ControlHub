@@ -1,10 +1,6 @@
-//! Tests for `CycleState<T>` generic cyclic iterator.
-
 use blade_controlhub::core::shared_state::SHIFT_PRESSED;
 use blade_controlhub::razer::config::CycleState;
 use std::sync::atomic::Ordering;
-
-// ── Basic initialization ────────────────────────────────────────────────────
 
 #[test]
 fn cycle_state_new_starts_at_index_zero() {
@@ -20,8 +16,6 @@ fn cycle_state_value_returns_current_item_without_advancing() {
     assert_eq!(cs.index, 0);
 }
 
-// ── next() advances and returns new item ─────────────────────────────────────
-
 #[test]
 fn cycle_state_next_advances_index_and_returns_new_item() {
     let mut cs = CycleState::new(vec![10, 20, 30]);
@@ -36,7 +30,6 @@ fn cycle_state_next_wraps_around_at_end_of_list() {
     let mut cs = CycleState::new(vec![10, 20, 30]);
     assert_eq!(cs.next(), 20);
     assert_eq!(cs.next(), 30);
-    // Next call should wrap back to index 0
     assert_eq!(cs.next(), 10);
     assert_eq!(cs.index, 0);
 }
@@ -48,8 +41,6 @@ fn cycle_state_two_item_list_cycles_correctly() {
     assert_eq!(cs.next(), 100);
     assert_eq!(cs.next(), 200);
 }
-
-// ── set() moves index to correct position ────────────────────────────────────
 
 #[test]
 fn cycle_state_set_moves_index_to_matching_value() {
@@ -79,8 +70,6 @@ fn cycle_state_set_returns_err_on_value_not_in_list() {
     let result = cs.set(&99);
     assert!(result.is_err(), "expected Err for value not in list");
 }
-
-// ── String type ──────────────────────────────────────────────────────────────
 
 #[test]
 fn cycle_state_string_new_starts_at_index_zero() {
@@ -126,8 +115,6 @@ fn cycle_state_string_set_returns_err_on_missing_value() {
     assert!(result.is_err(), "expected Err for missing string value");
 }
 
-// ── set() Result API ──────────────────────────────────────────────────────────
-
 #[test]
 fn cycle_state_set_success_returns_ok() {
     let mut cs = CycleState::new(vec![10u8, 20, 30]);
@@ -151,8 +138,6 @@ fn cycle_state_set_err_does_not_change_index() {
     let _ = cs.set(&99); // should fail
     assert_eq!(cs.index, 1, "index must not change on Err");
 }
-
-// ── next() boundary cases ─────────────────────────────────────────────────────
 
 #[test]
 fn cycle_state_single_item_next_stays_at_index_zero() {
@@ -212,8 +197,6 @@ fn cycle_state_next_full_cycle_returns_to_start() {
     assert_eq!(cs.index, 0, "after a full cycle, index must wrap to 0");
     assert_eq!(cs.value(), items[0]);
 }
-
-// ── value() does not advance ──────────────────────────────────────────────────
 
 #[test]
 fn cycle_state_value_after_next_reflects_new_item() {

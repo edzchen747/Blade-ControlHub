@@ -2,9 +2,6 @@ use librazer::device::Device;
 
 use crate::{razer::protocol::command, win::audio::AudioType};
 
-/// Audio handler.
-///
-/// Accepts a reference to the device. All logic is copied exactly from Executer.
 pub struct AudioHandler<'a> {
     device: &'a Device,
 }

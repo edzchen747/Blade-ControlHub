@@ -120,8 +120,6 @@ pub fn poll_captured_razer_key(after_sequence: u64) -> AppResult<Option<RazerKey
     }
 }
 
-/// Starts a Command Lab recording, blocking until the capture is running
-/// (including any UAC elevation prompt) or failed, and returns the state.
 pub fn begin_command_lab_record() -> AppResult<CommandLabRecordingState> {
     match send_request(IpcRequest::BeginCommandLabRecord)? {
         IpcResponse::CommandLabRecordingState(state) => Ok(state),

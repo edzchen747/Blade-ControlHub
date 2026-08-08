@@ -172,7 +172,6 @@ fn boost_saturation(rgb: Rgb, amount: f32) -> Rgb {
     let g = srgb_to_linear(rgb.g as f32 / 255.0);
     let b = srgb_to_linear(rgb.b as f32 / 255.0);
 
-    // Rec.709 luminance in linear RGB.
     let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
 
     Rgb {

@@ -15,7 +15,6 @@ pub enum PerfMode {
     Performance = 2,
     Turbo = 1,
     Custom = 4,
-    /// Experimental raw firmware mode, available only in debug mode.
     Unsupported = 255,
     Unknown = 254,
 }

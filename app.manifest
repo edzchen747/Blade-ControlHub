@@ -4,8 +4,6 @@
     <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
         <security>
             <requestedPrivileges>
-                <!-- Run as the launching user; elevation is requested explicitly
-                     when the "Start with administrator privileges" setting is on. -->
                 <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
             </requestedPrivileges>
         </security>

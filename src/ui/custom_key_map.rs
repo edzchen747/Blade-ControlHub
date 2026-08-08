@@ -1,13 +1,6 @@
-/// Data structures for custom key mapping state.
-///
-/// Extracted from `Settings` to provide a clean, testable domain model
-/// that can be shared across UI components without coupling to egui.
-
 #[derive(Default, Clone)]
 pub struct HypershiftKeyMap {
-    /// Windows virtual-key code for the ordinary keyboard key selected in settings.
     pub key_code: Option<u8>,
-    /// Reserved for the action editor, which has not been implemented yet.
     pub action: String,
 }
 
@@ -18,7 +11,6 @@ pub struct RazerKeyMap {
     pub action: String,
 }
 
-/// The custom key mapping state, holding both Hypershift and Razer special key rows.
 #[derive(Default)]
 pub struct CustomKeyMap {
     pub hypershift_keys: Vec<HypershiftKeyMap>,

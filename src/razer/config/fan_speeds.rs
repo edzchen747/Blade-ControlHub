@@ -2,8 +2,6 @@ use crate::razer::config::FanSpeedLimits;
 use crate::razer::enums::PerfMode;
 use serde::{Deserialize, Serialize};
 
-/// Saved manual fan speeds for each performance mode. A value of zero leaves
-/// that mode under the laptop firmware's automatic fan control.
 #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize, Debug)]
 #[serde(default)]
 pub struct FanSpeeds {

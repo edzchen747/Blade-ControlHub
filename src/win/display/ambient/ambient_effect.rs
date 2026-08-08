@@ -73,7 +73,6 @@ impl AmbientEffect {
         join_ambient_thread();
     }
 }
-
 fn ambient_thread() -> MutexGuard<'static, Option<JoinHandle<()>>> {
     AMBIENT_THREAD
         .lock()
@@ -146,6 +145,3 @@ fn schedule_ambient_recovery(device_handle: DeviceHandle, current_generation: u3
         }
     }
 }
-
-// --- Screen Capture ---
-

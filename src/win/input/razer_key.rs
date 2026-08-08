@@ -18,7 +18,6 @@ macro_rules! define_keymap {
 }
 
 define_keymap! {
-    // Dedicated Keys
     Mic      = 0xd4,
     Trackpad = 0xdd,
     Perf     = 0xd3,

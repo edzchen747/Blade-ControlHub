@@ -1,8 +1,4 @@
-//! Tests for `From<u8>` implementations on Razer enums.
-
 use blade_controlhub::razer::enums::{BatteryLimit, PerfMode, RGBEffect};
-
-// ── PerfMode ─────────────────────────────────────────────────────────────────
 
 #[test]
 fn perf_mode_from_zero_is_balanced() {
@@ -52,8 +48,6 @@ fn perf_mode_from_255_is_experimental_unsupported() {
     assert_eq!(PerfMode::Unsupported as u8, u8::MAX);
 }
 
-// ── RGBEffect ────────────────────────────────────────────────────────────────
-
 #[test]
 fn rgb_effect_from_four_is_cycle() {
     assert_eq!(RGBEffect::from(4), RGBEffect::Cycle);
@@ -86,8 +80,6 @@ fn rgb_effect_from_seventeen_nine_is_reactive() {
 
 #[test]
 fn rgb_effect_from_seven_is_starlight() {
-    // Current behavior: 7 maps to Starlight (same as 25).
-    // Note: A bug fix would change this to Unknown.
     assert_eq!(RGBEffect::from(7), RGBEffect::Starlight);
 }
 
@@ -95,8 +87,6 @@ fn rgb_effect_from_seven_is_starlight() {
 fn rgb_effect_from_invalid_is_unknown() {
     assert_eq!(RGBEffect::from(99), RGBEffect::Unknown);
 }
-
-// ── BatteryLimit ─────────────────────────────────────────────────────────────
 
 #[test]
 fn battery_limit_from_sixty_is_off() {

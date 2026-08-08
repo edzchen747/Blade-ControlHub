@@ -1,6 +1,3 @@
-// ── Device Commands ─────────────────────────────────────────────────────────
-
-/// Commands that can be sent to the background device thread.
 pub enum DeviceCmd {
     InitializeDevice(bool),
     SleepDevice(mpsc::Sender<bool>),
@@ -45,9 +42,6 @@ pub enum DeviceCmd {
     Shutdown(mpsc::Sender<bool>),
 }
 
-// ── DeviceHandle ────────────────────────────────────────────────────────────
-
-/// A thread-safe, cloneable handle for sending commands to the device thread.
 #[derive(Debug, Clone)]
 pub struct DeviceHandle {
     sender: Sender<DeviceCmd>,
@@ -55,7 +49,6 @@ pub struct DeviceHandle {
 }
 
 impl DeviceHandle {
-    // ── Queries (blocking) ──────────────────────────────────────────
 
     pub fn get_pid(&self) -> AppResult<u16> {
         self.query(DeviceCmd::GetPID)
@@ -111,13 +104,10 @@ impl DeviceHandle {
         self.query_urgent(DeviceCmd::SleepDevice)
     }
 
-    /// Reopens the Razer HID device on the hardware owner thread, reapplies
-    /// the active configuration, and returns the freshly detected PID.
     pub fn reinitialize(&self) -> AppResult<u16> {
         self.query_urgent_result(DeviceCmd::ReinitializeDevice)
     }
 
-    // ── Fire-and-forget commands ────────────────────────────────────
 
     pub fn initialize(&self, notify_startup: bool) {
         self.send(DeviceCmd::InitializeDevice(notify_startup));
@@ -216,31 +206,25 @@ impl DeviceHandle {
         self.send(DeviceCmd::PersistConfig);
     }
 
-    /// Replays the given captured commands on the hardware owner thread.
     pub fn play_command_lab_commands(&self, commands: Vec<CapturedCommand>) {
         self.send(DeviceCmd::PlayCommandLabCommands(commands));
     }
 
-    /// Saves a named Command Lab command list into the config and persists it.
     pub fn save_command_lab_commands(&self, name: String, commands: Vec<CapturedCommand>) {
         self.send(DeviceCmd::SaveCommandLabCommands(name, commands));
     }
 
-    /// Removes a named Command Lab command from the config and persists it.
     pub fn remove_command_lab_command(&self, name: String) {
         self.send(DeviceCmd::RemoveCommandLabCommand(name));
     }
 
-    // ── Internal helpers ────────────────────────────────────────────
 
-    /// Sends a command and logs an error if the device thread has exited.
     fn send(&self, cmd: DeviceCmd) {
         if let Err(error) = self.sender.send(cmd) {
             warn!(?error, "Device worker is unavailable; dropping command");
         }
     }
 
-    /// Sends a query command and blocks until the response arrives (5s timeout).
     fn query<T, F>(&self, make_query: F) -> AppResult<T>
     where
         F: FnOnce(mpsc::Sender<T>) -> DeviceCmd,

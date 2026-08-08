@@ -211,9 +211,6 @@ fn update_card_window(hwnd: HWND, card: &mut OsdCard) {
         return;
     };
 
-    // Depth 0 matches the previous centered placement; deeper cards rise and
-    // shrink towards the top of the stack. `promotion_y_offset` offsets the new front
-    // card below its spot, then eases up to 0 as it fades in.
     let screen_width = unsafe { GetSystemMetrics(SM_CXSCREEN) };
     let screen_height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
     let base_px = (BASE_SIZE * scale_factor).round() as i32;

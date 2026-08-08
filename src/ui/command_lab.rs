@@ -1,35 +1,20 @@
-//! Data structures for Command Lab state.
-//!
-//! Rows are plain text commands; the recording lifecycle is a UI-local
-//! concern that is mirrored by the runtime countdown through IPC.
-
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use crate::ipc::protocol::CommandLabStatus;
 use crate::win::system::usbpcap::capture::CapturedCommand;
 
-/// How many captured commands the row code block previews before "… n more".
 pub const COMMAND_LAB_CODE_PREVIEW_COMMANDS: usize = 2;
-/// How many arguments a full command line shows before "…".
 pub const COMMAND_LAB_COMMAND_ARGS_PREVIEW: usize = 3;
-/// How long the too-many-commands failure notice stays before the previous
-/// code block is restored.
 pub const COMMAND_LAB_TOO_MANY_NOTICE_DURATION: Duration = Duration::from_secs(3);
-/// Shown when a new row cannot be added until the last row is completed.
 pub const NEW_ROW_ERROR_MESSAGE: &str = "Complete the last row to add more";
 
 #[derive(Default, Clone)]
 pub struct CommandLabRow {
     pub command: String,
-    /// The commands captured for this row (empty until a recording finishes).
     pub captured_commands: Vec<CapturedCommand>,
-    /// Whether the last capture for this row was rejected as too long and
-    /// the failure notice is still showing.
     pub too_many_commands: bool,
-    /// Commands to restore once the too-many notice expires.
     restore_captured_commands: Vec<CapturedCommand>,
-    /// When the too-many notice was raised, so it can expire.
     too_many_shown_at: Option<Instant>,
 }
 
@@ -41,9 +26,6 @@ impl CommandLabRow {
         self.too_many_shown_at = Some(Instant::now());
     }
 
-    /// Expires the too-many notice once its duration elapsed, restoring the
-    /// previous commands so the code block comes back. Returns whether the
-    /// notice expired this call.
     pub fn expire_too_many_notice(&mut self, now: Instant) -> bool {
         let Some(shown_at) = self.too_many_shown_at else {
             return false;
@@ -58,13 +40,10 @@ impl CommandLabRow {
     }
 }
 
-/// The Command Lab editing state, holding the growing row list and which
-/// row (if any) is currently recording.
 #[derive(Default)]
 pub struct CommandLab {
     pub rows: Vec<CommandLabRow>,
     pub recording_row_idx: Option<usize>,
-    /// Whether the troubleshooting help box is shown.
     pub show_help: bool,
 }
 
@@ -85,9 +64,6 @@ impl CommandLab {
         self.recording_row_idx = idx;
     }
 
-    /// Marks a row as the recording row, clearing any too-many-commands
-    /// failure notice for it. Existing captured commands stay visible while
-    /// the new recording runs.
     pub fn begin_capture(&mut self, idx: usize) {
         self.recording_row_idx = Some(idx);
         if let Some(row) = self.rows.get_mut(idx) {
@@ -97,7 +73,6 @@ impl CommandLab {
         }
     }
 
-    /// Updates the full captured command list for the row being recorded.
     pub fn set_captured_command_list(&mut self, commands: Vec<CapturedCommand>) {
         if let Some(idx) = self.recording_row_idx
             && let Some(row) = self.rows.get_mut(idx)
@@ -106,11 +81,6 @@ impl CommandLab {
         }
     }
 
-    /// Applies a polled recording state to the recording row. Empty capture
-    /// results (failed, cancelled, or zero-command recordings) keep the row's
-    /// previous commands so the code block is restored instead of wiped. A
-    /// too-many-commands result shows the failure notice while keeping the
-    /// previous commands for restoration.
     pub fn apply_capture_result(&mut self, status: CommandLabStatus, commands: Vec<CapturedCommand>) {
         match status {
             CommandLabStatus::TooManyCommands => {
@@ -163,7 +133,6 @@ impl CommandLab {
         self.recording_row_idx.is_some()
     }
 
-    /// Whether the row's non-empty name is shared with another row.
     pub fn row_name_is_duplicate(&self, idx: usize) -> bool {
         let Some(name) = self.rows.get(idx).map(|row| row.command.trim()) else {
             return false;
@@ -171,8 +140,6 @@ impl CommandLab {
         !name.is_empty() && self.rows.iter().filter(|row| row.command.trim() == name).count() > 1
     }
 
-    /// Whether the row can be persisted: it has a valid capture and a unique
-    /// non-empty name.
     pub fn row_ready_to_save(&self, idx: usize) -> bool {
         let Some(row) = self.rows.get(idx) else {
             return false;
@@ -183,8 +150,6 @@ impl CommandLab {
             && !self.row_name_is_duplicate(idx)
     }
 
-    /// Whether a new row can be added: no active recording, every existing
-    /// row has a command entered, and the last row has a recording.
     pub fn can_add_row(&self) -> bool {
         self.recording_row_idx.is_none()
             && self.rows.iter().all(|row| !row.command.is_empty())
@@ -198,8 +163,6 @@ impl CommandLab {
         self.rows.push(CommandLabRow::default());
     }
 
-    /// Removes a row, clearing the recording row if it was removed. The list
-    /// never becomes empty: removing the last row leaves a new blank one.
     pub fn remove_row(&mut self, idx: usize) {
         if self.recording_row_idx == Some(idx) {
             self.recording_row_idx = None;
@@ -216,13 +179,10 @@ impl CommandLab {
     }
 }
 
-/// `0303` — the command code, for the code block preview.
 fn format_code_block_command(command: &CapturedCommand) -> String {
     format!("{:04X}", command.command)
 }
 
-/// `0x0303 01 05 FF` — the command code plus its arguments, truncating after
-/// the third argument with "…".
 pub fn format_command_full(command: &CapturedCommand) -> String {
     let mut text = format!("0x{:04X}", command.command);
     for arg in command.args.iter().take(COMMAND_LAB_COMMAND_ARGS_PREVIEW) {
@@ -234,9 +194,6 @@ pub fn format_command_full(command: &CapturedCommand) -> String {
     text
 }
 
-/// The code block preview text: the first two command codes without the `0x`
-/// prefix, comma-separated, with "… n more" appended (no trailing comma) for
-/// the remaining commands.
 pub fn command_lab_code_preview(commands: &[CapturedCommand]) -> String {
     let mut text = commands
         .iter()
@@ -447,7 +404,6 @@ mod tests {
 
         assert_eq!(command_lab.rows.len(), 3);
         assert_eq!(command_lab.rows[0].captured_commands.len(), 1);
-        // A row with a fresh capture must not be overwritten.
         assert_eq!(command_lab.rows[1].captured_commands.len(), 1);
         assert_eq!(command_lab.rows[1].captured_commands[0].command, 0x0004);
         assert_eq!(command_lab.rows[2].command, "Battery Cycle");
@@ -588,7 +544,6 @@ mod tests {
         assert!(command_lab.rows[0].expire_too_many_notice(now));
         assert!(!command_lab.rows[0].too_many_commands);
         assert_eq!(command_lab.rows[0].captured_commands, previous);
-        // Expiry is one-shot.
         assert!(!command_lab.rows[0].expire_too_many_notice(now));
     }
 

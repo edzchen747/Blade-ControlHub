@@ -4,8 +4,6 @@ use std::sync::atomic::Ordering;
 
 use serde::{Deserialize, Serialize};
 
-/// A generic cyclic iterator over a fixed set of items.
-/// Tracks a current index and advances through the collection in a loop.
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct CycleState<T> {
     pub index: usize,

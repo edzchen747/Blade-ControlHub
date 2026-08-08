@@ -7,10 +7,6 @@ use super::constants::CONFIG_PATH;
 use librazer::descriptor::Descriptor;
 use tracing::{info, warn};
 
-/// Loads the application config from disk, falling back to defaults on error.
-///
-/// Automatically handles backwards compatibility by using `#[serde(default)]`
-/// on all fields, so missing or unknown keys are gracefully ignored.
 pub fn load_config(device_info: &Descriptor) -> AppConfig {
     let Ok(contents) = std::fs::read_to_string(CONFIG_PATH) else {
         info!("Config file not found, using application defaults");
@@ -53,7 +49,6 @@ fn load_launch_flags_from_contents(contents: &str) -> (bool, bool) {
 }
 
 fn finalize_config(mut app_config: AppConfig, device_info: &Descriptor) -> AppConfig {
-    // Override saved cycle items in case new updates bring more options
     app_config.refresh_cycle_items();
     app_config.set_device_model(
         format!("0x{:04x}", device_info.pid),

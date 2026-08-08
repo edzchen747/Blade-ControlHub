@@ -10,9 +10,6 @@ use crate::{
 };
 use std::time::{Duration, Instant};
 
-/// Battery handler.
-///
-/// Owns battery-care HID commands and the OSD cycle timeout.
 pub struct BatteryHandler<'a> {
     device: &'a Device,
     battery_cycle_timeout: &'a mut Instant,
@@ -31,7 +28,6 @@ impl<'a> BatteryHandler<'a> {
         let _ = command(self.device, 0x070f, &[10], None);
     }
 
-    /// Reads the battery-care setting retained by the device firmware.
     pub fn battery_limit(&self) -> AppResult<BatteryLimit> {
         // Settings snapshots call this query. Avoid turning each read into a
         // new settings-update event, which would cause the UI to request

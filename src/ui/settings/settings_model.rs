@@ -124,7 +124,6 @@ impl Settings {
     pub fn cancel_pending_theme_color(&mut self) {
         self.pending_theme_color = None;
     }
-    /// Returns whether the captured key is already assigned to another row.
     pub fn apply_captured_razer_key(&mut self, key_code: u8) -> bool {
         let Some(idx) = self.custom_key_map.get_listening_idx() else {
             return false;
@@ -143,7 +142,6 @@ impl Settings {
         }
         false
     }
-    /// Returns whether the captured key is already assigned to another row.
     pub fn apply_captured_hypershift_key(&mut self, key_code: u8) -> bool {
         let Some(idx) = self.custom_key_map.hypershift_listening_idx() else {
             return false;

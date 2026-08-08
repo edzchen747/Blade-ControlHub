@@ -24,8 +24,8 @@ static GPU_MONITOR_RUNNING: AtomicBool = AtomicBool::new(false);
 static GPU_MONITOR_HWND: AtomicIsize = AtomicIsize::new(0);
 static GPU_MONITOR_THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
-/// Detect when main monitor GPU changes and launches app on main display GPU.
-/// Ambient Effect causes stutters in games if it runs on iGPU but game and main display are running on dGPU
+/// Keeps the ambient worker on the primary display's GPU to avoid cross-GPU
+/// capture stutter in games.
 pub struct GpuDisplayMonitor {
     class_name: PCWSTR,
     last_display_gpu: String,
@@ -83,7 +83,6 @@ impl GpuDisplayMonitor {
         };
         GPU_MONITOR_HWND.store(window.hwnd.0 as isize, Ordering::SeqCst);
 
-        // Trigger an explicit baseline check on setup.
         self.refresh_display_layout_baseline();
         self.sync_current_main_display_and_gpu();
         run_gpu_monitor_message_loop();
@@ -116,7 +115,6 @@ impl GpuDisplayMonitor {
         }
     }
 
-    /// The window callback procedure conforming exactly to native Win32 requirements.
     unsafe extern "system" fn window_procedure(
         hwnd: HWND,
         msg: u32,

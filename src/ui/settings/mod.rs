@@ -75,12 +75,10 @@ pub fn custom_mode_level_name(level: u8) -> &'static str {
     }
 }
 
-/// The shared heading treatment for every boxed settings section.
 pub(super) fn section_title(title: &str) -> egui::RichText {
     egui::RichText::new(title).size(SECTION_TITLE_SIZE)
 }
 
-/// The shared selectable-button treatment for settings choices.
 pub(super) fn choice_button(
     ui: &mut egui::Ui,
     selected: bool,
@@ -124,7 +122,6 @@ pub(super) fn choice_button(
     response
 }
 
-/// A compact on/off switch, used for boolean settings instead of a checkbox.
 fn toggle_switch(ui: &mut egui::Ui, enabled: &mut bool) -> egui::Response {
     let desired_size = egui::vec2(
         ui.spacing().interact_size.x * 0.75,
@@ -159,7 +156,6 @@ fn toggle_switch(ui: &mut egui::Ui, enabled: &mut bool) -> egui::Response {
     response
 }
 
-/// A labelled toggle whose control stays aligned to the section's right edge.
 pub(super) fn right_aligned_toggle(
     ui: &mut egui::Ui,
     label: impl Into<egui::WidgetText>,

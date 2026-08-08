@@ -1,6 +1,3 @@
-/// Device tab UI component.
-///
-/// Renders AC/Battery profile-specific controls.
 use eframe::egui;
 
 use crate::razer::{

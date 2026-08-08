@@ -19,8 +19,6 @@ use crate::win::system::power::PowerMonitor;
 use crate::win::system::standby::StandbyMonitor;
 use tracing::{debug, info, warn};
 
-// ── Global Context ───────────────────────────────────────────────────────────
-
 #[derive(Clone)]
 pub struct AppContext {
     pub core: Arc<Mutex<AppCore>>,
@@ -33,8 +31,6 @@ static ACTIVE_UI_PROCESS: Mutex<Option<Child>> = Mutex::new(None);
 static SHUTDOWN_SIGNAL: OnceLock<Arc<ShutdownSignal>> = OnceLock::new();
 
 type ShutdownSignal = (Mutex<bool>, Condvar);
-
-// ── App Core State Structure ──────────────────────────────────────────────────
 
 pub struct AppCore {
     pub running: bool,

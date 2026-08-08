@@ -6,11 +6,6 @@ use tracing::{debug, warn};
 pub(crate) const HID_PACKET_ARGS_LEN: usize = 80;
 const HID_COMMAND_ATTEMPTS: u8 = 3;
 
-/// Sends a HID command to the device with automatic retry logic (up to 3 attempts).
-///
-/// If `result_indices` is `Some(indices)`, validates the response and returns
-/// the bytes at those indexes. If `None`, returns an empty vector on success.
-/// Returns `Err` if all attempts fail or response is invalid.
 pub fn command(
     device: &Device,
     command: u16,
@@ -77,8 +72,6 @@ fn new_report(command: u16, args: &[u8]) -> AppResult<Packet> {
     Ok(Packet::new(command, args))
 }
 
-/// Validates that a response packet matches the sent arguments,
-/// skipping every requested result index.
 fn response_valid(response: &Packet, args: &[u8], result_indices: Option<&[usize]>) -> bool {
     let result_indices = result_indices.unwrap_or_default();
     response.get_args().iter().enumerate().zip(args.iter()).all(
