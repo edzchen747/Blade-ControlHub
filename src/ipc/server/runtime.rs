@@ -157,6 +157,9 @@ fn ipc_request_kind(request: &IpcRequest) -> &'static str {
         IpcRequest::BeginCommandLabRecord => "BeginCommandLabRecord",
         IpcRequest::CancelCommandLabRecord => "CancelCommandLabRecord",
         IpcRequest::PollCommandLabRecording => "PollCommandLabRecording",
+        IpcRequest::PlayCommandLabCommands { .. } => "PlayCommandLabCommands",
+        IpcRequest::SaveCommandLabCommands { .. } => "SaveCommandLabCommands",
+        IpcRequest::RemoveCommandLabCommand { .. } => "RemoveCommandLabCommand",
     }
 }
 
@@ -202,8 +205,7 @@ fn dispatch_request(request: IpcRequest, device: &DeviceHandle) -> IpcResponse {
             poll_captured_razer_key(after_sequence)
         }
         IpcRequest::BeginCommandLabRecord => {
-            begin_command_lab_record();
-            IpcResponse::Ack
+            IpcResponse::CommandLabRecordingState(begin_command_lab_record())
         }
         IpcRequest::CancelCommandLabRecord => {
             cancel_command_lab_record();
@@ -211,6 +213,18 @@ fn dispatch_request(request: IpcRequest, device: &DeviceHandle) -> IpcResponse {
         }
         IpcRequest::PollCommandLabRecording => {
             IpcResponse::CommandLabRecordingState(poll_command_lab_recording())
+        }
+        IpcRequest::PlayCommandLabCommands { commands } => {
+            device.play_command_lab_commands(commands);
+            IpcResponse::Ack
+        }
+        IpcRequest::SaveCommandLabCommands { name, commands } => {
+            device.save_command_lab_commands(name, commands);
+            IpcResponse::Ack
+        }
+        IpcRequest::RemoveCommandLabCommand { name } => {
+            device.remove_command_lab_command(name);
+            IpcResponse::Ack
         }
     }
 }

@@ -21,6 +21,7 @@ use crate::razer::{
     enums::{BatteryLimit, PerfMode, RGBEffect},
 };
 use crate::runtime::settings_state::SettingsState;
+use crate::win::system::usbpcap::capture::CapturedCommand;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(500);
 const CONNECT_RETRY: Duration = Duration::from_millis(25);
@@ -111,8 +112,13 @@ pub fn poll_captured_razer_key(after_sequence: u64) -> AppResult<Option<RazerKey
     }
 }
 
-pub fn begin_command_lab_record() -> AppResult<()> {
-    expect_ack(send_request(IpcRequest::BeginCommandLabRecord)?)
+/// Starts a Command Lab recording, blocking until the capture is running
+/// (including any UAC elevation prompt) or failed, and returns the state.
+pub fn begin_command_lab_record() -> AppResult<CommandLabRecordingState> {
+    match send_request(IpcRequest::BeginCommandLabRecord)? {
+        IpcResponse::CommandLabRecordingState(state) => Ok(state),
+        response => Err(unexpected_response(response)),
+    }
 }
 
 pub fn cancel_command_lab_record() -> AppResult<()> {
@@ -124,6 +130,25 @@ pub fn poll_command_lab_recording() -> AppResult<CommandLabRecordingState> {
         IpcResponse::CommandLabRecordingState(state) => Ok(state),
         response => Err(unexpected_response(response)),
     }
+}
+
+pub fn play_command_lab_commands(commands: Vec<CapturedCommand>) -> AppResult<()> {
+    expect_ack(send_request(IpcRequest::PlayCommandLabCommands {
+        commands,
+    })?)
+}
+
+pub fn save_command_lab_commands(name: String, commands: Vec<CapturedCommand>) -> AppResult<()> {
+    expect_ack(send_request(IpcRequest::SaveCommandLabCommands {
+        name,
+        commands,
+    })?)
+}
+
+pub fn remove_command_lab_command(name: String) -> AppResult<()> {
+    expect_ack(send_request(IpcRequest::RemoveCommandLabCommand {
+        name,
+    })?)
 }
 
 pub fn send_request(request: IpcRequest) -> AppResult<IpcResponse> {
@@ -205,6 +230,9 @@ fn ipc_request_kind(request: &IpcRequest) -> &'static str {
         IpcRequest::BeginCommandLabRecord => "BeginCommandLabRecord",
         IpcRequest::CancelCommandLabRecord => "CancelCommandLabRecord",
         IpcRequest::PollCommandLabRecording => "PollCommandLabRecording",
+        IpcRequest::PlayCommandLabCommands { .. } => "PlayCommandLabCommands",
+        IpcRequest::SaveCommandLabCommands { .. } => "SaveCommandLabCommands",
+        IpcRequest::RemoveCommandLabCommand { .. } => "RemoveCommandLabCommand",
     }
 }
 

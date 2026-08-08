@@ -1,10 +1,12 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::config::ThemeColor;
 use crate::razer::{
     config::{AppConfig, CustomModeConfig, DeviceState, FanSpeedLimits, FanSpeeds, PowerProfile},
     enums::{BATTERY_LIMITS, BatteryLimit, PerfMode, RGBEffect},
 };
+use crate::win::system::usbpcap::capture::CapturedCommand;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceProfileState {
@@ -32,6 +34,8 @@ pub struct SettingsState {
     pub primary_multimedia_keys: bool,
     pub advanced_experimental_features: bool,
     pub theme_color: ThemeColor,
+    /// Persisted Command Lab library: command name → captured commands.
+    pub command_lab_commands: HashMap<String, Vec<CapturedCommand>>,
 }
 
 impl SettingsState {
@@ -80,6 +84,7 @@ impl SettingsState {
             primary_multimedia_keys: config.primary_multimedia_keys,
             advanced_experimental_features: config.advanced_experimental_features,
             theme_color: config.theme_color,
+            command_lab_commands: config.command_lab_commands,
         }
     }
 

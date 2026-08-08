@@ -7,6 +7,7 @@ use crate::razer::{
     enums::{BatteryLimit, PerfMode, RGBEffect},
 };
 use crate::ui::theme::{theme_color32, theme_text_color};
+use crate::win::system::usbpcap::capture::CapturedCommand;
 
 mod command_lab_tab;
 mod device_tab;
@@ -54,6 +55,12 @@ pub enum SettingsCommand {
     CancelRazerKeyCapture,
     BeginCommandLabRecord { row_idx: usize },
     CancelCommandLabRecord,
+    PlayCommandLabCommands(Vec<CapturedCommand>),
+    SaveCommandLabCommands {
+        name: String,
+        commands: Vec<CapturedCommand>,
+    },
+    RemoveCommandLabCommand(String),
 }
 
 pub fn custom_mode_level_name(level: u8) -> &'static str {

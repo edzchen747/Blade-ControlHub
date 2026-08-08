@@ -33,6 +33,8 @@ pub struct Executer<'a> {
     display_manager: DisplayManager,
     refresh_cycle_timeout: Instant,
     battery_cycle_timeout: Instant,
+    settings_snapshot_queries: u32,
+    cached_battery_limit: BatteryLimit,
     fan_speed_limits: FanSpeedLimits,
 }
 

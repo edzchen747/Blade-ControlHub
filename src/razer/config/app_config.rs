@@ -2,7 +2,9 @@ use crate::config::ThemeColor;
 use crate::core::shared_state::IS_PLUGGED_IN;
 use crate::razer::config::{DeviceState, PowerProfile, allowed_perf_modes};
 use crate::razer::enums::{PerfMode, RGB_EFFECTS};
+use crate::win::system::usbpcap::capture::CapturedCommand;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 
 /// Top-level application configuration containing separate hardware states
@@ -20,6 +22,8 @@ pub struct AppConfig {
     pub advanced_experimental_features: bool,
     pub theme_color: ThemeColor,
     pub keyboard_width: u8,
+    /// Command Lab saved commands: command name → captured commands.
+    pub command_lab_commands: HashMap<String, Vec<CapturedCommand>>,
 }
 
 impl Default for AppConfig {
@@ -34,6 +38,7 @@ impl Default for AppConfig {
             advanced_experimental_features: false,
             theme_color: ThemeColor::default(),
             keyboard_width: 0,
+            command_lab_commands: HashMap::new(),
         }
     }
 }

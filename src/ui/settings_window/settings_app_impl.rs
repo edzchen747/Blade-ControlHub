@@ -171,6 +171,21 @@ impl SettingsApp {
                 SettingsCommand::CancelCommandLabRecord => {
                     self.cancel_command_lab_record(ctx);
                 }
+                SettingsCommand::PlayCommandLabCommands(commands) => {
+                    if let Err(error) = client::play_command_lab_commands(commands) {
+                        warn!(%error, "Failed to play Command Lab commands");
+                    }
+                }
+                SettingsCommand::SaveCommandLabCommands { name, commands } => {
+                    if let Err(error) = client::save_command_lab_commands(name, commands) {
+                        warn!(%error, "Failed to save Command Lab commands");
+                    }
+                }
+                SettingsCommand::RemoveCommandLabCommand(name) => {
+                    if let Err(error) = client::remove_command_lab_command(name) {
+                        warn!(%error, "Failed to remove Command Lab command");
+                    }
+                }
             }
         }
 
@@ -325,7 +340,23 @@ impl SettingsApp {
                     self.settings.with_settings(|settings| {
                         settings
                             .command_lab
-                            .set_captured_commands(state.captured_commands)
+                            .apply_capture_result(state.status, state.commands.clone());
+                        // When the name was already set before recording,
+                        // persist right away once the capture finishes.
+                        if state.status == crate::ipc::protocol::CommandLabStatus::Done
+                            && let Some(idx) = settings.command_lab.recording_row_idx()
+                            && settings.command_lab.row_ready_to_save(idx)
+                        {
+                            let name = settings.command_lab.rows[idx]
+                                .command
+                                .trim()
+                                .to_owned();
+                            let commands =
+                                settings.command_lab.rows[idx].captured_commands.clone();
+                            settings.queue_command(
+                                SettingsCommand::SaveCommandLabCommands { name, commands },
+                            );
+                        }
                     });
                     ctx.request_repaint();
                 }

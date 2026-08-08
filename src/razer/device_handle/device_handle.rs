@@ -34,6 +34,9 @@ pub enum DeviceCmd {
     SetKeyboardColor(u8, u8, u8, u8),
     #[allow(dead_code)]
     SetLidLogo(LidLogoMode),
+    PlayCommandLabCommands(Vec<CapturedCommand>),
+    SaveCommandLabCommands(String, Vec<CapturedCommand>),
+    RemoveCommandLabCommand(String),
     PersistConfig,
     GetConfig(mpsc::Sender<AppConfig>),
     GetSettingsState(mpsc::Sender<SettingsState>),
@@ -201,6 +204,21 @@ impl DeviceHandle {
 
     pub fn persist_config(&self) {
         self.send(DeviceCmd::PersistConfig);
+    }
+
+    /// Replays the given captured commands on the hardware owner thread.
+    pub fn play_command_lab_commands(&self, commands: Vec<CapturedCommand>) {
+        self.send(DeviceCmd::PlayCommandLabCommands(commands));
+    }
+
+    /// Saves a named Command Lab command list into the config and persists it.
+    pub fn save_command_lab_commands(&self, name: String, commands: Vec<CapturedCommand>) {
+        self.send(DeviceCmd::SaveCommandLabCommands(name, commands));
+    }
+
+    /// Removes a named Command Lab command from the config and persists it.
+    pub fn remove_command_lab_command(&self, name: String) {
+        self.send(DeviceCmd::RemoveCommandLabCommand(name));
     }
 
     // ── Internal helpers ────────────────────────────────────────────

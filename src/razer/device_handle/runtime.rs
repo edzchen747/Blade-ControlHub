@@ -9,6 +9,7 @@ use crate::razer::protocol::command;
 use crate::runtime::settings_state::SettingsState;
 use crate::utils::persist::PersistBuffer;
 use crate::win::audio::AudioType;
+use crate::win::system::usbpcap::capture::CapturedCommand;
 use librazer::descriptor::Descriptor;
 use tracing::{error, info, warn};
 

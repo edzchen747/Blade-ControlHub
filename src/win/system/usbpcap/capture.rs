@@ -12,18 +12,21 @@
 //! `frame.len` for the USBPcap link type (249).
 //!
 //! Each captured frame is a control transfer whose data fragment holds one
-//! Razer EC command (`extract_command`), counted live so the UI can show the
-//! number of captured commands next to the record button.
+//! Razer EC command (`extract_command`), collected so the row code block can
+//! show the recorded commands. For elevated captures the child delivers the
+//! command list through a `<pcap>.cmds.json` sidecar, since parent and child
+//! cannot share memory.
 
 use std::io::{self, Write};
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 use windows_sys::Win32::Foundation::{
     CloseHandle, GetLastError, ERROR_ACCESS_DENIED, ERROR_IO_PENDING, GENERIC_READ,
@@ -91,7 +94,7 @@ const USB_CONNECTION_DEVICE_CONNECTED: u32 = 1;
 const USBPCAP_ADDRESS_FILTER_LEN: usize = 17;
 
 /// A Razer EC command parsed from a captured frame.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CapturedCommand {
     /// Command identifier, e.g. `0x0004`.
     pub command: u16,
@@ -140,11 +143,13 @@ enum CaptureInner {
         cancel: Arc<AtomicBool>,
         read_thread: Option<JoinHandle<()>>,
         commands: Arc<AtomicU64>,
+        command_list: Arc<Mutex<Vec<CapturedCommand>>>,
+        output_path: PathBuf,
     },
     Elevated {
         process: windows_sys::Win32::Foundation::HANDLE,
         output_path: PathBuf,
-        commands: Arc<AtomicU64>,
+        command_list: Arc<Mutex<Vec<CapturedCommand>>>,
     },
 }
 
@@ -179,30 +184,57 @@ impl CommandLabCapture {
         }
     }
 
-    /// Number of commands captured so far (live during recording).
+    /// Number of commands captured so far (live during recording). An
+    /// elevated capture has no live count until the child exits, since the
+    /// command list is only delivered at the end.
     pub fn captured_count(&self) -> u32 {
         match &self.inner {
             CaptureInner::Native { commands, .. } => commands.load(Ordering::SeqCst) as u32,
+            CaptureInner::Elevated { .. } => self.captured_commands().len() as u32,
+        }
+    }
+
+    /// The full parsed commands captured so far. For an elevated capture this
+    /// reads the command-list sidecar the child writes when it finishes, so
+    /// the list is only complete once the child has exited; after `stop` the
+    /// cached copy taken before the sidecars were discarded is returned.
+    pub fn captured_commands(&self) -> Vec<CapturedCommand> {
+        match &self.inner {
+            CaptureInner::Native { command_list, .. } => command_list
+                .lock()
+                .map(|commands| commands.clone())
+                .unwrap_or_default(),
             CaptureInner::Elevated {
-                output_path, commands, ..
+                output_path, command_list, ..
             } => {
-                if let Ok(text) = std::fs::read_to_string(count_sidecar_path(output_path))
-                    && let Ok(count) = text.trim().parse::<u64>()
+                if let Some(commands) = std::fs::read_to_string(command_list_sidecar_path(output_path))
+                    .ok()
+                    .and_then(|text| serde_json::from_str::<Vec<CapturedCommand>>(&text).ok())
                 {
-                    commands.store(count, Ordering::SeqCst);
+                    if let Ok(mut cached) = command_list.lock() {
+                        *cached = commands.clone();
+                    }
+                    commands
+                } else {
+                    command_list
+                        .lock()
+                        .map(|commands| commands.clone())
+                        .unwrap_or_default()
                 }
-                commands.load(Ordering::SeqCst) as u32
             }
         }
     }
 
-    /// Stops the capture and returns the total number of captured commands.
+    /// Stops the capture and returns the total number of captured commands,
+    /// discarding the capture file and its sidecars once consumed.
     pub fn stop(&mut self) -> u32 {
         match &mut self.inner {
             CaptureInner::Native {
                 cancel,
                 read_thread,
                 commands,
+                output_path,
+                ..
             } => {
                 cancel.store(true, Ordering::SeqCst);
                 if let Some(thread) = read_thread.take()
@@ -211,12 +243,14 @@ impl CommandLabCapture {
                 {
                     warn!("Command Lab capture thread panicked");
                 }
-                commands.load(Ordering::SeqCst) as u32
+                let count = commands.load(Ordering::SeqCst) as u32;
+                remove_capture_files(output_path);
+                count
             }
             CaptureInner::Elevated {
                 process,
                 output_path,
-                commands,
+                command_list,
             } => {
                 // The child finishes its own countdown window; terminate it
                 // when it lingers (for example on an early cancel).
@@ -226,12 +260,21 @@ impl CommandLabCapture {
                     unsafe { WaitForSingleObject(*process, 1000) };
                 }
                 unsafe { CloseHandle(*process) };
-                if let Ok(text) = std::fs::read_to_string(count_sidecar_path(output_path))
-                    && let Ok(count) = text.trim().parse::<u64>()
+                // Cache the command list before the sidecar is discarded,
+                // since `captured_commands` reads it from disk.
+                if let Some(list) = std::fs::read_to_string(command_list_sidecar_path(output_path))
+                    .ok()
+                    .and_then(|text| serde_json::from_str::<Vec<CapturedCommand>>(&text).ok())
+                    && let Ok(mut cached) = command_list.lock()
                 {
-                    commands.store(count, Ordering::SeqCst);
+                    *cached = list;
                 }
-                commands.load(Ordering::SeqCst) as u32
+                let count = command_list
+                    .lock()
+                    .map(|commands| commands.len() as u32)
+                    .unwrap_or_default();
+                remove_capture_files(output_path);
+                count
             }
         }
     }
@@ -245,28 +288,33 @@ impl CommandLabCapture {
                 cancel: Arc::new(AtomicBool::new(false)),
                 read_thread: None,
                 commands: Arc::new(AtomicU64::new(0)),
+                command_list: Arc::new(Mutex::new(Vec::new())),
+                output_path: std::env::temp_dir().join("blade-command-lab-test-dummy.pcap"),
             },
         }
     }
 }
 
 /// Standalone elevated capture process entry. Captures for the countdown
-/// duration, updating the count sidecar while running, then exits `0` with
-/// the final count written. Exits `1` when the capture could not start.
+/// duration, updating the count sidecar while running, then writes the
+/// command-list sidecar and exits `0` with the final count written. Exits
+/// `1` when the capture could not start.
 pub fn run_command_lab_capture_process(output_path: &std::path::Path) -> i32 {
     let Some(mut capture) = CommandLabCapture::start_at(output_path) else {
         warn!("Elevated Command Lab capture could not start");
         return 1;
     };
     info!(path = %output_path.display(), "Elevated Command Lab capture started");
-    let deadline = Instant::now() + COMMAND_LAB_CAPTURE_DURATION;
-    while Instant::now() < deadline {
-        write_count_sidecar(output_path, capture.captured_count());
-        std::thread::sleep(ELEVATED_SIDECAR_INTERVAL);
-    }
+    std::thread::sleep(COMMAND_LAB_CAPTURE_DURATION);
     let count = capture.stop();
-    write_count_sidecar(output_path, count);
-    info!(count, "Elevated Command Lab capture finished");
+    let commands = capture.captured_commands();
+    if let Ok(json) = serde_json::to_string(&commands) {
+        let _ = std::fs::write(command_list_sidecar_path(output_path), json);
+    }
+    // The parent reads the command-list sidecar for the final commands; the
+    // parent discards it together with the pcap after reading.
+    let _ = std::fs::remove_file(output_path);
+    info!(count, commands = commands.len(), "Elevated Command Lab capture finished");
     0
 }
 
@@ -281,8 +329,10 @@ fn start_native(output_path: &Path) -> Result<CommandLabCapture, CaptureError> {
 
     let cancel = Arc::new(AtomicBool::new(false));
     let commands = Arc::new(AtomicU64::new(0));
+    let command_list = Arc::new(Mutex::new(Vec::new()));
     let thread_cancel = cancel.clone();
     let thread_commands = commands.clone();
+    let thread_command_list = command_list.clone();
     let path_log = output_path.display().to_string();
     let read_thread = match std::thread::Builder::new()
         .name("blade-command-lab-capture".to_string())
@@ -294,6 +344,7 @@ fn start_native(output_path: &Path) -> Result<CommandLabCapture, CaptureError> {
                 &thread_cancel,
                 COMMAND_LAB_FRAME_LEN,
                 &thread_commands,
+                &thread_command_list,
             );
             info!(
                 path = %path_log,
@@ -315,6 +366,8 @@ fn start_native(output_path: &Path) -> Result<CommandLabCapture, CaptureError> {
             cancel,
             read_thread: Some(read_thread),
             commands,
+            command_list,
+            output_path: output_path.to_path_buf(),
         },
     })
 }
@@ -341,7 +394,7 @@ fn start_elevated_capture(output_path: &Path) -> Option<CommandLabCapture> {
         inner: CaptureInner::Elevated {
             process,
             output_path: output_path.to_path_buf(),
-            commands: Arc::new(AtomicU64::new(0)),
+            command_list: Arc::new(Mutex::new(Vec::new())),
         },
     })
 }
@@ -380,21 +433,23 @@ fn spawn_elevated_process(
     Some(info.hProcess)
 }
 
-/// Path of the count sidecar file an elevated capture updates.
-fn count_sidecar_path(output_path: &std::path::Path) -> PathBuf {
+/// Path of the command-list sidecar an elevated capture writes when done.
+fn command_list_sidecar_path(output_path: &std::path::Path) -> PathBuf {
     let mut file_name = output_path
         .file_name()
         .unwrap_or_default()
         .to_os_string();
-    file_name.push(".count");
+    file_name.push(".cmds.json");
     output_path.with_file_name(file_name)
 }
 
-fn write_count_sidecar(output_path: &std::path::Path, count: u32) {
-    let _ = std::fs::write(count_sidecar_path(output_path), count.to_string());
+/// Removes the capture output file and its command-list sidecar once the
+/// captured data has been consumed, ignoring errors (for example when the
+/// elevated child already removed the pcap).
+fn remove_capture_files(output_path: &std::path::Path) {
+    let _ = std::fs::remove_file(output_path);
+    let _ = std::fs::remove_file(command_list_sidecar_path(output_path));
 }
-
-const ELEVATED_SIDECAR_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Capture output path: `command_lab_capture_<unix seconds>.pcap` next to the
 /// running executable.
@@ -664,7 +719,7 @@ struct CaptureStats {
 
 /// Reads USBPcap packets until `duration` elapses or `cancel` is set, writing
 /// only frames matching `frame_len_filter` to the output file and counting
-/// parsed commands in `commands`.
+/// parsed commands in `commands`, collecting them into `command_list`.
 fn read_and_filter(
     filter: windows_sys::Win32::Foundation::HANDLE,
     mut output: std::fs::File,
@@ -672,12 +727,13 @@ fn read_and_filter(
     cancel: &AtomicBool,
     frame_len_filter: u32,
     commands: &AtomicU64,
+    command_list: &Mutex<Vec<CapturedCommand>>,
 ) -> CaptureStats {
     let read_event = unsafe { CreateEventW(null_mut(), 1, 0, null()) };
     let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
     overlapped.hEvent = read_event;
     let mut buffer = vec![0u8; USBPCAP_BUFFER_LEN as usize];
-    let mut sink = CaptureSink::new(&mut output, commands);
+    let mut sink = CaptureSink::new(&mut output, commands, command_list);
     let deadline = Instant::now() + duration;
 
     if !start_read(filter, &mut buffer, &mut overlapped) {
@@ -741,22 +797,28 @@ fn start_read(
 }
 
 /// Streaming pcap filter: forwards the 24-byte global header, then keeps only
-/// records whose frame length equals the configured filter, counting the
-/// commands extracted from each kept frame. Handles any read granularity,
-/// including partial headers and records.
+/// records whose frame length equals the configured filter, counting and
+/// collecting the commands extracted from each kept frame. Handles any read
+/// granularity, including partial headers and records.
 struct CaptureSink<'a> {
     output: &'a mut dyn Write,
     commands: &'a AtomicU64,
+    command_list: &'a Mutex<Vec<CapturedCommand>>,
     header_bytes: usize,
     pending: Vec<u8>,
     records: u64,
 }
 
 impl<'a> CaptureSink<'a> {
-    fn new(output: &'a mut dyn Write, commands: &'a AtomicU64) -> Self {
+    fn new(
+        output: &'a mut dyn Write,
+        commands: &'a AtomicU64,
+        command_list: &'a Mutex<Vec<CapturedCommand>>,
+    ) -> Self {
         Self {
             output,
             commands,
+            command_list,
             header_bytes: 0,
             pending: Vec::new(),
             records: 0,
@@ -790,8 +852,13 @@ impl<'a> CaptureSink<'a> {
             self.records += 1;
             if frame_len(&self.pending[..record_len]).is_some_and(|len| len == frame_len_filter) {
                 self.output.write_all(&self.pending[..record_len])?;
-                if extract_command(&self.pending[PCAP_RECORD_HEADER_LEN..record_len]).is_some() {
+                if let Some(command) =
+                    extract_command(&self.pending[PCAP_RECORD_HEADER_LEN..record_len])
+                {
                     self.commands.fetch_add(1, Ordering::SeqCst);
+                    if let Ok(mut command_list) = self.command_list.lock() {
+                        command_list.push(command);
+                    }
                 }
             }
             self.pending.drain(..record_len);
@@ -884,8 +951,9 @@ mod tests {
     fn sink_forwards_header_and_keeps_only_command_frames() {
         let mut written = Vec::new();
         let commands = AtomicU64::new(0);
+        let command_list = Mutex::new(Vec::new());
         let stats = {
-            let mut sink = CaptureSink::new(&mut written, &commands);
+            let mut sink = CaptureSink::new(&mut written, &commands, &command_list);
             sink.feed(&[0u8; PCAP_GLOBAL_HEADER_LEN], 126).unwrap();
             let mut matched = command_record([0; 5], 0, [0x00, 0x04], &[]);
             // A well-formed 77-byte frame that must not match the filter.
@@ -907,14 +975,22 @@ mod tests {
         assert_eq!(stats.records, 2);
         assert_eq!(stats.commands, 1);
         assert_eq!(commands.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            *command_list.lock().unwrap(),
+            vec![CapturedCommand {
+                command: 0x0004,
+                args: Vec::new(),
+            }]
+        );
     }
 
     #[test]
     fn sink_handles_split_header_and_split_records() {
         let mut written = Vec::new();
         let commands = AtomicU64::new(0);
+        let command_list = Mutex::new(Vec::new());
         let stats = {
-            let mut sink = CaptureSink::new(&mut written, &commands);
+            let mut sink = CaptureSink::new(&mut written, &commands, &command_list);
             let matched = command_record([0; 5], 0, [0x00, 0x04], &[]);
             sink.feed(&[0u8; 10], 126).unwrap();
             sink.feed(&[0u8; PCAP_GLOBAL_HEADER_LEN - 10], 126).unwrap();
@@ -929,6 +1005,27 @@ mod tests {
         );
         assert_eq!(stats.records, 1);
         assert_eq!(stats.commands, 1);
+        assert_eq!(command_list.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn captured_command_round_trips_through_json() {
+        let commands = vec![
+            CapturedCommand {
+                command: 0x0303,
+                args: vec![0x01, 0x05, 0xFF],
+            },
+            CapturedCommand {
+                command: 0x0792,
+                args: vec![0x00],
+            },
+        ];
+
+        let encoded = serde_json::to_string(&commands).expect("commands must serialize");
+        let decoded: Vec<CapturedCommand> =
+            serde_json::from_str(&encoded).expect("commands must deserialize");
+
+        assert_eq!(decoded, commands);
     }
 
     #[test]
@@ -947,11 +1044,28 @@ mod tests {
     }
 
     #[test]
-    fn count_sidecar_sits_next_to_the_capture_file() {
+    fn command_list_sidecar_sits_next_to_the_capture_file() {
         let path = std::path::Path::new(r"C:\dir\command_lab_capture_1.pcap");
         assert_eq!(
-            count_sidecar_path(path),
-            PathBuf::from(r"C:\dir\command_lab_capture_1.pcap.count")
+            command_list_sidecar_path(path),
+            PathBuf::from(r"C:\dir\command_lab_capture_1.pcap.cmds.json")
         );
+    }
+
+    #[test]
+    fn remove_capture_files_deletes_output_and_sidecar() {
+        let output = std::env::temp_dir().join(format!(
+            "blade_remove_capture_files_{}.pcap",
+            std::process::id()
+        ));
+        std::fs::write(&output, b"data").unwrap();
+        std::fs::write(command_list_sidecar_path(&output), b"[]").unwrap();
+
+        remove_capture_files(&output);
+
+        assert!(!output.exists());
+        assert!(!command_list_sidecar_path(&output).exists());
+        // Removing again (for example a stale elevated-child cleanup) is a no-op.
+        remove_capture_files(&output);
     }
 }

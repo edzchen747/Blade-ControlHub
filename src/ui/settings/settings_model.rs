@@ -66,6 +66,8 @@ impl Settings {
     }
     pub fn show(&mut self, state: SettingsState) {
         self.selected_profile = state.current_profile;
+        self.command_lab
+            .populate_from_config(state.command_lab_commands.clone());
         self.state = Some(state);
         self.show = true;
         self.update = true;
@@ -81,6 +83,8 @@ impl Settings {
         if let Some(pending) = &self.pending_theme_color {
             state.theme_color = pending.color;
         }
+        self.command_lab
+            .populate_from_config(state.command_lab_commands.clone());
         self.state = Some(state);
     }
     pub fn toggle(&mut self, state: SettingsState) {

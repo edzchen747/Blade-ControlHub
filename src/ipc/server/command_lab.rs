@@ -8,6 +8,7 @@
 /// administrator-privileged filter open happens); the OSD countdown only
 /// starts once the capture is actually running. When the capture cannot
 /// start, the recording moves to `Failed` without showing the countdown.
+use std::sync::mpsc;
 use std::sync::Arc;
 
 use crate::ipc::protocol::{CommandLabRecordingState, CommandLabStatus};
@@ -16,6 +17,8 @@ use crate::ui::osd_controller::{OsdController, OsdParams};
 use crate::win::system::usbpcap::capture::CommandLabCapture;
 
 pub const COMMAND_LAB_TOTAL_STEPS: usize = 5;
+/// A capture that records more commands than this is discarded as a failure.
+pub const COMMAND_LAB_MAX_CAPTURED_COMMANDS: u32 = 20;
 const COMMAND_LAB_STEP_INTERVAL: Duration = Duration::from_secs(1);
 const COMMAND_LAB_CANCEL_CHECK_INTERVAL: Duration = Duration::from_millis(50);
 
@@ -47,6 +50,7 @@ impl CommandLabRecording {
                 status: CommandLabStatus::Idle,
                 step: 0,
                 captured_commands: 0,
+                commands: Vec::new(),
             },
             cancel: None,
             worker: None,
@@ -54,10 +58,15 @@ impl CommandLabRecording {
     }
 }
 
-pub fn begin_command_lab_record() {
+/// Starts a Command Lab recording and blocks until the capture is actually
+/// running (this is where a UAC elevation prompt is answered) or has failed
+/// to start, returning the resulting state. The client therefore needs no
+/// polling while the capture start is pending.
+pub fn begin_command_lab_record() -> CommandLabRecordingState {
     cancel_active_worker();
 
     let cancel = Arc::new(AtomicBool::new(false));
+    let (started_tx, started_rx) = mpsc::channel::<CommandLabRecordingState>();
     {
         let mut recording = command_lab_recording();
         recording.cancel = Some(cancel.clone());
@@ -65,6 +74,7 @@ pub fn begin_command_lab_record() {
             status: CommandLabStatus::Idle,
             step: 0,
             captured_commands: 0,
+            commands: Vec::new(),
         };
     }
     // No OSD yet: the worker only starts the countdown once the capture is
@@ -72,17 +82,30 @@ pub fn begin_command_lab_record() {
 
     match thread::Builder::new()
         .name("blade-command-lab-record".to_string())
-        .spawn(move || run_command_lab_worker(cancel))
+        .spawn(move || run_command_lab_worker(cancel, started_tx))
     {
-        Ok(handle) => command_lab_recording().worker = Some(handle),
+        Ok(handle) => {
+            command_lab_recording().worker = Some(handle);
+            started_rx
+                .recv()
+                .unwrap_or_else(|_| CommandLabRecordingState {
+                    status: CommandLabStatus::Failed,
+                    step: 0,
+                    captured_commands: 0,
+                    commands: Vec::new(),
+                })
+        }
         Err(error) => {
             warn!(%error, "Failed to spawn Command Lab recording worker");
             command_lab_recording().cancel = None;
-            command_lab_recording().state = CommandLabRecordingState {
+            let state = CommandLabRecordingState {
                 status: CommandLabStatus::Failed,
                 step: 0,
                 captured_commands: 0,
+                commands: Vec::new(),
             };
+            command_lab_recording().state = state.clone();
+            state
         }
     }
 }
@@ -92,7 +115,7 @@ pub fn cancel_command_lab_record() {
 }
 
 pub fn poll_command_lab_recording() -> CommandLabRecordingState {
-    command_lab_recording().state
+    command_lab_recording().state.clone()
 }
 
 /// Stops any active worker. The worker must not be joined while the state
@@ -120,18 +143,34 @@ fn join_worker(worker: JoinHandle<()>) {
     }
 }
 
-fn run_command_lab_worker(cancel: Arc<AtomicBool>) {
+fn run_command_lab_worker(
+    cancel: Arc<AtomicBool>,
+    started_tx: mpsc::Sender<CommandLabRecordingState>,
+) {
     let Some(capture) = start_command_lab_capture() else {
-        command_lab_recording().state = CommandLabRecordingState {
+        let state = CommandLabRecordingState {
             status: CommandLabStatus::Failed,
             step: 0,
             captured_commands: 0,
+            commands: Vec::new(),
         };
+        command_lab_recording().state = state.clone();
         command_lab_recording().cancel = None;
+        let _ = started_tx.send(state);
         return;
     };
 
-    // The capture is running: the OSD countdown can start.
+    // The capture is running: publish it and release the blocking begin so
+    // the OSD countdown can start.
+    let started = CommandLabRecordingState {
+        status: CommandLabStatus::Recording,
+        step: 0,
+        captured_commands: capture.captured_count(),
+        commands: Vec::new(),
+    };
+    command_lab_recording().state = started.clone();
+    let _ = started_tx.send(started);
+
     let cancelled = run_command_lab_countdown(&cancel, COMMAND_LAB_STEP_INTERVAL, |step| {
         if cancel.load(Ordering::SeqCst) {
             return;
@@ -140,25 +179,46 @@ fn run_command_lab_worker(cancel: Arc<AtomicBool>) {
             status: CommandLabStatus::Recording,
             step: step.min(COMMAND_LAB_TOTAL_STEPS) as u8,
             captured_commands: capture.captured_count(),
+            commands: Vec::new(),
         };
-        command_lab_recording().state = state;
+        command_lab_recording().state = state.clone();
         show_command_lab_osd(&state);
     });
 
     let mut capture = capture;
-    let status = if cancelled || cancel.load(Ordering::SeqCst) {
-        CommandLabStatus::Cancelled
-    } else {
-        CommandLabStatus::Done
+    let captured_commands = capture.stop();
+    let (status, step) = final_capture_status(
+        cancelled || cancel.load(Ordering::SeqCst),
+        captured_commands,
+    );
+    let commands = match status {
+        CommandLabStatus::Done | CommandLabStatus::TooManyCommands => {
+            capture.captured_commands()
+        }
+        _ => Vec::new(),
     };
     let state = CommandLabRecordingState {
         status,
-        step: COMMAND_LAB_TOTAL_STEPS as u8,
-        captured_commands: capture.stop(),
+        step,
+        captured_commands,
+        commands,
     };
-    command_lab_recording().state = state;
+    command_lab_recording().state = state.clone();
     show_command_lab_osd(&state);
     command_lab_recording().cancel = None;
+}
+
+/// Maps a finished capture to its published status and step. Cancellations
+/// keep full progress; a capture that recorded more commands than a row can
+/// hold is reported as a failure with zero progress.
+fn final_capture_status(cancelled: bool, captured_commands: u32) -> (CommandLabStatus, u8) {
+    if cancelled {
+        (CommandLabStatus::Cancelled, COMMAND_LAB_TOTAL_STEPS as u8)
+    } else if captured_commands > COMMAND_LAB_MAX_CAPTURED_COMMANDS {
+        (CommandLabStatus::TooManyCommands, 0)
+    } else {
+        (CommandLabStatus::Done, COMMAND_LAB_TOTAL_STEPS as u8)
+    }
 }
 
 /// Starts the USBPcap capture, or a dummy when tests suppress hardware use.
@@ -212,16 +272,17 @@ fn show_command_lab_osd(state: &CommandLabRecordingState) {
     if COMMAND_LAB_TEST_OSD_SUPPRESSED.load(Ordering::SeqCst) {
         return;
     }
-    let label = match state.status {
-        CommandLabStatus::Recording => "Recording",
-        CommandLabStatus::Done => "Done",
-        CommandLabStatus::Cancelled => "Cancelled",
+    let (label, active_steps) = match state.status {
+        CommandLabStatus::Recording => ("Recording", state.step as usize),
+        CommandLabStatus::Done => ("Done", state.step as usize),
+        CommandLabStatus::TooManyCommands => ("Failed", 0),
+        CommandLabStatus::Cancelled => ("Cancelled", state.step as usize),
         CommandLabStatus::Idle | CommandLabStatus::Failed => return,
     };
     OsdController::show(OsdParams {
         label: label.to_string(),
         total_steps: COMMAND_LAB_TOTAL_STEPS,
-        active_steps: state.step as usize,
+        active_steps,
         icon: Some(OsdIcon::CommandLab),
     });
 }
@@ -238,6 +299,7 @@ mod command_lab_tests {
             status: CommandLabStatus::Idle,
             step: 0,
             captured_commands: 0,
+            commands: Vec::new(),
         };
     }
 
@@ -264,6 +326,7 @@ mod command_lab_tests {
                     status: CommandLabStatus::Idle,
                     step: 0,
                     captured_commands: 0,
+                    commands: Vec::new(),
                 }
             );
         });
@@ -300,17 +363,41 @@ mod command_lab_tests {
     }
 
     #[test]
-    fn begin_resets_to_idle_and_cancel_publishes_cancelled_state() {
-        with_test_recording(|| {
-            begin_command_lab_record();
+    fn finished_capture_reports_done_with_full_progress() {
+        assert_eq!(
+            final_capture_status(false, COMMAND_LAB_MAX_CAPTURED_COMMANDS),
+            (CommandLabStatus::Done, COMMAND_LAB_TOTAL_STEPS as u8)
+        );
+    }
 
-            // Capture starts asynchronously; the countdown OSD is gated on it.
+    #[test]
+    fn capture_over_the_limit_reports_failed_with_zero_progress() {
+        assert_eq!(
+            final_capture_status(false, COMMAND_LAB_MAX_CAPTURED_COMMANDS + 1),
+            (CommandLabStatus::TooManyCommands, 0)
+        );
+    }
+
+    #[test]
+    fn cancelled_capture_stays_cancelled_even_over_the_limit() {
+        assert_eq!(
+            final_capture_status(true, COMMAND_LAB_MAX_CAPTURED_COMMANDS + 1),
+            (CommandLabStatus::Cancelled, COMMAND_LAB_TOTAL_STEPS as u8)
+        );
+    }
+
+    #[test]
+    fn begin_blocks_until_recording_starts_and_cancel_publishes_cancelled_state() {
+        with_test_recording(|| {
+            let started = begin_command_lab_record();
+
             assert_eq!(
-                poll_command_lab_recording(),
+                started,
                 CommandLabRecordingState {
-                    status: CommandLabStatus::Idle,
+                    status: CommandLabStatus::Recording,
                     step: 0,
                     captured_commands: 0,
+                    commands: Vec::new(),
                 }
             );
 
@@ -322,6 +409,7 @@ mod command_lab_tests {
                     status: CommandLabStatus::Cancelled,
                     step: COMMAND_LAB_TOTAL_STEPS as u8,
                     captured_commands: 0,
+                    commands: Vec::new(),
                 }
             );
         });

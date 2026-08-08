@@ -18,6 +18,8 @@ impl<'a> Executer<'a> {
             display_manager,
             refresh_cycle_timeout: Instant::now(),
             battery_cycle_timeout: Instant::now(),
+            settings_snapshot_queries: 0,
+            cached_battery_limit: BatteryLimit::Unknown,
             fan_speed_limits: FanSpeedLimits::default(),
         })
     }

@@ -21,29 +21,35 @@ fn run_command_lab_record_worker(
     tx: Sender<CommandLabRecordMessage>,
     ctx: egui::Context,
 ) {
-    loop {
+    // Begin blocks until the capture is running (UAC prompt answered) or has
+    // failed, so no polling happens while the start is pending.
+    let started = loop {
         if cancel.load(Ordering::SeqCst) {
             return;
         }
 
         match client::begin_command_lab_record() {
-            Ok(()) => break,
+            Ok(state) => break state,
             Err(error) => {
                 warn!(%error, "Command Lab record begin failed; retrying");
                 thread::sleep(command_lab_record_retry_interval());
             }
         }
+    };
+    if command_lab_status_is_terminal(started.status) {
+        let _ = tx.send(CommandLabRecordMessage::State { record_id, state: started });
+        let _ = tx.send(CommandLabRecordMessage::Finished { record_id });
+        ctx.request_repaint();
+        return;
     }
 
     while !cancel.load(Ordering::SeqCst) {
         match client::poll_command_lab_recording() {
             Ok(state) => {
+                let terminal = command_lab_status_is_terminal(state.status);
                 let _ = tx.send(CommandLabRecordMessage::State { record_id, state });
                 ctx.request_repaint();
-                if state.status == crate::ipc::protocol::CommandLabStatus::Done
-                    || state.status == crate::ipc::protocol::CommandLabStatus::Cancelled
-                    || state.status == crate::ipc::protocol::CommandLabStatus::Failed
-                {
+                if terminal {
                     let _ = tx.send(CommandLabRecordMessage::Finished { record_id });
                     ctx.request_repaint();
                     return;
@@ -56,6 +62,16 @@ fn run_command_lab_record_worker(
             }
         }
     }
+}
+
+fn command_lab_status_is_terminal(status: crate::ipc::protocol::CommandLabStatus) -> bool {
+    matches!(
+        status,
+        crate::ipc::protocol::CommandLabStatus::Done
+            | crate::ipc::protocol::CommandLabStatus::Cancelled
+            | crate::ipc::protocol::CommandLabStatus::Failed
+            | crate::ipc::protocol::CommandLabStatus::TooManyCommands
+    )
 }
 
 fn command_lab_record_poll_interval() -> Duration {

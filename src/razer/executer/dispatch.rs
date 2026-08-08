@@ -1,3 +1,16 @@
+/// The battery-care query is device-backed; settings snapshots run it only
+/// once every this many `GetSettingsState` calls and reuse the cached result
+/// in between.
+const SETTINGS_STATE_BATTERY_QUERY_PERIOD: u32 = 20;
+
+/// Whether the device-backed battery-care query should run for the
+/// `queries`-th settings snapshot (counting from 1). The very first snapshot
+/// always queries so the settings UI never starts with Unknown; afterwards it
+/// runs once every period.
+fn should_query_battery_limit(queries: u32) -> bool {
+    queries > 0 && (queries == 1 || queries.is_multiple_of(SETTINGS_STATE_BATTERY_QUERY_PERIOD))
+}
+
 impl<'a> Executer<'a> {
     fn dispatch(&mut self, cmd: DeviceCmd) -> bool {
         match cmd {
@@ -25,6 +38,27 @@ impl<'a> Executer<'a> {
                 let _ = tx.send(self.set_keyboard_brightness_for_profile(profile, brightness));
             }
             DeviceCmd::SetLidLogo(mode) => self.kb().set_lid_logo(mode),
+            DeviceCmd::PlayCommandLabCommands(commands) => {
+                for captured in commands {
+                    if let Err(error) =
+                        command(self.device, captured.command, &captured.args, None)
+                    {
+                        warn!(
+                            %error,
+                            command = captured.command,
+                            "Command Lab replay command failed"
+                        );
+                    }
+                }
+            }
+            DeviceCmd::SaveCommandLabCommands(name, commands) => {
+                self.app_config.command_lab_commands.insert(name, commands);
+                self.persist_config();
+            }
+            DeviceCmd::RemoveCommandLabCommand(name) => {
+                self.app_config.command_lab_commands.remove(&name);
+                self.persist_config();
+            }
             DeviceCmd::CyclePerfMode => self.perf().cycle_perf_mode(),
             DeviceCmd::SetPerfMode(profile, mode, tx) => {
                 let _ = tx.send(self.set_perf_mode_for_profile(profile, mode));
@@ -91,12 +125,20 @@ impl<'a> Executer<'a> {
                     rate_count = supported_refresh_rates.len(),
                     "Enumerated supported refresh rates for settings state"
                 );
-                let battery_limit = match self.battery().battery_limit() {
-                    Ok(limit) => limit,
-                    Err(error) => {
-                        warn!(%error, "Failed to read device battery-care setting");
-                        BatteryLimit::Unknown
+                self.settings_snapshot_queries = self.settings_snapshot_queries.wrapping_add(1);
+                let battery_limit = if should_query_battery_limit(self.settings_snapshot_queries) {
+                    match self.battery().battery_limit() {
+                        Ok(limit) => {
+                            self.cached_battery_limit = limit;
+                            limit
+                        }
+                        Err(error) => {
+                            warn!(%error, "Failed to read device battery-care setting");
+                            self.cached_battery_limit
+                        }
                     }
+                } else {
+                    self.cached_battery_limit
                 };
                 let state = crate::runtime::settings_state::SettingsState::from_config_with_fan_speed_limits_and_battery_limit(
                     self.app_config.clone(),

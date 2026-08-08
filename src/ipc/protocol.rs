@@ -6,6 +6,7 @@ use crate::razer::{
     enums::{BatteryLimit, PerfMode, RGBEffect},
 };
 use crate::runtime::settings_state::SettingsState;
+use crate::win::system::usbpcap::capture::CapturedCommand;
 
 pub const PIPE_NAME: &str = r"\\.\pipe\BladeControlHub";
 
@@ -66,6 +67,14 @@ pub enum IpcRequest {
     BeginCommandLabRecord,
     CancelCommandLabRecord,
     PollCommandLabRecording,
+    PlayCommandLabCommands {
+        commands: Vec<CapturedCommand>,
+    },
+    SaveCommandLabCommands {
+        name: String,
+        commands: Vec<CapturedCommand>,
+    },
+    RemoveCommandLabCommand { name: String },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,13 +86,19 @@ pub enum CommandLabStatus {
     /// Recording could not start (for example without administrator
     /// privileges for the USBPcap capture).
     Failed,
+    /// Recording finished but captured more commands than a row can hold;
+    /// the capture is discarded and reported as a failure.
+    TooManyCommands,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandLabRecordingState {
     pub status: CommandLabStatus,
     pub step: u8,
     pub captured_commands: u32,
+    /// The full parsed commands of the finished capture; empty while
+    /// recording and for cancelled or never-started recordings.
+    pub commands: Vec<CapturedCommand>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -149,6 +164,10 @@ mod tests {
             status: CommandLabStatus::Recording,
             step: 3,
             captured_commands: 12,
+            commands: vec![CapturedCommand {
+                command: 0x0303,
+                args: vec![0x01, 0x05, 0xFF],
+            }],
         };
 
         let encoded = serde_json::to_string(&state).expect("state must serialize");
@@ -166,5 +185,30 @@ mod tests {
         let decoded: IpcRequest = serde_json::from_str(&encoded).expect("request must deserialize");
 
         assert_eq!(decoded, request);
+    }
+
+    #[test]
+    fn command_lab_play_and_save_requests_round_trip_through_json() {
+        let commands = vec![CapturedCommand {
+            command: 0x0303,
+            args: vec![0x01, 0x05, 0xFF],
+        }];
+        for request in [
+            IpcRequest::PlayCommandLabCommands {
+                commands: commands.clone(),
+            },
+            IpcRequest::SaveCommandLabCommands {
+                name: "Brightness Up".to_owned(),
+                commands: commands.clone(),
+            },
+            IpcRequest::RemoveCommandLabCommand {
+                name: "Brightness Up".to_owned(),
+            },
+        ] {
+            let encoded = serde_json::to_string(&request).expect("request must serialize");
+            let decoded: IpcRequest =
+                serde_json::from_str(&encoded).expect("request must deserialize");
+            assert_eq!(decoded, request);
+        }
     }
 }

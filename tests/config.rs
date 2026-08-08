@@ -106,6 +106,49 @@ fn app_config_round_trips_through_json() {
 }
 
 #[test]
+fn app_config_round_trips_command_lab_commands() {
+    use blade_controlhub::win::system::usbpcap::capture::CapturedCommand;
+
+    let mut config = AppConfig::default();
+    config.command_lab_commands.insert(
+        "Brightness Up".to_owned(),
+        vec![CapturedCommand {
+            command: 0x0303,
+            args: vec![0x01, 0x05, 0xFF],
+        }],
+    );
+
+    let json = serde_json::to_string(&config).expect("config must serialize");
+    let restored: AppConfig = serde_json::from_str(&json).expect("config must deserialize");
+
+    assert_eq!(
+        restored.command_lab_commands,
+        config.command_lab_commands
+    );
+}
+
+#[test]
+fn app_config_serializes_command_lab_commands_at_the_end() {
+    use blade_controlhub::win::system::usbpcap::capture::CapturedCommand;
+
+    let mut config = AppConfig::default();
+    config.command_lab_commands.insert(
+        "Test".to_owned(),
+        vec![CapturedCommand {
+            command: 0x0792,
+            args: vec![0x00],
+        }],
+    );
+
+    let json = serde_json::to_string(&config).expect("config must serialize");
+    let trimmed = json.strip_suffix('}').unwrap_or(&json);
+    assert!(
+        trimmed.ends_with(r#""command_lab_commands":{"Test":[{"command":1938,"args":[0]}]}"#),
+        "command_lab_commands must be the last key in the config JSON"
+    );
+}
+
+#[test]
 fn app_config_serializes_to_valid_json_without_error() {
     let config = AppConfig::default();
     let result = serde_json::to_string_pretty(&config);
