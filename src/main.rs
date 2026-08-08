@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use blade_controlhub::{
+    config,
     error::AppError,
     error::AppResult,
     razer::{self, device_handle::device},
@@ -23,13 +24,14 @@ fn main() -> AppResult<()> {
     if let Some(path) = command_lab_capture_arg() {
         // Elevated capture child: must exit before close_running_instances()
         // so it does not shut down the parent runtime it works for.
-        std::process::exit(win::system::usbpcap::capture::run_command_lab_capture_process(
-            &path,
-        ));
+        std::process::exit(win::system::usbpcap::capture::run_command_lab_capture_process(&path));
     }
 
     set_cwd()?;
     init_log_file_writer();
+
+    refresh_launch_elevation();
+    refresh_startup_task();
 
     if std::env::args().any(|arg| arg == "--mock-trigger") {
         run_mock_trigger();
@@ -53,7 +55,33 @@ fn command_lab_capture_arg() -> Option<std::path::PathBuf> {
     None
 }
 
-fn start_razer_service() -> AppResult<()> {    let device_pid = razer::device_handle::device().get_pid()?;
+fn refresh_launch_elevation() {
+    let (start_with_admin, _) = config::load_launch_flags();
+    if !start_with_admin || win::system::elevation::is_elevated() {
+        return;
+    }
+
+    match win::system::elevation::spawn_self_elevated() {
+        Ok(()) => {
+            info!("Relaunching elevated to honour start-with-administrator setting");
+            std::process::exit(0);
+        }
+        Err(error) => {
+            tracing::error!(
+                %error,
+                "Failed to relaunch as administrator; continuing without elevation"
+            );
+        }
+    }
+}
+
+fn refresh_startup_task() {
+    let (start_with_admin, start_with_windows) = config::load_launch_flags();
+    win::system::startup::Startup::refresh(start_with_windows, start_with_admin);
+}
+
+fn start_razer_service() -> AppResult<()> {
+    let device_pid = razer::device_handle::device().get_pid()?;
     info!("Detected device with PID: 0x{:04x}", device_pid);
     win::input::start_keyboard_hooks(device_pid)?;
     win::system::power::PowerMonitor::start();

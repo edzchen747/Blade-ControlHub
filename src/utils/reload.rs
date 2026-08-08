@@ -4,6 +4,8 @@ use sysinfo::System;
 use tracing::{error, warn};
 
 use crate::runtime::launch_args::is_settings_mode_arg;
+use crate::ui::app::app;
+use crate::ui::app_events::AppEvent;
 
 const APP_PROCESS_NAMES: &[&str] = &["blade-controlhub", "blade-controlhub.exe"];
 /// Restart code reserved for recovery paths that must not show the startup OSD.
@@ -13,6 +15,9 @@ const DEFAULT_RESTART_ARGS: &[&str] = &[];
 const DETACHED_PROCESS: u32 = 0x0000_0008;
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+/// Delay between persisting the admin preference and relaunching, so the
+/// current process can shut down cleanly
+const ADMIN_TOGGLE_RELAUNCH_DELAY: Duration = Duration::from_millis(500);
 
 /// Restarts the application by spawning a new instance and exiting.
 pub fn restart_app(code: i32) -> ! {
@@ -26,6 +31,39 @@ pub fn spawn_replacement_app(code: i32) -> std::io::Result<()> {
     match std::env::current_exe() {
         Ok(current_exe) => spawn_replacement_process(&current_exe, code),
         Err(e) => Err(e),
+    }
+}
+
+/// Relaunches the app elevated after the "Start with administrator privileges"
+/// toggle is switched on. The old process shuts down only after the elevated
+/// replacement was launched. Disabling keeps the current session's privileges
+/// untouched (the startup task was already downgraded by the executor) and
+/// simply applies on the next manual launch.
+pub fn relaunch_after_admin_toggle(enabled: bool) {
+    if !enabled {
+        return;
+    }
+
+    let spawn_result = std::thread::Builder::new()
+        .name("blade-admin-relaunch".to_string())
+        .spawn(move || {
+            std::thread::sleep(ADMIN_TOGGLE_RELAUNCH_DELAY);
+
+            match crate::win::system::elevation::spawn_self_elevated() {
+                Ok(()) => app(AppEvent::Shutdown),
+                Err(spawn_error) => {
+                    error!(
+                        %spawn_error,
+                        "Failed to relaunch after admin toggle; keeping current session"
+                    );
+                    // Elevation was declined: revert the persisted preference so
+                    // the setting reflects the actual state of the app.
+                    let _ = crate::razer::device_handle::device().set_start_with_admin(false);
+                }
+            }
+        });
+    if let Err(error) = spawn_result {
+        error!(%error, "Failed to spawn admin toggle relaunch thread");
     }
 }
 

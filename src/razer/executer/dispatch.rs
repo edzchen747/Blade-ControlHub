@@ -112,6 +112,12 @@ impl<'a> Executer<'a> {
             DeviceCmd::SetAdvancedExperimentalFeatures(enabled, tx) => {
                 let _ = tx.send(self.set_advanced_experimental_features(enabled));
             }
+            DeviceCmd::SetStartWithAdmin(enabled, tx) => {
+                let _ = tx.send(self.set_start_with_admin(enabled));
+            }
+            DeviceCmd::SetStartWithWindows(enabled) => {
+                self.set_start_with_windows(enabled);
+            }
             DeviceCmd::GetConfig(tx) => {
                 let _ = tx.send(self.app_config.clone());
             }

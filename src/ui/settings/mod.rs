@@ -42,6 +42,8 @@ impl CustomModeSetting {
 pub enum SettingsCommand {
     SetPrimaryMultimediaKeys(bool),
     SetAdvancedExperimentalFeatures(bool),
+    SetStartWithAdmin(bool),
+    SetStartWithWindows(bool),
     SetPerfMode(PowerProfile, PerfMode),
     SetCustomModeConfig { cpu_level: u8, gpu_level: u8 },
     SetFanSpeed(PowerProfile, u8),

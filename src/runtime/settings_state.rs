@@ -34,7 +34,8 @@ pub struct SettingsState {
     pub primary_multimedia_keys: bool,
     pub advanced_experimental_features: bool,
     pub theme_color: ThemeColor,
-    /// Persisted Command Lab library: command name → captured commands.
+    pub start_with_admin: bool,
+    pub start_with_windows: bool,
     pub command_lab_commands: HashMap<String, Vec<CapturedCommand>>,
 }
 
@@ -84,6 +85,8 @@ impl SettingsState {
             primary_multimedia_keys: config.primary_multimedia_keys,
             advanced_experimental_features: config.advanced_experimental_features,
             theme_color: config.theme_color,
+            start_with_admin: config.start_with_admin,
+            start_with_windows: config.start_with_windows,
             command_lab_commands: config.command_lab_commands,
         }
     }
@@ -159,6 +162,27 @@ mod tests {
         assert_eq!(state.fan_speed_limits, FanSpeedLimits::default());
         assert!(state.primary_multimedia_keys);
         assert_eq!(state.theme_color, ThemeColor::default());
+        assert!(!state.start_with_admin);
+    }
+
+    #[test]
+    fn settings_state_carries_start_with_admin_flag() {
+        let mut config = AppConfig::default();
+        config.start_with_admin = true;
+
+        let state = SettingsState::from_config(config, Vec::new());
+
+        assert!(state.start_with_admin);
+    }
+
+    #[test]
+    fn settings_state_carries_start_with_windows_flag() {
+        let mut config = AppConfig::default();
+        config.start_with_windows = true;
+
+        let state = SettingsState::from_config(config, Vec::new());
+
+        assert!(state.start_with_windows);
     }
 
     #[test]

@@ -12,7 +12,7 @@
   <Principals>
     <Principal id="Author">
       <LogonType>InteractiveToken</LogonType>
-      <RunLevel>HighestAvailable</RunLevel> <!-- Vital for keyboard hooks -->
+      <RunLevel>__RUN_LEVEL__</RunLevel> <!-- HighestAvailable when starting as admin, else LeastPrivilege -->
     </Principal>
   </Principals>
   <Settings>

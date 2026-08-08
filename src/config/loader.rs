@@ -35,6 +35,23 @@ pub fn load_config(device_info: &Descriptor) -> AppConfig {
     finalize_config(app_config, device_info)
 }
 
+pub fn load_launch_flags() -> (bool, bool) {
+    let Ok(contents) = std::fs::read_to_string(CONFIG_PATH) else {
+        return (false, false);
+    };
+    load_launch_flags_from_contents(&contents)
+}
+
+fn load_launch_flags_from_contents(contents: &str) -> (bool, bool) {
+    match serde_json::from_str::<AppConfig>(contents) {
+        Ok(config) => (config.start_with_admin, config.start_with_windows),
+        Err(error) => {
+            warn!(%error, "Failed to parse config for launch flags; using defaults");
+            (false, false)
+        }
+    }
+}
+
 fn finalize_config(mut app_config: AppConfig, device_info: &Descriptor) -> AppConfig {
     // Override saved cycle items in case new updates bring more options
     app_config.refresh_cycle_items();
@@ -85,5 +102,29 @@ mod tests {
 
         assert_eq!(serialized["model_pid"], "0x02c7");
         assert_eq!(finalized.model_name, "Razer Blade Test");
+    }
+
+    #[test]
+    fn launch_flags_default_to_disabled_without_config_file() {
+        let (start_with_admin, start_with_windows) = load_launch_flags();
+
+        assert!(!start_with_admin);
+        assert!(!start_with_windows);
+    }
+
+    #[test]
+    fn launch_flags_are_read_from_the_persisted_config() {
+        let json = serde_json::json!({
+            "start_with_admin": true,
+            "start_with_windows": true,
+        })
+        .to_string();
+
+        assert_eq!(load_launch_flags_from_contents(&json), (true, true));
+    }
+
+    #[test]
+    fn corrupt_config_falls_back_to_disabled_launch_flags() {
+        assert_eq!(load_launch_flags_from_contents("{not json"), (false, false));
     }
 }

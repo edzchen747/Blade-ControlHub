@@ -90,6 +90,20 @@ impl SettingsApp {
                         command_sent = true;
                     }
                 }
+                SettingsCommand::SetStartWithAdmin(enabled) => {
+                    if let Err(error) = client::set_start_with_admin(enabled) {
+                        warn!(%error, "Failed to update start with administrator setting");
+                    } else {
+                        command_sent = true;
+                    }
+                }
+                SettingsCommand::SetStartWithWindows(enabled) => {
+                    if let Err(error) = client::set_start_with_windows(enabled) {
+                        warn!(%error, "Failed to update start with Windows setting");
+                    } else {
+                        command_sent = true;
+                    }
+                }
                 SettingsCommand::SetPerfMode(profile, mode) => {
                     if let Err(error) = client::set_perf_mode(profile, mode) {
                         warn!(%error, "Failed to update performance mode");

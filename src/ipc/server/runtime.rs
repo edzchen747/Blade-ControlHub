@@ -142,6 +142,8 @@ fn ipc_request_kind(request: &IpcRequest) -> &'static str {
         IpcRequest::SetSettingsWindowOpen { .. } => "SetSettingsWindowOpen",
         IpcRequest::SetPrimaryMultimediaKeys { .. } => "SetPrimaryMultimediaKeys",
         IpcRequest::SetAdvancedExperimentalFeatures { .. } => "SetAdvancedExperimentalFeatures",
+        IpcRequest::SetStartWithAdmin { .. } => "SetStartWithAdmin",
+        IpcRequest::SetStartWithWindows { .. } => "SetStartWithWindows",
         IpcRequest::SetPerfMode { .. } => "SetPerfMode",
         IpcRequest::SetCustomModeConfig { .. } => "SetCustomModeConfig",
         IpcRequest::SetFanSpeed { .. } => "SetFanSpeed",
@@ -180,6 +182,17 @@ fn dispatch_request(request: IpcRequest, device: &DeviceHandle) -> IpcResponse {
         }
         IpcRequest::SetAdvancedExperimentalFeatures { enabled } => {
             ack(device.set_advanced_experimental_features(enabled))
+        }
+        IpcRequest::SetStartWithAdmin { enabled } => {
+            let result = device.set_start_with_admin(enabled);
+            if result.is_ok() {
+                crate::utils::reload::relaunch_after_admin_toggle(enabled);
+            }
+            ack(result)
+        }
+        IpcRequest::SetStartWithWindows { enabled } => {
+            device.set_start_with_windows(enabled);
+            IpcResponse::Ack
         }
         IpcRequest::SetPerfMode { profile, mode } => ack(device.set_perf_mode(profile, mode)),
         IpcRequest::SetCustomModeConfig {

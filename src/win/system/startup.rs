@@ -10,19 +10,21 @@ pub struct Startup;
 impl Startup {
     const TASK_NAME: &'static str = "Blade ControlHub";
 
-    /// Creates a Task Scheduler entry to run the current EXE as Admin on Logon.
-    pub fn register() {
+    pub fn register(run_as_admin: bool) {
         if let Err(error) = thread::Builder::new()
             .name("blade-startup-register".to_string())
-            .spawn(Self::register_after_delay)
+            .spawn(move || {
+                thread::sleep(time::Duration::from_secs(2));
+                Self::register_now(run_as_admin);
+            })
         {
             warn!(%error, "Failed to start startup registration thread");
         }
     }
 
-    fn register_after_delay() {
-        thread::sleep(time::Duration::from_secs(2));
-
+    /// Synchronous variant of [`Self::register`], for callers that must leave
+    /// the task in the correct state before a process relaunch.
+    pub fn register_now(run_as_admin: bool) {
         let exe_path = match env::current_exe() {
             Ok(p) => p,
             Err(e) => {
@@ -57,6 +59,7 @@ impl Startup {
 
         xml_content = xml_content.replace("__EXE_PATH__", path_str);
         xml_content = xml_content.replace("__EXE_DIR__", dir_str);
+        xml_content = xml_content.replace("__RUN_LEVEL__", Self::run_level(run_as_admin));
 
         let temp_xml_path = env::temp_dir().join("blade_task_config.xml");
         if let Err(e) = fs::write(&temp_xml_path, xml_content) {
@@ -100,6 +103,36 @@ impl Startup {
         }
     }
 
+    pub fn refresh(start_with_windows: bool, run_as_admin: bool) {
+        if start_with_windows {
+            if !Self::is_registered_with(run_as_admin) {
+                info!(
+                    run_as_admin,
+                    "Reconfiguring startup task to match persisted settings"
+                );
+                Self::register(run_as_admin);
+            }
+        } else if Self::task_exists() {
+            Self::unregister();
+        }
+    }
+
+    /// Synchronous variant of [`Self::refresh`], for callers that must leave
+    /// the task in the correct state before a process relaunch
+    pub fn refresh_now(start_with_windows: bool, run_as_admin: bool) {
+        if start_with_windows {
+            if !Self::is_registered_with(run_as_admin) {
+                info!(
+                    run_as_admin,
+                    "Reconfiguring startup task to match persisted settings"
+                );
+                Self::register_now(run_as_admin);
+            }
+        } else if Self::task_exists() {
+            Self::unregister();
+        }
+    }
+
     pub fn unregister() {
         let status = match Command::new("schtasks")
             .args(["/Delete", "/TN", Self::TASK_NAME, "/F"])
@@ -119,22 +152,56 @@ impl Startup {
         }
     }
 
-    pub fn is_registered() -> bool {
-        let current_path = match env::current_exe() {
-            Ok(p) => p.to_string_lossy().to_string(),
-            Err(_) => return false,
-        };
+    pub fn task_exists() -> bool {
+        Self::query_task_xml().is_some()
+    }
 
+    pub fn is_registered() -> bool {
+        let current_path = current_exe_path();
+        Self::query_task_xml().is_some_and(|xml| xml.contains(&current_path))
+    }
+
+    pub fn is_registered_with(run_as_admin: bool) -> bool {
+        let current_path = current_exe_path();
+        Self::query_task_xml().is_some_and(|xml| {
+            xml.contains(&current_path) && xml.contains(Self::run_level(run_as_admin))
+        })
+    }
+
+    fn run_level(run_as_admin: bool) -> &'static str {
+        if run_as_admin {
+            "HighestAvailable"
+        } else {
+            "LeastPrivilege"
+        }
+    }
+
+    fn query_task_xml() -> Option<String> {
         let output = Command::new("schtasks")
             .args(["/Query", "/TN", Self::TASK_NAME, "/XML"])
-            .output();
+            .output()
+            .ok()?;
 
-        if let Ok(out) = output
-            && out.status.success()
-        {
-            let xml_content = String::from_utf8_lossy(&out.stdout);
-            return xml_content.contains(&current_path);
+        if !output.status.success() {
+            return None;
         }
-        false
+        Some(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+}
+
+fn current_exe_path() -> String {
+    env::current_exe()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_level_matches_admin_preference() {
+        assert_eq!(Startup::run_level(true), "HighestAvailable");
+        assert_eq!(Startup::run_level(false), "LeastPrivilege");
     }
 }

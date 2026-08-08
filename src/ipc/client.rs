@@ -52,6 +52,14 @@ pub fn set_advanced_experimental_features(enabled: bool) -> AppResult<()> {
     })?)
 }
 
+pub fn set_start_with_admin(enabled: bool) -> AppResult<()> {
+    expect_ack(send_request(IpcRequest::SetStartWithAdmin { enabled })?)
+}
+
+pub fn set_start_with_windows(enabled: bool) -> AppResult<()> {
+    expect_ack(send_request(IpcRequest::SetStartWithWindows { enabled })?)
+}
+
 pub fn set_perf_mode(profile: PowerProfile, mode: PerfMode) -> AppResult<()> {
     expect_ack(send_request(IpcRequest::SetPerfMode { profile, mode })?)
 }
@@ -215,6 +223,8 @@ fn ipc_request_kind(request: &IpcRequest) -> &'static str {
         IpcRequest::SetSettingsWindowOpen { .. } => "SetSettingsWindowOpen",
         IpcRequest::SetPrimaryMultimediaKeys { .. } => "SetPrimaryMultimediaKeys",
         IpcRequest::SetAdvancedExperimentalFeatures { .. } => "SetAdvancedExperimentalFeatures",
+        IpcRequest::SetStartWithAdmin { .. } => "SetStartWithAdmin",
+        IpcRequest::SetStartWithWindows { .. } => "SetStartWithWindows",
         IpcRequest::SetPerfMode { .. } => "SetPerfMode",
         IpcRequest::SetCustomModeConfig { .. } => "SetCustomModeConfig",
         IpcRequest::SetFanSpeed { .. } => "SetFanSpeed",

@@ -4,8 +4,9 @@
     <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
         <security>
             <requestedPrivileges>
-                <!-- This line triggers the Admin prompt -->
-                <requestedExecutionLevel level="requireAdministrator" uiAccess="false"/>
+                <!-- Run as the launching user; elevation is requested explicitly
+                     when the "Start with administrator privileges" setting is on. -->
+                <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
             </requestedPrivileges>
         </security>
     </trustInfo>

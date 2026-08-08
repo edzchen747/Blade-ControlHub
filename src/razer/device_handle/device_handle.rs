@@ -14,6 +14,8 @@ pub enum DeviceCmd {
     TogglePrimaryMultimediaKeys(mpsc::Sender<bool>),
     SetPrimaryMultimediaKeys(bool, mpsc::Sender<AppResult<()>>),
     SetAdvancedExperimentalFeatures(bool, mpsc::Sender<AppResult<()>>),
+    SetStartWithAdmin(bool, mpsc::Sender<AppResult<()>>),
+    SetStartWithWindows(bool),
     SetMuteIndicator(AudioType, bool),
     CycleBatteryLimit,
     SetBatteryLimit(BatteryLimit, mpsc::Sender<AppResult<()>>),
@@ -83,6 +85,14 @@ impl DeviceHandle {
 
     pub fn set_advanced_experimental_features(&self, enabled: bool) -> AppResult<()> {
         self.query_result(|tx| DeviceCmd::SetAdvancedExperimentalFeatures(enabled, tx))
+    }
+
+    pub fn set_start_with_admin(&self, enabled: bool) -> AppResult<()> {
+        self.query_result(|tx| DeviceCmd::SetStartWithAdmin(enabled, tx))
+    }
+
+    pub fn set_start_with_windows(&self, enabled: bool) {
+        self.send(DeviceCmd::SetStartWithWindows(enabled));
     }
 
     pub fn get_config(&self) -> AppResult<AppConfig> {

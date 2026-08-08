@@ -23,6 +23,12 @@ pub enum IpcRequest {
     SetAdvancedExperimentalFeatures {
         enabled: bool,
     },
+    SetStartWithAdmin {
+        enabled: bool,
+    },
+    SetStartWithWindows {
+        enabled: bool,
+    },
     SetPerfMode {
         profile: PowerProfile,
         mode: PerfMode,
@@ -151,6 +157,26 @@ mod tests {
     #[test]
     fn advanced_experimental_features_request_round_trips_through_json() {
         let request = IpcRequest::SetAdvancedExperimentalFeatures { enabled: false };
+
+        let encoded = serde_json::to_string(&request).expect("request must serialize");
+        let decoded: IpcRequest = serde_json::from_str(&encoded).expect("request must deserialize");
+
+        assert_eq!(decoded, request);
+    }
+
+    #[test]
+    fn start_with_admin_request_round_trips_through_json() {
+        let request = IpcRequest::SetStartWithAdmin { enabled: true };
+
+        let encoded = serde_json::to_string(&request).expect("request must serialize");
+        let decoded: IpcRequest = serde_json::from_str(&encoded).expect("request must deserialize");
+
+        assert_eq!(decoded, request);
+    }
+
+    #[test]
+    fn start_with_windows_request_round_trips_through_json() {
+        let request = IpcRequest::SetStartWithWindows { enabled: true };
 
         let encoded = serde_json::to_string(&request).expect("request must serialize");
         let decoded: IpcRequest = serde_json::from_str(&encoded).expect("request must deserialize");

@@ -52,18 +52,6 @@ impl TrayManager {
         let close_gpu_apps_item =
             MenuItem::with_id("close_gpu_apps", "Close apps running on dGPU", true, None);
 
-        let startup_detected = Startup::is_registered();
-        let startup_item = CheckMenuItem::with_id(
-            "startup_toggle",
-            "Start with Windows",
-            true,
-            startup_detected,
-            None,
-        );
-
-        STARTUP_STATE.store(startup_detected, Ordering::SeqCst);
-
-        let _ = tray_menu.append(&startup_item);
         let _ = tray_menu.append(&close_gpu_apps_item);
         let _ = tray_menu.append(&settings_item);
         let _ = tray_menu.append(&restart_item);
@@ -82,15 +70,6 @@ impl TrayManager {
             }
             "settings_window" => {
                 app(AppEvent::OpenSettings);
-            }
-            "startup_toggle" => {
-                let is_checked = !STARTUP_STATE.load(Ordering::SeqCst);
-                STARTUP_STATE.store(is_checked, Ordering::SeqCst);
-                if is_checked && !Startup::is_registered() {
-                    Startup::register();
-                } else if !is_checked && Startup::is_registered() {
-                    Startup::unregister();
-                }
             }
             "close_gpu_apps" => {
                 cycle_gpu();

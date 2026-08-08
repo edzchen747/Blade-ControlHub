@@ -22,7 +22,8 @@ pub struct AppConfig {
     pub advanced_experimental_features: bool,
     pub theme_color: ThemeColor,
     pub keyboard_width: u8,
-    /// Command Lab saved commands: command name → captured commands.
+    pub start_with_admin: bool,
+    pub start_with_windows: bool,
     pub command_lab_commands: HashMap<String, Vec<CapturedCommand>>,
 }
 
@@ -38,6 +39,8 @@ impl Default for AppConfig {
             advanced_experimental_features: false,
             theme_color: ThemeColor::default(),
             keyboard_width: 0,
+            start_with_admin: false,
+            start_with_windows: false,
             command_lab_commands: HashMap::new(),
         }
     }

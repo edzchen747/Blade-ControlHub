@@ -13,6 +13,8 @@ use super::{
 
 pub(super) const ADVANCED_EXPERIMENTAL_FEATURES_DESCRIPTION: &str = "⚠ Advanced experimental features may not work perfectly on every device, and some configurations may cause unexpected behaviour. You can turn these features off at any time if they do not work as expected in the Settings tab.";
 
+pub(super) const START_WITH_ADMIN_DESCRIPTION: &str = "This starts the app with administrator privileges so you do not need to repeatedly accept UAC prompts for certain actions.";
+
 pub fn show(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
@@ -22,6 +24,10 @@ pub fn show(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Setti
             primary_func_key_section(ui, ctx, settings);
             ui.add_space(5.0);
             theme_section(ui, ctx, settings);
+            ui.add_space(5.0);
+            start_with_admin_section(ui, ctx, settings);
+            ui.add_space(5.0);
+            start_with_windows_section(ui, ctx, settings);
             ui.add_space(5.0);
             advanced_experimental_features_section(ui, ctx, settings);
         });
@@ -109,6 +115,38 @@ pub(super) fn primary_func_key_switcher(
         set_primary_multimedia_keys(settings, selected_primary);
         ctx.request_repaint_of(egui::ViewportId::ROOT);
     }
+}
+
+fn start_with_admin_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
+    section(ui, "Start with administrator privileges", |ui| {
+        ui.label(START_WITH_ADMIN_DESCRIPTION);
+        ui.add_space(3.0);
+
+        let Some(state) = settings.state.as_ref() else {
+            ui.label("Waiting for runtime state...");
+            return;
+        };
+        let mut enabled = state.start_with_admin;
+        if right_aligned_toggle(ui, "Start with administrator privileges", &mut enabled).changed()
+        {
+            set_start_with_admin(settings, enabled);
+            ctx.request_repaint_of(egui::ViewportId::ROOT);
+        }
+    });
+}
+
+fn start_with_windows_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
+    section(ui, "Start with Windows", |ui| {
+        let Some(state) = settings.state.as_ref() else {
+            ui.label("Waiting for runtime state...");
+            return;
+        };
+        let mut enabled = state.start_with_windows;
+        if right_aligned_toggle(ui, "Start with Windows", &mut enabled).changed() {
+            set_start_with_windows(settings, enabled);
+            ctx.request_repaint_of(egui::ViewportId::ROOT);
+        }
+    });
 }
 
 fn theme_section(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
@@ -216,6 +254,22 @@ fn set_advanced_experimental_features(settings: &mut Settings, enabled: bool) {
     }
 }
 
+fn set_start_with_admin(settings: &mut Settings, enabled: bool) {
+    if let Some(state) = settings.state.as_mut() {
+        state.start_with_admin = enabled;
+        settings.update = true;
+        settings.queue_command(SettingsCommand::SetStartWithAdmin(enabled));
+    }
+}
+
+fn set_start_with_windows(settings: &mut Settings, enabled: bool) {
+    if let Some(state) = settings.state.as_mut() {
+        state.start_with_windows = enabled;
+        settings.update = true;
+        settings.queue_command(SettingsCommand::SetStartWithWindows(enabled));
+    }
+}
+
 fn selected_battery_limit(
     limits: &[BatteryLimit],
     current: BatteryLimit,
@@ -295,6 +349,46 @@ mod tests {
         assert_eq!(
             settings.drain_commands(),
             vec![SettingsCommand::SetAdvancedExperimentalFeatures(false)]
+        );
+    }
+
+    #[test]
+    fn set_start_with_admin_updates_settings_state() {
+        let mut settings = Settings::new();
+        settings.show(SettingsState::from(AppConfig::default()));
+
+        set_start_with_admin(&mut settings, true);
+
+        assert!(
+            settings
+                .state
+                .as_ref()
+                .expect("settings state is available")
+                .start_with_admin
+        );
+        assert_eq!(
+            settings.drain_commands(),
+            vec![SettingsCommand::SetStartWithAdmin(true)]
+        );
+    }
+
+    #[test]
+    fn set_start_with_windows_updates_settings_state() {
+        let mut settings = Settings::new();
+        settings.show(SettingsState::from(AppConfig::default()));
+
+        set_start_with_windows(&mut settings, true);
+
+        assert!(
+            settings
+                .state
+                .as_ref()
+                .expect("settings state is available")
+                .start_with_windows
+        );
+        assert_eq!(
+            settings.drain_commands(),
+            vec![SettingsCommand::SetStartWithWindows(true)]
         );
     }
 

@@ -156,13 +156,39 @@ impl<'a> Executer<'a> {
         Ok(())
     }
 
-    fn set_advanced_experimental_features(
-        &mut self,
-        enabled: bool,
-    ) -> crate::error::AppResult<()> {
+    fn set_advanced_experimental_features(&mut self, enabled: bool) -> crate::error::AppResult<()> {
         self.app_config.advanced_experimental_features = enabled;
         self.persist_config();
         Ok(())
+    }
+
+    fn set_start_with_admin(&mut self, enabled: bool) -> crate::error::AppResult<()> {
+        self.app_config.start_with_admin = enabled;
+
+        crate::config::persist_config_now(self.app_config);
+        self.persist_config();
+
+        let start_with_windows = self.app_config.start_with_windows;
+        if let Err(error) = std::thread::Builder::new()
+            .name("blade-admin-task-refresh".to_string())
+            .spawn(move || {
+                crate::win::system::startup::Startup::refresh_now(start_with_windows, enabled);
+            })
+        {
+            warn!(%error, "Failed to spawn startup task refresh thread");
+        }
+        Ok(())
+    }
+
+    fn set_start_with_windows(&mut self, enabled: bool) {
+        self.app_config.start_with_windows = enabled;
+        self.persist_config();
+
+        if enabled {
+            crate::win::system::startup::Startup::register(self.app_config.start_with_admin);
+        } else {
+            crate::win::system::startup::Startup::unregister();
+        }
     }
 
     fn set_theme_color(&mut self, color: ThemeColor) -> crate::error::AppResult<()> {
@@ -179,5 +205,4 @@ impl<'a> Executer<'a> {
     fn profile_is_active(&self, profile: PowerProfile) -> bool {
         AppConfig::active_profile() == profile
     }
-
 }
