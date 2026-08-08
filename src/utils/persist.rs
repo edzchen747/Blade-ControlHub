@@ -109,11 +109,11 @@ impl PersistBuffer {
                 }
 
                 Err(RecvTimeoutError::Timeout) => {
-                    if let Some(content) = pending_content.take() {
-                        if content != last_written_content {
-                            Self::perform_commit(&path, &content);
-                            last_written_content = content;
-                        }
+                    if let Some(content) = pending_content.take()
+                        && content != last_written_content
+                    {
+                        Self::perform_commit(&path, &content);
+                        last_written_content = content;
                     }
                     flush_at = None;
                 }
