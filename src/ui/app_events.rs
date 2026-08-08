@@ -4,12 +4,8 @@ use crate::{
     ui::osd_controller::OsdParams,
 };
 
-// Re-export OsdIcon for convenience (canonical definition lives in icons.rs)
 pub use crate::ui::icons::OsdIcon;
 
-// ── Application Events ──────────────────────────────────────────────────────
-
-/// High-level events that drive the application UI and system actions.
 #[derive(PartialEq, Clone, Copy, serde::Serialize)]
 pub enum OsdEvent {
     Startup,

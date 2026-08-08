@@ -34,7 +34,6 @@ pub struct SettingsState {
     pub primary_multimedia_keys: bool,
     pub advanced_experimental_features: bool,
     pub theme_color: ThemeColor,
-    /// Persisted Command Lab library: command name → captured commands.
     pub command_lab_commands: HashMap<String, Vec<CapturedCommand>>,
 }
 

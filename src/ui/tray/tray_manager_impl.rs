@@ -1,10 +1,7 @@
 impl TrayManager {
-    /// Initializes and builds the system tray manager, context menu,
-    /// mouse click listeners, and zero-idle icon updater thread.
     pub fn start() {
         join_finished_tray_threads();
 
-        // Prevent double-initialization if called multiple times
         if TRAY_INITIALIZED
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
@@ -40,8 +37,6 @@ impl TrayManager {
         *tray_update_sender() = None;
         join_tray_threads();
     }
-
-    // ── Menu Construction & Handling ─────────────────────────────────────────
 
     fn build_tray_menu() -> Menu {
         let tray_menu = Menu::new();
@@ -98,8 +93,6 @@ impl TrayManager {
             _ => {}
         }));
     }
-
-    // ── Tray Click Listener ──────────────────────────────────────────────────
 
     fn spawn_tray_click_listener() {
         match thread::Builder::new()
@@ -198,8 +191,6 @@ impl TrayManager {
         }
         quit
     }
-
-    // ── Icon Rasterization & Theme Coloring ──────────────────────────────────
 
     fn load_tray_icon(hex_color: &str) -> Option<Icon> {
         let Some(mut pixmap) = tiny_skia::Pixmap::new(TRAY_ICON_SIZE, TRAY_ICON_SIZE) else {

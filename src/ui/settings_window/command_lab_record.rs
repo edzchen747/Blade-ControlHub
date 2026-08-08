@@ -1,10 +1,3 @@
-/// Command Lab recording worker.
-///
-/// Starts the runtime countdown over IPC, then polls until the recording
-/// reaches a terminal state so the UI can restore the Record button. Every
-/// polled state is forwarded so the UI can show the live captured-command
-/// count. Mirrors the Razer key capture worker: transient IPC failures are
-/// retried until the flow is cancelled, and pipe delays must not stall the UI.
 use crate::ipc::protocol::CommandLabRecordingState;
 
 enum CommandLabRecordMessage {
@@ -21,8 +14,6 @@ fn run_command_lab_record_worker(
     tx: Sender<CommandLabRecordMessage>,
     ctx: egui::Context,
 ) {
-    // Begin blocks until the capture is running (UAC prompt answered) or has
-    // failed, so no polling happens while the start is pending.
     let started = loop {
         if cancel.load(Ordering::SeqCst) {
             return;

@@ -15,20 +15,16 @@ impl AppCore {
     }
 }
 
-// ── Public Dispatcher Entrypoint ─────────────────────────────────────────────
-
 pub fn app(event: AppEvent) {
     let Some(ctx) = APP_CONTEXT.get_or_timeout() else {
         warn!("Dropping app event before app context initialization completed");
         return;
     };
 
-    // 1. Dispatch incoming events and capture matching platform side effects
     if let Some(side) = EventDispatcher::dispatch(event) {
         core(&ctx).pending_side_effects.push(side);
     }
 
-    // 2. Process all pending side effects immediately within the event transaction block
     let pending = {
         let mut core = core(&ctx);
         if !core.running {
@@ -63,7 +59,6 @@ pub fn app(event: AppEvent) {
         }
     }
 
-    // 3. Process standalone On-Screen Display Overlay parameters via static invocation
     let osd_params = match event {
         AppEvent::OsdEvent(osd_event) => osd_event.as_params(),
         _ => None,
@@ -101,8 +96,6 @@ fn release_osd_disable_guard() {
     core.osd_disable_guards -= 1;
 }
 
-/// Holds the existing OSD-disable guard only while the settings window has focus.
-/// The settings process reports its lifecycle through runtime IPC; it never owns OSD state.
 pub fn set_settings_window_state(open: bool, focused: bool) {
     let Some(ctx) = APP_CONTEXT.get() else {
         warn!(

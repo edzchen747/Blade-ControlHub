@@ -1,8 +1,3 @@
-/// Command Lab tab UI component.
-///
-/// Renders a growing list of command rows. Each row pairs a command text
-/// box with a Record/Cancel button that drives the runtime recording
-/// countdown through IPC, mirroring the Razer special key capture flow.
 use std::time;
 
 use eframe::egui;
@@ -16,7 +11,6 @@ use crate::win::system::usbpcap::{
     USBPCAP_DOWNLOAD_URL, UsbpcapStatus, usbpcap_driver_label, usbpcap_status,
 };
 
-/// Common troubleshooting questions and answers for the Command Lab.
 static COMMAND_LAB_HELP: [(&str, &str); 2] = [
     (
         "What does \"Failed, too many commands\" mean?",
@@ -30,7 +24,6 @@ static COMMAND_LAB_HELP: [(&str, &str); 2] = [
 
 static USBPCAP_CAPTURE_DESCRIPTION: &str = "Record USB commands for your Razer device while you make changes in Synapse to replay commands from Blade ControlHub.\nUSBPcap is a Windows driver that is used to capture the USB reports sent between Synapse and your device. It requires administrator privileges to start a capture.";
 
-/// Red that keeps ~4:1 contrast on both the light and dark settings themes.
 static ADVANCED_EXPERIMENTAL_FEATURES_COLOR: egui::Color32 =
     egui::Color32::from_rgb(0xE5, 0x39, 0x35);
 
@@ -76,7 +69,6 @@ pub fn show(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Setti
             .collect();
 
         for (idx, row) in settings.command_lab.rows.iter_mut().enumerate() {
-            // Bring the code block back once the too-many notice expired.
             row.expire_too_many_notice(time::Instant::now());
             ui.horizontal(|ui| {
                 ui.label(format!("{}:", idx + 1));
@@ -87,9 +79,6 @@ pub fn show(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Setti
                     name_edit = name_edit.text_color(ADVANCED_EXPERIMENTAL_FEATURES_COLOR);
                 }
                 let name_response = ui.add(name_edit);
-                // Persist the named command list once the name box is left:
-                // only for a row that has a valid capture, a non-empty name,
-                // and no name clash with another row.
                 if name_response.lost_focus() && ready_to_save[idx] {
                     save_request =
                         Some((row.command.trim().to_owned(), row.captured_commands.clone()));

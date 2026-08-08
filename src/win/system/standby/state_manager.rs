@@ -28,7 +28,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::PCWSTR;
 
-// --- GLOBAL STATE MANAGER ---
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum StandbyState {
     Normal,
@@ -47,7 +46,6 @@ pub static STATE_MANAGER: once_cell::sync::Lazy<Arc<StateManager>> =
         })
     });
 
-// Custom Message ID to wake up the main loop
 const WM_STANDBY_CHANGE: u32 = WM_USER + 1;
 const WM_STANDBY_STOP: u32 = WM_USER + 2;
 const PBT_APMSUSPEND: u32 = 4;
@@ -68,8 +66,6 @@ type StandbyWatchdogWake = (Mutex<()>, Condvar);
 
 const STANDBY_WATCHDOG_INTERVAL: Duration = Duration::from_secs(2);
 const STANDBY_RESUME_GAP_THRESHOLD: Duration = Duration::from_secs(8);
-
-// --- WINDOWS CALLBACKS ---
 
 unsafe extern "system" fn wnd_proc(
     hwnd: HWND,

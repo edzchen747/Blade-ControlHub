@@ -27,7 +27,6 @@ fn post_osd_update(hwnd: HWND, params: OsdParams) {
         let lparam = LPARAM(Box::into_raw(boxed_params) as isize);
 
         if PostMessageW(hwnd, WM_TRIGGER_OSD, WPARAM(0), lparam).is_err() {
-            // Prevent memory leaks if the target window receiver pipeline goes offline.
             let _ = Box::from_raw(lparam.0 as *mut OsdParams);
         }
     }

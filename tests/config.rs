@@ -1,10 +1,5 @@
-//! Tests for `AppConfig` default values, JSON deserialization/serialization,
-//! and `refresh_cycle_items()`.
-
 use blade_controlhub::razer::config::{AppConfig, PowerProfile, allowed_perf_modes};
 use blade_controlhub::razer::enums::PerfMode;
-
-// ── Default values ───────────────────────────────────────────────────────────
 
 #[test]
 fn app_config_primary_multimedia_keys_is_false() {
@@ -40,12 +35,8 @@ fn app_config_default_perf_cycle_modes_are_profile_specific() {
     );
 }
 
-// ── JSON Deserialization (mirrors load_config behaviour) ──────────────────────
-
 #[test]
 fn app_config_deserializes_from_empty_json_object_with_defaults() {
-    // load_config uses serde(default) on all fields; an empty JSON object
-    // should produce the same result as AppConfig::default().
     let json = "{}";
     let config: AppConfig =
         serde_json::from_str(json).expect("empty JSON object must deserialize successfully");
@@ -91,14 +82,11 @@ fn app_config_rejects_malformed_json_with_parse_error() {
 
 #[test]
 fn app_config_round_trips_through_json() {
-    // Serialize a default config, then deserialize it back.
-    // The result must be semantically equivalent to the original.
     let original = AppConfig::default();
     let json = serde_json::to_string_pretty(&original)
         .expect("default AppConfig must serialize without error");
     let restored: AppConfig =
         serde_json::from_str(&json).expect("serialized AppConfig must deserialize without error");
-    // Verify key structural properties survive the round-trip
     assert_eq!(
         restored.primary_multimedia_keys,
         original.primary_multimedia_keys
@@ -161,19 +149,15 @@ fn app_config_serializes_to_valid_json_without_error() {
     assert!(json.contains("primary_multimedia_keys"));
 }
 
-// ── refresh_cycle_items() preserves indices ───────────────────────────────────
-
 #[test]
 fn app_config_refresh_cycle_items_does_not_panic() {
     let mut config = AppConfig::default();
-    // Should not panic
     config.refresh_cycle_items();
 }
 
 #[test]
 fn app_config_refresh_cycle_items_multiple_times_does_not_panic() {
     let mut config = AppConfig::default();
-    // Calling multiple times should not panic or cause issues
     config.refresh_cycle_items();
     config.refresh_cycle_items();
     config.refresh_cycle_items();
@@ -181,18 +165,10 @@ fn app_config_refresh_cycle_items_multiple_times_does_not_panic() {
 
 #[test]
 fn app_config_refresh_cycle_items_restores_full_rgb_effects_list() {
-    // Simulate a stale config where the internal rgb_effect items were truncated
-    // to a single entry. Since `power_state` is private, we inject the truncated
-    // state via JSON deserialization, then verify that refresh_cycle_items()
-    // restores the full list by serializing back and inspecting the output.
     let json = r#"{"power_state": {"rgb_effect": {"index": 0, "items": [4]}}}"#;
     let mut config: AppConfig = serde_json::from_str(json).unwrap_or_default();
     config.refresh_cycle_items();
-    // After refresh, serialize back to JSON and verify the items array
-    // now contains multiple entries (the full RGB_EFFECTS set has 6 items).
     let json_out = serde_json::to_string(&config).unwrap();
-    // The serialized rgb_effect items should contain the Wave variant (discriminant 1),
-    // which was not present in the truncated single-item list [4] (Cycle).
     assert!(
         json_out.contains("\"Wave\"") || json_out.contains(",1") || json_out.contains("1,"),
         "refresh_cycle_items must restore the full RGB effects list beyond the single truncated entry"

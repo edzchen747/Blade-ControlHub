@@ -1,5 +1,3 @@
-//! Mock implementation of `DeviceController` for use in integration tests.
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 
@@ -7,8 +5,6 @@ use blade_controlhub::error::AppResult;
 use blade_controlhub::hal::DeviceController;
 use blade_controlhub::razer::enums::LidLogoMode;
 
-/// Thread-safe mock that records which commands were dispatched.
-/// Cloneable so it can be shared across test assertions.
 #[derive(Debug, Default, Clone)]
 #[allow(dead_code)]
 pub struct MockDeviceController {

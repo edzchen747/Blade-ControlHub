@@ -9,7 +9,6 @@ struct DxgiSparseCapture {
     last: Option<AmbientColor>,
     reducer: AmbientReducer,
 }
-
 impl DxgiSparseCapture {
     fn new() -> Result<Self, String> {
         let primary_display = primary_display_device_name()
@@ -245,6 +244,3 @@ impl DxgiSparseCapture {
         Ok(self.reducer.finish(SAMPLE_WIDTH * SAMPLE_HEIGHT))
     }
 }
-
-// --- Color Engine ---
-

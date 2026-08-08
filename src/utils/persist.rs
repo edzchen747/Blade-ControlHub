@@ -8,13 +8,8 @@ use std::time::{Duration, Instant};
 
 use tracing::{debug, error, warn};
 
-// Module-local - accessed only within this module via enable()/disable() methods
 static PERSIST_ENABLED: AtomicBool = AtomicBool::new(true);
 
-/// A debounced file writer that batches rapid writes into a single disk commit.
-///
-/// Sends to `PersistBuffer` are buffered and only flushed to disk after a 2-second
-/// quiet period, preventing excessive I/O during bursts of configuration changes.
 pub struct PersistBuffer {
     tx: Option<Sender<String>>,
     worker: Option<JoinHandle<()>>,
@@ -101,7 +96,6 @@ impl PersistBuffer {
             } else {
                 Duration::MAX
             };
-            // New data sent to be persisted
             let recv = rx.recv_timeout(timeout);
             if !PERSIST_ENABLED.load(Ordering::SeqCst) {
                 continue;
@@ -109,16 +103,13 @@ impl PersistBuffer {
             match recv {
                 Ok(content) => {
                     if flush_at.is_none() {
-                        // Set timer for a "debounced" write (2 seconds)
                         flush_at = Some(Instant::now() + Duration::from_secs(2));
                     }
                     pending_content = Some(content);
                 }
 
-                // Timer expired: Time to save to disk
                 Err(RecvTimeoutError::Timeout) => {
                     if let Some(content) = pending_content.take() {
-                        // Only write if it's actually different from what is on disk
                         if content != last_written_content {
                             Self::perform_commit(&path, &content);
                             last_written_content = content;
@@ -127,7 +118,6 @@ impl PersistBuffer {
                     flush_at = None;
                 }
 
-                // Final emergency save
                 Err(RecvTimeoutError::Disconnected) => {
                     if let Some(content) = pending_content.take()
                         && content != last_written_content

@@ -1,15 +1,8 @@
-//! Integration tests for inter-component behaviour.
-//!
-//! These tests use `MockDeviceController` to exercise pipelines that would
-//! otherwise require real hardware.
-
 mod common;
 
 use blade_controlhub::hal::DeviceController;
 use blade_controlhub::razer::enums::{BATTERY_LIMITS, PERF_MODES, PerfMode, RGB_EFFECTS};
 use common::mock_device::MockDeviceController;
-
-// ── MockDeviceController wiring ──────────────────────────────────────────────
 
 #[test]
 fn mock_device_initialize_records_call() {
@@ -92,7 +85,6 @@ fn mock_device_cycle_perf_records_call() {
 fn mock_device_clone_shares_state() {
     let mock = MockDeviceController::new();
     let clone = mock.clone();
-    // Calling initialize on the clone must be visible via the original's Arc
     clone.initialize(false);
     assert!(
         mock.initialize_called

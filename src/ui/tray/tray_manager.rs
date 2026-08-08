@@ -24,8 +24,6 @@ use crate::ui::theme::{
 use crate::win::system::cli_utils::cycle_gpu;
 use crate::win::system::startup::Startup;
 
-// ── Globals & State ──────────────────────────────────────────────────────────
-
 static STARTUP_STATE: AtomicBool = AtomicBool::new(false);
 static TRAY_INITIALIZED: AtomicBool = AtomicBool::new(false);
 static TRAY_SHUTDOWN: AtomicBool = AtomicBool::new(false);
@@ -33,8 +31,6 @@ static TRAY_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 static TRAY_UPDATE_SENDER: Mutex<Option<Sender<PerfMode>>> = Mutex::new(None);
 static TRAY_ICON_THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 static TRAY_CLICK_THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
-
-// ── Tray Manager Struct ──────────────────────────────────────────────────────
 
 pub struct TrayManager {
     pub tray_icon: TrayIcon,

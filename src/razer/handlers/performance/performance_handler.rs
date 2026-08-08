@@ -39,8 +39,6 @@ pub(crate) fn validate_fan_speed(speed: u8, limits: FanSpeedLimits) -> AppResult
     }
 }
 
-/// Restores the firmware's sleep performance state without changing saved
-/// configuration.
 pub(crate) fn reset_perf_mode_for_sleep(device: &Device) {
     let _ = command(
         device,
@@ -50,10 +48,6 @@ pub(crate) fn reset_perf_mode_for_sleep(device: &Device) {
     );
 }
 
-/// Performance mode handler.
-///
-/// Accepts references to the device, app config, and persist buffer.
-/// All logic is copied exactly from Executer — zero-cost abstraction.
 pub struct PerformanceHandler<'a> {
     device: &'a Device,
     app_config: &'a mut AppConfig,
@@ -76,7 +70,6 @@ impl<'a> PerformanceHandler<'a> {
         }
     }
 
-    // ── Performance ─────────────────────────────────────────────────────
 
     pub fn cycle_perf_mode(&mut self) {
         let attempts = self.app_config.get().perf_mode.items.len();
@@ -142,8 +135,6 @@ impl<'a> PerformanceHandler<'a> {
         Ok(perf_mode)
     }
 
-    /// Applies the CPU and GPU limits for Custom mode without re-selecting the
-    /// performance mode. These settings only exist for the AC Custom profile.
     pub fn set_custom_mode_config(&mut self, cpu_level: u8, gpu_level: u8) -> AppResult<()> {
         validate_custom_mode_level(cpu_level)?;
         validate_custom_mode_level(gpu_level)?;
@@ -167,8 +158,6 @@ impl<'a> PerformanceHandler<'a> {
         Ok(())
     }
 
-    /// Saves the fan speed for the active performance mode and reapplies that
-    /// performance mode before updating all fan channels.
     #[allow(dead_code)]
     pub fn set_fan_speed(&mut self, speed: u8) -> AppResult<()> {
         validate_fan_speed(speed, self.fan_speed_limits)?;
@@ -178,7 +167,6 @@ impl<'a> PerformanceHandler<'a> {
         self.set_perf_mode(perf_mode)
     }
 
-    /// Returns the saved fan speed for the active performance mode.
     #[allow(dead_code)]
     pub fn get_fan_speed(&mut self) -> u8 {
         let state = self.app_config.get();
@@ -204,7 +192,6 @@ impl<'a> PerformanceHandler<'a> {
         })
     }
 
-    // ── Internal helpers ────────────────────────────────────────────────
 
     pub fn remove_perf_mode(&mut self, perf_mode: PerfMode) {
         if self.app_config.get().perf_mode.remove(&perf_mode) {

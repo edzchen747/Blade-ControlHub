@@ -6,7 +6,6 @@ use tracing::{error, warn};
 use crate::runtime::launch_args::is_settings_mode_arg;
 
 const APP_PROCESS_NAMES: &[&str] = &["blade-controlhub", "blade-controlhub.exe"];
-/// Restart code reserved for recovery paths that must not show the startup OSD.
 pub const SILENT_RESTART_CODE: i32 = 1;
 const SILENT_RESTART_ARGS: &[&str] = &["--silent"];
 const DEFAULT_RESTART_ARGS: &[&str] = &[];
@@ -14,7 +13,6 @@ const DETACHED_PROCESS: u32 = 0x0000_0008;
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-/// Restarts the application by spawning a new instance and exiting.
 pub fn restart_app(code: i32) -> ! {
     if let Err(e) = spawn_replacement_app(code) {
         error!(error = %e, "Failed to spawn replacement process");

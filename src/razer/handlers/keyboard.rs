@@ -15,10 +15,6 @@ use crate::{
 };
 use std::sync::atomic::Ordering;
 
-/// Keyboard, RGB, lighting, and key-mode handler.
-///
-/// Accepts references to the device, app config, and persist buffer.
-/// All logic is copied exactly from Executer — zero-cost abstraction.
 pub struct KeyboardHandler<'a> {
     device: &'a Device,
     app_config: &'a mut AppConfig,
@@ -38,7 +34,6 @@ impl<'a> KeyboardHandler<'a> {
         }
     }
 
-    // ── Keyboard ────────────────────────────────────────────────────────
 
     pub fn adjust_keyboard_light(&mut self, up: bool) {
         let level_new = next_keyboard_brightness(self.app_config.read().key_lvl, up);
@@ -53,7 +48,6 @@ impl<'a> KeyboardHandler<'a> {
     }
 
     pub fn get_keyboard_brightness(&self) -> u8 {
-        // unwrap_or(0): returns 0 on hardware/protocol failure
         command(self.device, 0x0383, &[1, 5, 0], Some(&[2]))
             .ok()
             .and_then(|result| result.first().copied())
@@ -85,7 +79,6 @@ impl<'a> KeyboardHandler<'a> {
         self.get_primary_multimedia_keys()
     }
 
-    // ── RGB & Lighting ──────────────────────────────────────────────────
 
     pub fn cycle_rgb_mode(&mut self) {
         let new_rgb_effect = self.app_config.get().rgb_effect.next();
@@ -119,7 +112,6 @@ impl<'a> KeyboardHandler<'a> {
         }
         let _ = command(self.device, 0x030a, &args, None);
 
-        // value comes from hardware readback; mismatch is non-fatal
         let _ = self.app_config.get().rgb_effect.set(&rgb_effect);
         if rgb_effect != RGBEffect::Ambient {
             let effect = self.get_rgb_effect();
@@ -129,7 +121,6 @@ impl<'a> KeyboardHandler<'a> {
     }
 
     pub fn get_rgb_effect(&self) -> RGBEffect {
-        // unwrap_or(0): returns RGBEffect 0 on hardware/protocol failure
         command(self.device, 0x038a, &[0], Some(&[0]))
             .ok()
             .and_then(|result| result.first().copied())
@@ -157,7 +148,6 @@ impl<'a> KeyboardHandler<'a> {
     }
 
     pub fn get_under_glow_brightness(&self) -> u8 {
-        // unwrap_or(0): returns 0 on hardware/protocol failure
         let brightness = command(self.device, 0x0383, &[1, 38, 0], Some(&[2]))
             .ok()
             .and_then(|result| result.first().copied())
@@ -225,10 +215,9 @@ impl<'a> KeyboardHandler<'a> {
         }
     }
 
-    // ── Key Modes ───────────────────────────────────────────────────────
 
     pub fn keyboard_control(&self, state: bool) {
-        // Use Chroma-RGB, prevents Dynamic Lighting interfering
+        // Select Chroma-RGB so Windows Dynamic Lighting cannot take control.
         let _ = command(self.device, 0x0f10, &[1], None);
         let arg = if state { 3 } else { 0 };
         let _ = command(self.device, 0x0004, &[arg, 0], None);
@@ -242,7 +231,6 @@ impl<'a> KeyboardHandler<'a> {
         let _ = command(self.device, 0x0206, &[0, 0], None);
     }
 
-    // ── Internal helpers ────────────────────────────────────────────────
 
     fn persist_config(&mut self) {
         persist_config(self.app_config, self.persist_buffer);

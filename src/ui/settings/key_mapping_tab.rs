@@ -1,6 +1,3 @@
-/// Key Mapping tab UI component.
-///
-/// Renders sub-tabs for Hypershift and Razer Special Keys customization.
 use std::time;
 
 use eframe::egui;
@@ -148,7 +145,6 @@ fn captured_normal_key_code(ctx: &egui::Context) -> Option<u8> {
     })
 }
 
-/// Converts supported Hypershift input into Windows virtual-key codes.
 fn normal_key_code(key: egui::Key) -> Option<u8> {
     use egui::Key;
 
@@ -212,7 +208,6 @@ fn razer_special_key_tab(ui: &mut eframe::egui::Ui, ctx: &egui::Context, setting
             ctx.request_repaint_after(Settings::duplicate_key_notice_duration());
         }
 
-        // Allow cancelling with Escape
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             settings.custom_key_map.set_listening_idx(None);
             settings.queue_command(SettingsCommand::CancelRazerKeyCapture);

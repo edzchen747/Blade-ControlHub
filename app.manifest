@@ -4,7 +4,6 @@
     <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
         <security>
             <requestedPrivileges>
-                <!-- This line triggers the Admin prompt -->
                 <requestedExecutionLevel level="requireAdministrator" uiAccess="false"/>
             </requestedPrivileges>
         </security>

@@ -9,10 +9,6 @@ use crate::{
 };
 use std::time::{Duration, Instant};
 
-/// Display handler.
-///
-/// Accepts references to the device, app config, persist buffer, display manager,
-/// and refresh cycle timeout. All logic is copied exactly from Executer.
 pub struct DisplayHandler<'a> {
     _device: &'a Device,
     app_config: &'a mut AppConfig,
@@ -38,7 +34,6 @@ impl<'a> DisplayHandler<'a> {
         }
     }
 
-    // ── Display ─────────────────────────────────────────────────────────
 
     pub fn get_refresh_rate(&mut self, silent: bool) -> u32 {
         let current = self.display_manager.get_current_rate();
@@ -84,7 +79,6 @@ impl<'a> DisplayHandler<'a> {
         self.persist_config();
     }
 
-    // ── Internal helpers ────────────────────────────────────────────────
 
     fn persist_config(&mut self) {
         persist_config(self.app_config, self.persist_buffer);

@@ -81,10 +81,6 @@ fn generate_progress_svg(total_steps: usize, active_steps: usize) -> String {
     svg_string
 }
 
-/// Parsed SVG layers for one card. Parsing is the expensive part of rendering;
-/// the trees are resolution-independent, so the same layers can be re-rasterized
-/// at any size while the card animates. The frame is theme-colored, so it is
-/// re-parsed whenever the runtime theme changes.
 struct SvgLayers {
     theme: ThemeColor,
     frame: resvg::usvg::Tree,

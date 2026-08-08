@@ -1,14 +1,6 @@
-//! Centralized icon registry: all SVG assets, off-state overlays, and icon
-//! lookup APIs for the OSD overlay and system tray.
-//!
-//! Change an icon asset once, propagate everywhere it's consumed.
-
 use std::borrow::Cow;
 use tracing::warn;
 
-// ── OSD Icon Identifiers ────────────────────────────────────────────────────
-
-/// Identifies which icon to display on the OSD overlay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OsdIcon {
     RazerControlHub,
@@ -25,14 +17,9 @@ pub enum OsdIcon {
     CommandLab,
 }
 
-// ── Strike-through Overlay ──────────────────────────────────────────────────
-
-/// The red diagonal strike-through line appended to "off" state icons.
 const STRIKE_THROUGH_SVG: &str =
     r##"<path d="M2 22L22 2" stroke="#FF4444" stroke-width="2" stroke-linecap="round" />"##;
 
-/// Overlays a red strike-through line onto an existing SVG icon by inserting
-/// it just before the closing `</svg>` tag.
 fn with_strikethrough(base_svg: &[u8]) -> Cow<'static, [u8]> {
     match std::str::from_utf8(base_svg) {
         Ok(base) => Cow::Owned(
@@ -50,9 +37,6 @@ fn with_strikethrough(base_svg: &[u8]) -> Cow<'static, [u8]> {
 }
 
 impl OsdIcon {
-    /// Stable identity key for the control this icon represents. Boolean state
-    /// variants (e.g. mic on/off) share a key so toggling the same control does
-    /// not create a new OSD card.
     pub fn kind_key(&self) -> u8 {
         match self {
             Self::RazerControlHub => 0,
@@ -70,10 +54,6 @@ impl OsdIcon {
         }
     }
 
-    /// Returns the `(uri, bytes)` pair for embedding the icon in the OSD.
-    ///
-    /// For "off" states the icon is generated dynamically by overlaying a red
-    /// strike-through on the base icon — no separate `_off.svg` asset needed.
     pub fn as_bytes(&self) -> Cow<'static, [u8]> {
         match self {
             Self::RazerControlHub => Cow::Borrowed(include_bytes!("../../assets/icon.svg")),

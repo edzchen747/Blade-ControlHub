@@ -12,7 +12,6 @@ const TRACKPAD_STATUS_REGISTRY_PATH: &str =
 const TRACKPAD_ENABLED_REGISTRY_VALUE: &str = "Enabled";
 const DEFAULT_TRACKPAD_STATE_WHEN_UNKNOWN: bool = true;
 
-/// Queries the Windows registry to determine if the precision touchpad is enabled.
 pub fn get_trackpad_state() -> bool {
     match read_trackpad_registry_value() {
         Ok(enabled) => trackpad_state_from_registry_value(enabled),

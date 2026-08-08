@@ -62,13 +62,10 @@ impl BrightnessWorker {
 
     fn worker_loop(rx: Receiver<()>) {
         let mut last_processed_lvl: u8 = 101;
-        // Block on the channel waiting for "pokes"
         while rx.recv().is_ok() {
             while rx.try_recv().is_ok() {} // drain queue in channel to prevent extra updates
-            // Get the latest target
             let target = SCREEN_TARGET_LVL.load(Ordering::SeqCst);
 
-            // skip if target has not changed
             if target == last_processed_lvl {
                 debug!(
                     level = last_processed_lvl,

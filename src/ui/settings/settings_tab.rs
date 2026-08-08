@@ -1,6 +1,3 @@
-/// Settings tab UI component.
-///
-/// Renders global application and device settings that are not tied to a power profile.
 use eframe::egui;
 
 use crate::config::ThemeColor;

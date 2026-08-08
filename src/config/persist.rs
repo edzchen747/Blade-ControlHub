@@ -5,9 +5,6 @@ use crate::utils::persist::PersistBuffer;
 use std::sync::atomic::Ordering;
 use tracing::error;
 
-/// Persists the current application config to disk via the provided buffer.
-///
-/// Snapshots the current screen brightness into the config before writing.
 pub fn persist_config(app_config: &mut AppConfig, persist_buffer: &PersistBuffer) {
     app_config.get().screen_lvl = SCREEN_TARGET_LVL.load(Ordering::SeqCst);
 

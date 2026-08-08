@@ -7,8 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 
-/// Top-level application configuration containing separate hardware states
-/// for plugged-in and battery power modes.
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(default)]
 pub struct AppConfig {
@@ -22,7 +20,6 @@ pub struct AppConfig {
     pub advanced_experimental_features: bool,
     pub theme_color: ThemeColor,
     pub keyboard_width: u8,
-    /// Command Lab saved commands: command name → captured commands.
     pub command_lab_commands: HashMap<String, Vec<CapturedCommand>>,
 }
 

@@ -1,75 +1,45 @@
-//! Centralized UI theming: color palettes, typography, and styling helpers.
-//!
-//! Layout dimensions and spacing tokens have been moved to `crate::ui::layout`.
-//! This module now focuses exclusively on colors, fonts, and visual effects.
-
 use eframe::egui;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::config::ThemeColor;
 use crate::razer::enums::PerfMode;
 
-// ── Re-exports for backward compatibility ─────────────────────────────────────
-
-/// Layout constants (window sizes, margins, spacing, animation timing).
-/// Import from `crate::ui::layout` for new code.
 pub use super::layout::*;
 
-// ── Tray Theme ───────────────────────────────────────────────────────────────
-
-/// Default icon color (hex string for SVG replacement).
 pub const DEFAULT_ICON_COLOR: &str = "#95A5A6";
 
-/// Neutral icon/accent color used before the runtime settings state is available.
 pub const SETTINGS_LOADING_ICON_COLOR: ThemeColor = ThemeColor::new(0x95, 0xa5, 0xa6);
 
-/// Tooltip text displayed when hovering the tray icon.
 pub const APP_TOOLTIP: &str = "Blade ControlHub";
 
-/// Title shown on the settings window frame.
 pub const SETTINGS_WINDOW_TITLE: &str = "Blade ControlHub";
 
 static RUNTIME_THEME_COLOR: AtomicU32 =
     AtomicU32::new(theme_color_to_u32(ThemeColor::new(0xff, 0xd7, 0x00)));
 
-// ── OSD Colors ───────────────────────────────────────────────────────────────
-
-/// Raw RGBA components for the OSD background at full opacity.
-/// Computed as `(30, 30, 30, 230)` before alpha multiplication.
 pub const OSD_BACKGROUND_R: f32 = 30.0;
 pub const OSD_BACKGROUND_G: f32 = 30.0;
 pub const OSD_BACKGROUND_B: f32 = 30.0;
 pub const OSD_BACKGROUND_A: f32 = 230.0;
 
-/// Raw RGBA components for the OSD accent (gold) color.
-/// Computed as `(255, 215, 0, 230)` before alpha multiplication.
 pub const OSD_ACCENT_R: f32 = 255.0;
 pub const OSD_ACCENT_G: f32 = 215.0;
 pub const OSD_ACCENT_B: f32 = 0.0;
 pub const OSD_ACCENT_A: f32 = 230.0;
 
-/// Raw RGBA components for the OSD text (white).
-/// Computed as `(255, 255, 255, 230)` before alpha multiplication.
 pub const OSD_TEXT_R: f32 = 255.0;
 pub const OSD_TEXT_G: f32 = 255.0;
 pub const OSD_TEXT_B: f32 = 255.0;
 pub const OSD_TEXT_A: f32 = 230.0;
 
-// ── Theme Helpers ────────────────────────────────────────────────────────────
-
-/// Computes an OSD color with the given alpha factor applied for fade animations.
 #[derive(Clone, Copy, Debug)]
 pub struct OsdColors {
-    /// Background fill color with alpha applied.
     pub background: egui::Color32,
-    /// Accent (gold) color with alpha applied.
     pub accent: egui::Color32,
-    /// Text (white) color with alpha applied.
     pub text: egui::Color32,
 }
 
 impl OsdColors {
-    /// Creates a themed color set with the specified alpha (0.0 = invisible, 1.0 = full).
     #[inline]
     pub fn with_alpha(alpha: f32) -> Self {
         Self {
