@@ -9,11 +9,14 @@ pub struct CommandLabRow {
 }
 
 /// The Command Lab editing state, holding the growing row list and which
-/// row (if any) is currently recording.
+/// row (if any) is currently recording, plus the live captured-command count
+/// for the most recent recording row.
 #[derive(Default)]
 pub struct CommandLab {
     pub rows: Vec<CommandLabRow>,
     pub recording_row_idx: Option<usize>,
+    pub captured_row_idx: Option<usize>,
+    pub captured_commands: u32,
 }
 
 impl CommandLab {
@@ -21,6 +24,8 @@ impl CommandLab {
         Self {
             rows: vec![CommandLabRow::default()],
             recording_row_idx: None,
+            captured_row_idx: None,
+            captured_commands: 0,
         }
     }
 
@@ -30,6 +35,18 @@ impl CommandLab {
 
     pub fn set_recording_row_idx(&mut self, idx: Option<usize>) {
         self.recording_row_idx = idx;
+    }
+
+    /// Marks a row as the recording row, resetting the captured-command count.
+    pub fn begin_capture(&mut self, idx: usize) {
+        self.recording_row_idx = Some(idx);
+        self.captured_row_idx = Some(idx);
+        self.captured_commands = 0;
+    }
+
+    /// Updates the captured-command count reported by the runtime.
+    pub fn set_captured_commands(&mut self, count: u32) {
+        self.captured_commands = count;
     }
 
     pub fn is_recording(&self) -> bool {
@@ -46,7 +63,8 @@ impl CommandLab {
         self.rows.push(CommandLabRow::default());
     }
 
-    /// Removes a row, clearing the recording row if it was removed.
+    /// Removes a row, clearing the recording and captured rows if they were
+    /// removed.
     pub fn remove_row(&mut self, idx: usize) {
         if self.recording_row_idx == Some(idx) {
             self.recording_row_idx = None;
@@ -55,6 +73,14 @@ impl CommandLab {
             && *recording_row_idx > idx
         {
             *recording_row_idx -= 1;
+        }
+        if self.captured_row_idx == Some(idx) {
+            self.captured_row_idx = None;
+        }
+        if let Some(captured_row_idx) = self.captured_row_idx.as_mut()
+            && *captured_row_idx > idx
+        {
+            *captured_row_idx -= 1;
         }
         self.rows.remove(idx);
     }

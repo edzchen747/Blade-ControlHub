@@ -297,6 +297,8 @@ impl SettingsApp {
             cancel.store(true, Ordering::SeqCst);
         }
         self.active_command_lab_record_id = None;
+        self.settings
+            .with_settings(|settings| settings.command_lab.set_recording_row_idx(None));
         ctx.request_repaint();
 
         let ctx = ctx.clone();
@@ -315,16 +317,29 @@ impl SettingsApp {
 
     fn drain_command_lab_record_messages(&mut self, ctx: &egui::Context) {
         while let Ok(message) = self.command_lab_record_rx.try_recv() {
-            let CommandLabRecordMessage::Finished { record_id } = message;
-            if Some(record_id) != self.active_command_lab_record_id {
-                continue;
+            match message {
+                CommandLabRecordMessage::State { record_id, state } => {
+                    if Some(record_id) != self.active_command_lab_record_id {
+                        continue;
+                    }
+                    self.settings.with_settings(|settings| {
+                        settings
+                            .command_lab
+                            .set_captured_commands(state.captured_commands)
+                    });
+                    ctx.request_repaint();
+                }
+                CommandLabRecordMessage::Finished { record_id } => {
+                    if Some(record_id) != self.active_command_lab_record_id {
+                        continue;
+                    }
+                    self.command_lab_record_cancel = None;
+                    self.active_command_lab_record_id = None;
+                    self.settings
+                        .with_settings(|settings| settings.command_lab.set_recording_row_idx(None));
+                    ctx.request_repaint();
+                }
             }
-
-            self.command_lab_record_cancel = None;
-            self.active_command_lab_record_id = None;
-            self.settings
-                .with_settings(|settings| settings.command_lab.set_recording_row_idx(None));
-            ctx.request_repaint();
         }
     }
 

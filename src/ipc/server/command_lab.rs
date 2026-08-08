@@ -3,11 +3,17 @@
 /// The countdown worker lives in this process because the OSD overlay is
 /// owned by the main runtime. The settings window only sends begin/cancel
 /// requests and polls the recording status; it never drives the timer.
+///
+/// The worker starts the USBPcap capture first (this is where the
+/// administrator-privileged filter open happens); the OSD countdown only
+/// starts once the capture is actually running. When the capture cannot
+/// start, the recording moves to `Failed` without showing the countdown.
 use std::sync::Arc;
 
 use crate::ipc::protocol::{CommandLabRecordingState, CommandLabStatus};
 use crate::ui::icons::OsdIcon;
 use crate::ui::osd_controller::{OsdController, OsdParams};
+use crate::win::system::usbpcap::capture::CommandLabCapture;
 
 pub const COMMAND_LAB_TOTAL_STEPS: usize = 5;
 const COMMAND_LAB_STEP_INTERVAL: Duration = Duration::from_secs(1);
@@ -21,6 +27,9 @@ struct CommandLabRecording {
 
 #[cfg(test)]
 static COMMAND_LAB_TEST_OSD_SUPPRESSED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(test)]
+static COMMAND_LAB_TEST_CAPTURE_SUPPRESSED: AtomicBool = AtomicBool::new(false);
 
 static COMMAND_LAB_RECORDING: Mutex<CommandLabRecording> =
     Mutex::new(CommandLabRecording::new());
@@ -37,6 +46,7 @@ impl CommandLabRecording {
             state: CommandLabRecordingState {
                 status: CommandLabStatus::Idle,
                 step: 0,
+                captured_commands: 0,
             },
             cancel: None,
             worker: None,
@@ -52,11 +62,13 @@ pub fn begin_command_lab_record() {
         let mut recording = command_lab_recording();
         recording.cancel = Some(cancel.clone());
         recording.state = CommandLabRecordingState {
-            status: CommandLabStatus::Recording,
+            status: CommandLabStatus::Idle,
             step: 0,
+            captured_commands: 0,
         };
     }
-    show_command_lab_osd(&command_lab_recording().state);
+    // No OSD yet: the worker only starts the countdown once the capture is
+    // actually running.
 
     match thread::Builder::new()
         .name("blade-command-lab-record".to_string())
@@ -67,8 +79,9 @@ pub fn begin_command_lab_record() {
             warn!(%error, "Failed to spawn Command Lab recording worker");
             command_lab_recording().cancel = None;
             command_lab_recording().state = CommandLabRecordingState {
-                status: CommandLabStatus::Idle,
+                status: CommandLabStatus::Failed,
                 step: 0,
+                captured_commands: 0,
             };
         }
     }
@@ -76,11 +89,6 @@ pub fn begin_command_lab_record() {
 
 pub fn cancel_command_lab_record() {
     cancel_active_worker();
-    command_lab_recording().state = CommandLabRecordingState {
-        status: CommandLabStatus::Cancelled,
-        step: 0,
-    };
-    show_command_lab_osd(&command_lab_recording().state);
 }
 
 pub fn poll_command_lab_recording() -> CommandLabRecordingState {
@@ -113,45 +121,75 @@ fn join_worker(worker: JoinHandle<()>) {
 }
 
 fn run_command_lab_worker(cancel: Arc<AtomicBool>) {
-    run_command_lab_countdown(&cancel, COMMAND_LAB_STEP_INTERVAL, |state| {
+    let Some(capture) = start_command_lab_capture() else {
+        command_lab_recording().state = CommandLabRecordingState {
+            status: CommandLabStatus::Failed,
+            step: 0,
+            captured_commands: 0,
+        };
+        command_lab_recording().cancel = None;
+        return;
+    };
+
+    // The capture is running: the OSD countdown can start.
+    let cancelled = run_command_lab_countdown(&cancel, COMMAND_LAB_STEP_INTERVAL, |step| {
         if cancel.load(Ordering::SeqCst) {
             return;
         }
+        let state = CommandLabRecordingState {
+            status: CommandLabStatus::Recording,
+            step: step.min(COMMAND_LAB_TOTAL_STEPS) as u8,
+            captured_commands: capture.captured_count(),
+        };
         command_lab_recording().state = state;
         show_command_lab_osd(&state);
     });
+
+    let mut capture = capture;
+    let status = if cancelled || cancel.load(Ordering::SeqCst) {
+        CommandLabStatus::Cancelled
+    } else {
+        CommandLabStatus::Done
+    };
+    let state = CommandLabRecordingState {
+        status,
+        step: COMMAND_LAB_TOTAL_STEPS as u8,
+        captured_commands: capture.stop(),
+    };
+    command_lab_recording().state = state;
+    show_command_lab_osd(&state);
     command_lab_recording().cancel = None;
 }
 
+/// Starts the USBPcap capture, or a dummy when tests suppress hardware use.
+fn start_command_lab_capture() -> Option<CommandLabCapture> {
+    #[cfg(test)]
+    if COMMAND_LAB_TEST_CAPTURE_SUPPRESSED.load(Ordering::SeqCst) {
+        return Some(CommandLabCapture::dummy());
+    }
+    CommandLabCapture::start()
+}
+
 /// Runs one progress step per `interval` until the total is reached or the
-/// recording is cancelled. Each step publishes the next recording state.
+/// recording is cancelled. Each step publishes the next step index. Returns
+/// whether the recording was cancelled.
 fn run_command_lab_countdown(
     cancel: &AtomicBool,
     interval: Duration,
-    mut on_step: impl FnMut(CommandLabRecordingState),
-) {
+    mut on_step: impl FnMut(usize),
+) -> bool {
     for step in 0..=COMMAND_LAB_TOTAL_STEPS {
         if cancel.load(Ordering::SeqCst) {
-            return;
+            return true;
         }
 
-        on_step(step_state(step));
+        on_step(step);
 
         if step < COMMAND_LAB_TOTAL_STEPS && sleep_interruptible(cancel, interval) {
-            return;
+            return true;
         }
     }
-}
-
-fn step_state(step: usize) -> CommandLabRecordingState {
-    CommandLabRecordingState {
-        status: if step >= COMMAND_LAB_TOTAL_STEPS {
-            CommandLabStatus::Done
-        } else {
-            CommandLabStatus::Recording
-        },
-        step: step.min(COMMAND_LAB_TOTAL_STEPS) as u8,
-    }
+    false
 }
 
 /// Sleeps in small chunks so a cancelled recording exits promptly.
@@ -178,7 +216,7 @@ fn show_command_lab_osd(state: &CommandLabRecordingState) {
         CommandLabStatus::Recording => "Recording",
         CommandLabStatus::Done => "Done",
         CommandLabStatus::Cancelled => "Cancelled",
-        CommandLabStatus::Idle => return,
+        CommandLabStatus::Idle | CommandLabStatus::Failed => return,
     };
     OsdController::show(OsdParams {
         label: label.to_string(),
@@ -199,6 +237,7 @@ mod command_lab_tests {
         command_lab_recording().state = CommandLabRecordingState {
             status: CommandLabStatus::Idle,
             step: 0,
+            captured_commands: 0,
         };
     }
 
@@ -207,9 +246,11 @@ mod command_lab_tests {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         COMMAND_LAB_TEST_OSD_SUPPRESSED.store(true, Ordering::SeqCst);
+        COMMAND_LAB_TEST_CAPTURE_SUPPRESSED.store(true, Ordering::SeqCst);
         reset_test_recording();
         let result = test();
         COMMAND_LAB_TEST_OSD_SUPPRESSED.store(false, Ordering::SeqCst);
+        COMMAND_LAB_TEST_CAPTURE_SUPPRESSED.store(false, Ordering::SeqCst);
         reset_test_recording();
         result
     }
@@ -222,6 +263,7 @@ mod command_lab_tests {
                 CommandLabRecordingState {
                     status: CommandLabStatus::Idle,
                     step: 0,
+                    captured_commands: 0,
                 }
             );
         });
@@ -231,18 +273,12 @@ mod command_lab_tests {
     fn countdown_reaches_done_with_full_progress() {
         with_test_recording(|| {
             let cancel = AtomicBool::new(false);
-            let mut last_state = None;
-            run_command_lab_countdown(&cancel, Duration::ZERO, |state| {
-                last_state = Some(state);
+            let mut last_step = None;
+            run_command_lab_countdown(&cancel, Duration::ZERO, |step| {
+                last_step = Some(step);
             });
 
-            assert_eq!(
-                last_state,
-                Some(CommandLabRecordingState {
-                    status: CommandLabStatus::Done,
-                    step: COMMAND_LAB_TOTAL_STEPS as u8,
-                })
-            );
+            assert_eq!(last_step, Some(COMMAND_LAB_TOTAL_STEPS));
         });
     }
 
@@ -250,35 +286,31 @@ mod command_lab_tests {
     fn countdown_stops_early_when_cancelled() {
         with_test_recording(|| {
             let cancel = AtomicBool::new(false);
-            let mut states = Vec::new();
-            run_command_lab_countdown(&cancel, Duration::ZERO, |state| {
-                states.push(state);
-                if state.step == 2 {
+            let mut steps = Vec::new();
+            let cancelled = run_command_lab_countdown(&cancel, Duration::ZERO, |step| {
+                steps.push(step);
+                if step == 2 {
                     cancel.store(true, Ordering::SeqCst);
                 }
             });
 
-            assert_eq!(states.len(), 3);
-            assert_eq!(
-                states.last(),
-                Some(&CommandLabRecordingState {
-                    status: CommandLabStatus::Recording,
-                    step: 2,
-                })
-            );
+            assert!(cancelled);
+            assert_eq!(steps, vec![0, 1, 2]);
         });
     }
 
     #[test]
-    fn begin_resets_state_to_recording_at_zero_and_cancel_empties_it() {
+    fn begin_resets_to_idle_and_cancel_publishes_cancelled_state() {
         with_test_recording(|| {
             begin_command_lab_record();
 
+            // Capture starts asynchronously; the countdown OSD is gated on it.
             assert_eq!(
                 poll_command_lab_recording(),
                 CommandLabRecordingState {
-                    status: CommandLabStatus::Recording,
+                    status: CommandLabStatus::Idle,
                     step: 0,
+                    captured_commands: 0,
                 }
             );
 
@@ -288,7 +320,8 @@ mod command_lab_tests {
                 poll_command_lab_recording(),
                 CommandLabRecordingState {
                     status: CommandLabStatus::Cancelled,
-                    step: 0,
+                    step: COMMAND_LAB_TOTAL_STEPS as u8,
+                    captured_commands: 0,
                 }
             );
         });

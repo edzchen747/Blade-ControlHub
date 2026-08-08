@@ -11,7 +11,7 @@ use super::{
     right_aligned_toggle, section_title,
 };
 
-pub(super) const ADVANCED_EXPERIMENTAL_FEATURES_DESCRIPTION: &str = "Advanced experimental features may not work perfectly on every device, and some configurations may cause unexpected behaviour. You can turn these features off at any time if they do not work as expected in the Settings tab.";
+pub(super) const ADVANCED_EXPERIMENTAL_FEATURES_DESCRIPTION: &str = "⚠ Advanced experimental features may not work perfectly on every device, and some configurations may cause unexpected behaviour. You can turn these features off at any time if they do not work as expected in the Settings tab.";
 
 pub fn show(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Settings) {
     egui::ScrollArea::vertical()

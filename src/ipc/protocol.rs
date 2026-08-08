@@ -74,12 +74,16 @@ pub enum CommandLabStatus {
     Recording,
     Done,
     Cancelled,
+    /// Recording could not start (for example without administrator
+    /// privileges for the USBPcap capture).
+    Failed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandLabRecordingState {
     pub status: CommandLabStatus,
     pub step: u8,
+    pub captured_commands: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -144,6 +148,7 @@ mod tests {
         let state = CommandLabRecordingState {
             status: CommandLabStatus::Recording,
             step: 3,
+            captured_commands: 12,
         };
 
         let encoded = serde_json::to_string(&state).expect("state must serialize");

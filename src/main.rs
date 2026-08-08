@@ -20,6 +20,14 @@ fn main() -> AppResult<()> {
             .map_err(|error| AppError::Internal(format!("settings UI failed: {error:?}")));
     }
 
+    if let Some(path) = command_lab_capture_arg() {
+        // Elevated capture child: must exit before close_running_instances()
+        // so it does not shut down the parent runtime it works for.
+        std::process::exit(win::system::usbpcap::capture::run_command_lab_capture_process(
+            &path,
+        ));
+    }
+
     set_cwd()?;
     init_log_file_writer();
 
@@ -35,8 +43,17 @@ fn main() -> AppResult<()> {
     Ok(())
 }
 
-fn start_razer_service() -> AppResult<()> {
-    let device_pid = razer::device_handle::device().get_pid()?;
+fn command_lab_capture_arg() -> Option<std::path::PathBuf> {
+    let mut args = std::env::args();
+    while let Some(arg) = args.next() {
+        if arg == "--command-lab-capture" {
+            return args.next().map(std::path::PathBuf::from);
+        }
+    }
+    None
+}
+
+fn start_razer_service() -> AppResult<()> {    let device_pid = razer::device_handle::device().get_pid()?;
     info!("Detected device with PID: 0x{:04x}", device_pid);
     win::input::start_keyboard_hooks(device_pid)?;
     win::system::power::PowerMonitor::start();

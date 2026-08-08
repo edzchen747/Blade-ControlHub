@@ -211,11 +211,21 @@ impl Settings {
             ui.add_space(4.0);
             ui.separator();
             ui.add_space(2.0);
+            let advanced_experimental_features = self
+                .state
+                .as_ref()
+                .map(|state| state.advanced_experimental_features)
+                .unwrap_or(false);
+            if !advanced_experimental_features && self.current_tab == "Command Lab" {
+                self.current_tab = "Device".to_string();
+            }
             ui.horizontal(|ui| {
                 primary_tab(ui, &mut self.current_tab, "Device");
                 primary_tab(ui, &mut self.current_tab, "Settings");
                 primary_tab(ui, &mut self.current_tab, "Key Mapping");
-                primary_tab(ui, &mut self.current_tab, "Command Lab");
+                if advanced_experimental_features {
+                    primary_tab(ui, &mut self.current_tab, "Command Lab");
+                }
             });
             ui.separator();
             ui.add_space(3.0);
@@ -223,7 +233,9 @@ impl Settings {
                 "Device" => super::device_tab::show(ui, ctx, self),
                 "Settings" => super::settings_tab::show(ui, ctx, self),
                 "Key Mapping" => super::key_mapping_tab::show(ui, ctx, self),
-                "Command Lab" => super::command_lab_tab::show(ui, ctx, self),
+                "Command Lab" if advanced_experimental_features => {
+                    super::command_lab_tab::show(ui, ctx, self)
+                }
                 _ => {}
             }
         });
