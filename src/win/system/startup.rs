@@ -1,4 +1,3 @@
-use core::time;
 use std::env;
 use std::fs;
 use std::io;
@@ -16,9 +15,10 @@ impl Startup {
     const TASK_NAME: &'static str = "Blade ControlHub";
 
     /// Creates a Task Scheduler entry to run the current EXE on Logon, at the
-    /// requested privilege level (elevated or not). Runs on a delayed thread.
+    /// requested privilege level (elevated or not). Runs on a background
+    /// thread so the caller (device worker) is not blocked.
     pub fn register(run_as_admin: bool) {
-        Self::spawn_delayed("blade-startup-register", move || {
+        Self::spawn_background("blade-startup-register", move || {
             Self::register_now(run_as_admin);
         });
     }
@@ -49,9 +49,10 @@ impl Startup {
         let _ = fs::remove_file(&temp_xml_path);
     }
 
-    /// Runs on a delayed thread so rapid toggle changes settle in order.
+    /// Runs on a background thread so the caller (device worker) is not
+    /// blocked by schtasks.
     pub fn unregister() {
-        Self::spawn_delayed("blade-startup-unregister", || {
+        Self::spawn_background("blade-startup-unregister", || {
             Self::unregister_now();
         });
     }
@@ -197,14 +198,8 @@ impl Startup {
         Some((temp_xml_path, temp_xml_str))
     }
 
-    fn spawn_delayed(name: &'static str, job: impl FnOnce() + Send + 'static) {
-        if let Err(error) = thread::Builder::new()
-            .name(name.to_string())
-            .spawn(move || {
-                thread::sleep(time::Duration::from_secs(2));
-                job();
-            })
-        {
+    fn spawn_background(name: &'static str, job: impl FnOnce() + Send + 'static) {
+        if let Err(error) = thread::Builder::new().name(name.to_string()).spawn(job) {
             warn!(%error, "Failed to start startup task thread");
         }
     }

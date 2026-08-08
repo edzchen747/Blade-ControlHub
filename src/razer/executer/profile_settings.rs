@@ -168,14 +168,19 @@ impl<'a> Executer<'a> {
         crate::config::persist_config_now(self.app_config);
         self.persist_config();
 
-        let start_with_windows = self.app_config.start_with_windows;
-        if let Err(error) = std::thread::Builder::new()
-            .name("blade-admin-task-refresh".to_string())
-            .spawn(move || {
-                crate::win::system::startup::Startup::refresh_now(start_with_windows, enabled);
-            })
-        {
-            warn!(%error, "Failed to spawn startup task refresh thread");
+        // Only DISABLING refreshes the task here, otherwise UAC prompts twice
+        // (once for the task, once for the app); the relaunched process
+        // refreshes the task on launch instead.
+        if !enabled {
+            let start_with_windows = self.app_config.start_with_windows;
+            if let Err(error) = std::thread::Builder::new()
+                .name("blade-admin-task-refresh".to_string())
+                .spawn(move || {
+                    crate::win::system::startup::Startup::refresh_now(start_with_windows, false);
+                })
+            {
+                warn!(%error, "Failed to spawn startup task refresh thread");
+            }
         }
         Ok(())
     }
