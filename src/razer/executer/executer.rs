@@ -1,5 +1,6 @@
 use crate::config::ThemeColor;
 use crate::config::persist_config;
+use crate::core::shared_state::COMMAND_LAB_CAPTURE_ACTIVE;
 use crate::disable_osd;
 use crate::error::AppError;
 use crate::razer::config::{AppConfig, FanSpeedLimits, PowerProfile};
@@ -19,6 +20,7 @@ use crate::win::display::ambient::AmbientEffect;
 use crate::win::display::brightness::BrightnessWorker;
 use crate::win::display::refresh_rate::DisplayManager;
 use librazer::device::Device;
+use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 use tracing::{debug, info, instrument, warn};
@@ -38,3 +40,6 @@ pub struct Executer<'a> {
     fan_speed_limits: FanSpeedLimits,
 }
 
+fn should_discard_during_capture(cmd: &DeviceCmd) -> bool {
+    !matches!(cmd, DeviceCmd::Shutdown(_))
+}

@@ -62,6 +62,7 @@ fn command_lab_status_is_terminal(status: crate::ipc::protocol::CommandLabStatus
             | crate::ipc::protocol::CommandLabStatus::Cancelled
             | crate::ipc::protocol::CommandLabStatus::Failed
             | crate::ipc::protocol::CommandLabStatus::TooManyCommands
+            | crate::ipc::protocol::CommandLabStatus::NoCommandsRecorded
     )
 }
 

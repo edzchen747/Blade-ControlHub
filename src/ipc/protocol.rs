@@ -89,12 +89,9 @@ pub enum CommandLabStatus {
     Recording,
     Done,
     Cancelled,
-    /// Recording could not start (for example without administrator
-    /// privileges for the USBPcap capture).
     Failed,
-    /// Recording finished but captured more commands than a row can hold;
-    /// the capture is discarded and reported as a failure.
     TooManyCommands,
+    NoCommandsRecorded,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -11,6 +11,7 @@
 use std::sync::mpsc;
 use std::sync::Arc;
 
+use crate::core::shared_state::COMMAND_LAB_CAPTURE_ACTIVE;
 use crate::ipc::protocol::{CommandLabRecordingState, CommandLabStatus};
 use crate::ui::icons::OsdIcon;
 use crate::ui::osd_controller::{OsdController, OsdParams};
@@ -64,6 +65,7 @@ impl CommandLabRecording {
 /// polling while the capture start is pending.
 pub fn begin_command_lab_record() -> CommandLabRecordingState {
     cancel_active_worker();
+    COMMAND_LAB_CAPTURE_ACTIVE.store(true, Ordering::SeqCst);
 
     let cancel = Arc::new(AtomicBool::new(false));
     let (started_tx, started_rx) = mpsc::channel::<CommandLabRecordingState>();
@@ -98,6 +100,7 @@ pub fn begin_command_lab_record() -> CommandLabRecordingState {
         Err(error) => {
             warn!(%error, "Failed to spawn Command Lab recording worker");
             command_lab_recording().cancel = None;
+            COMMAND_LAB_CAPTURE_ACTIVE.store(false, Ordering::SeqCst);
             let state = CommandLabRecordingState {
                 status: CommandLabStatus::Failed,
                 step: 0,
@@ -140,6 +143,7 @@ fn join_worker(worker: JoinHandle<()>) {
     }
     if worker.join().is_err() {
         warn!("Command Lab recording worker panicked");
+        COMMAND_LAB_CAPTURE_ACTIVE.store(false, Ordering::SeqCst);
     }
 }
 
@@ -156,6 +160,7 @@ fn run_command_lab_worker(
         };
         command_lab_recording().state = state.clone();
         command_lab_recording().cancel = None;
+        COMMAND_LAB_CAPTURE_ACTIVE.store(false, Ordering::SeqCst);
         let _ = started_tx.send(state);
         return;
     };
@@ -206,6 +211,7 @@ fn run_command_lab_worker(
     command_lab_recording().state = state.clone();
     show_command_lab_osd(&state);
     command_lab_recording().cancel = None;
+    COMMAND_LAB_CAPTURE_ACTIVE.store(false, Ordering::SeqCst);
 }
 
 /// Maps a finished capture to its published status and step. Cancellations
@@ -216,6 +222,8 @@ fn final_capture_status(cancelled: bool, captured_commands: u32) -> (CommandLabS
         (CommandLabStatus::Cancelled, COMMAND_LAB_TOTAL_STEPS as u8)
     } else if captured_commands > COMMAND_LAB_MAX_CAPTURED_COMMANDS {
         (CommandLabStatus::TooManyCommands, 0)
+    } else if captured_commands == 0 {
+        (CommandLabStatus::NoCommandsRecorded, COMMAND_LAB_TOTAL_STEPS as u8)
     } else {
         (CommandLabStatus::Done, COMMAND_LAB_TOTAL_STEPS as u8)
     }
@@ -276,6 +284,7 @@ fn show_command_lab_osd(state: &CommandLabRecordingState) {
         CommandLabStatus::Recording => ("Recording", state.step as usize),
         CommandLabStatus::Done => ("Done", state.step as usize),
         CommandLabStatus::TooManyCommands => ("Failed", 0),
+        CommandLabStatus::NoCommandsRecorded => ("No commands", state.step as usize),
         CommandLabStatus::Cancelled => ("Cancelled", state.step as usize),
         CommandLabStatus::Idle | CommandLabStatus::Failed => return,
     };
@@ -379,6 +388,17 @@ mod command_lab_tests {
     }
 
     #[test]
+    fn empty_capture_reports_no_commands_with_full_progress() {
+        assert_eq!(
+            final_capture_status(false, 0),
+            (
+                CommandLabStatus::NoCommandsRecorded,
+                COMMAND_LAB_TOTAL_STEPS as u8
+            )
+        );
+    }
+
+    #[test]
     fn cancelled_capture_stays_cancelled_even_over_the_limit() {
         assert_eq!(
             final_capture_status(true, COMMAND_LAB_MAX_CAPTURED_COMMANDS + 1),
@@ -412,6 +432,18 @@ mod command_lab_tests {
                     commands: Vec::new(),
                 }
             );
+        });
+    }
+
+    #[test]
+    fn capture_gate_blocks_executor_until_the_worker_finishes() {
+        with_test_recording(|| {
+            assert!(!COMMAND_LAB_CAPTURE_ACTIVE.load(Ordering::SeqCst));
+            let started = begin_command_lab_record();
+            assert_eq!(started.status, CommandLabStatus::Recording);
+            assert!(COMMAND_LAB_CAPTURE_ACTIVE.load(Ordering::SeqCst));
+            cancel_command_lab_record();
+            assert!(!COMMAND_LAB_CAPTURE_ACTIVE.load(Ordering::SeqCst));
         });
     }
 }

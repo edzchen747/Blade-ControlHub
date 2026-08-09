@@ -36,6 +36,11 @@ impl<'a> Executer<'a> {
 
             match self.rx.recv_timeout(Duration::from_millis(50)) {
                 Ok(cmd) => {
+                    if COMMAND_LAB_CAPTURE_ACTIVE.load(Ordering::SeqCst)
+                        && should_discard_during_capture(&cmd)
+                    {
+                        continue;
+                    }
                     if !self.dispatch(cmd) {
                         break;
                     }

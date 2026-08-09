@@ -6,35 +6,50 @@ use crate::win::system::usbpcap::capture::CapturedCommand;
 
 pub const COMMAND_LAB_CODE_PREVIEW_COMMANDS: usize = 2;
 pub const COMMAND_LAB_COMMAND_ARGS_PREVIEW: usize = 3;
-pub const COMMAND_LAB_TOO_MANY_NOTICE_DURATION: Duration = Duration::from_secs(3);
+pub const COMMAND_LAB_NOTICE_DURATION: Duration = Duration::from_secs(3);
 pub const NEW_ROW_ERROR_MESSAGE: &str = "Complete the last row to add more";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommandLabRowNotice {
+    TooManyCommands,
+    NoCommandsRecorded,
+}
 
 #[derive(Default, Clone)]
 pub struct CommandLabRow {
     pub command: String,
     pub captured_commands: Vec<CapturedCommand>,
-    pub too_many_commands: bool,
+    notice: Option<CommandLabRowNotice>,
     restore_captured_commands: Vec<CapturedCommand>,
-    too_many_shown_at: Option<Instant>,
+    notice_shown_at: Option<Instant>,
 }
 
 impl CommandLabRow {
-    fn show_too_many_notice(&mut self, captured: Vec<CapturedCommand>) {
-        self.restore_captured_commands = std::mem::take(&mut self.captured_commands);
-        self.captured_commands = captured;
-        self.too_many_commands = true;
-        self.too_many_shown_at = Some(Instant::now());
+    pub fn notice(&self) -> Option<CommandLabRowNotice> {
+        self.notice
     }
 
-    pub fn expire_too_many_notice(&mut self, now: Instant) -> bool {
-        let Some(shown_at) = self.too_many_shown_at else {
+    pub fn notice_expires_in(&self) -> Option<Duration> {
+        self.notice_shown_at
+            .map(|shown_at| COMMAND_LAB_NOTICE_DURATION.saturating_sub(shown_at.elapsed()))
+    }
+
+    fn show_notice(&mut self, notice: CommandLabRowNotice, captured: Vec<CapturedCommand>) {
+        self.restore_captured_commands = std::mem::take(&mut self.captured_commands);
+        self.captured_commands = captured;
+        self.notice = Some(notice);
+        self.notice_shown_at = Some(Instant::now());
+    }
+
+    pub fn expire_notice(&mut self, now: Instant) -> bool {
+        let Some(shown_at) = self.notice_shown_at else {
             return false;
         };
-        if now.duration_since(shown_at) < COMMAND_LAB_TOO_MANY_NOTICE_DURATION {
+        if now.duration_since(shown_at) < COMMAND_LAB_NOTICE_DURATION {
             return false;
         }
-        self.too_many_commands = false;
-        self.too_many_shown_at = None;
+        self.notice = None;
+        self.notice_shown_at = None;
         self.captured_commands = std::mem::take(&mut self.restore_captured_commands);
         true
     }
@@ -67,8 +82,8 @@ impl CommandLab {
     pub fn begin_capture(&mut self, idx: usize) {
         self.recording_row_idx = Some(idx);
         if let Some(row) = self.rows.get_mut(idx) {
-            row.too_many_commands = false;
-            row.too_many_shown_at = None;
+            row.notice = None;
+            row.notice_shown_at = None;
             row.restore_captured_commands.clear();
         }
     }
@@ -87,7 +102,14 @@ impl CommandLab {
                 if let Some(idx) = self.recording_row_idx
                     && let Some(row) = self.rows.get_mut(idx)
                 {
-                    row.show_too_many_notice(commands);
+                    row.show_notice(CommandLabRowNotice::TooManyCommands, commands);
+                }
+            }
+            CommandLabStatus::NoCommandsRecorded => {
+                if let Some(idx) = self.recording_row_idx
+                    && let Some(row) = self.rows.get_mut(idx)
+                {
+                    row.show_notice(CommandLabRowNotice::NoCommandsRecorded, commands);
                 }
             }
             _ => {
@@ -124,13 +146,21 @@ impl CommandLab {
                 }
             }
             if !found {
-                self.rows.push(CommandLabRow { command: name, captured_commands: commands, too_many_commands: false, ..CommandLabRow::default() });
+                self.rows.push(CommandLabRow { command: name, captured_commands: commands, ..CommandLabRow::default() });
             }
         }
     }
 
     pub fn is_recording(&self) -> bool {
         self.recording_row_idx.is_some()
+    }
+
+    /// Time until the soonest active row notice expires, if any.
+    pub fn notice_expires_in(&self) -> Option<Duration> {
+        self.rows
+            .iter()
+            .filter_map(|row| row.notice_expires_in())
+            .min()
     }
 
     pub fn row_name_is_duplicate(&self, idx: usize) -> bool {
@@ -145,7 +175,7 @@ impl CommandLab {
             return false;
         };
         !row.captured_commands.is_empty()
-            && !row.too_many_commands
+            && row.notice.is_none()
             && !row.command.trim().is_empty()
             && !self.row_name_is_duplicate(idx)
     }
@@ -358,12 +388,13 @@ mod tests {
     fn begin_capture_keeps_existing_captures_and_clears_the_failure_notice() {
         let mut command_lab = CommandLab::new();
         command_lab.rows[0].captured_commands = vec![command(0x0303, &[])];
-        command_lab.rows[0].too_many_commands = true;
+        let previous = command_lab.rows[0].captured_commands.clone();
+        command_lab.rows[0].show_notice(CommandLabRowNotice::TooManyCommands, previous.clone());
 
         command_lab.begin_capture(0);
 
         assert_eq!(command_lab.rows[0].captured_commands.len(), 1);
-        assert!(!command_lab.rows[0].too_many_commands);
+        assert_eq!(command_lab.rows[0].notice(), None);
         assert_eq!(command_lab.recording_row_idx, Some(0));
     }
 
@@ -380,16 +411,19 @@ mod tests {
         );
 
         assert!(command_lab.rows[0].captured_commands.is_empty());
-        assert!(!command_lab.rows[0].too_many_commands);
+        assert_eq!(command_lab.rows[0].notice(), None);
         assert_eq!(command_lab.rows[1].captured_commands.len(), 1);
-        assert!(command_lab.rows[1].too_many_commands);
+        assert_eq!(
+            command_lab.rows[1].notice(),
+            Some(CommandLabRowNotice::TooManyCommands)
+        );
     }
 
     #[test]
     fn populate_from_config_fills_matching_empty_rows_and_appends_new_ones() {
         let mut command_lab = CommandLab::new();
         command_lab.rows[0].command = "Brightness Up".to_string();
-        command_lab.rows.push(CommandLabRow { command: "Fresh Capture".to_string(), captured_commands: vec![command(0x0004, &[])], too_many_commands: false, ..CommandLabRow::default() });
+        command_lab.rows.push(CommandLabRow { command: "Fresh Capture".to_string(), captured_commands: vec![command(0x0004, &[])], ..CommandLabRow::default() });
 
         command_lab.populate_from_config(HashMap::from([
             (
@@ -464,7 +498,6 @@ mod tests {
         command_lab.rows.push(CommandLabRow {
             command: "  Underglow off ".to_string(),
             captured_commands: vec![command(0x0303, &[])],
-            too_many_commands: false,
             ..CommandLabRow::default()
         });
 
@@ -483,9 +516,9 @@ mod tests {
         command_lab.rows[0].captured_commands = vec![command(0x0303, &[])];
         assert!(command_lab.row_ready_to_save(0));
 
-        command_lab.rows[0].too_many_commands = true;
+        command_lab.rows[0].show_notice(CommandLabRowNotice::TooManyCommands, vec![command(0x0303, &[])]);
         assert!(!command_lab.row_ready_to_save(0));
-        command_lab.rows[0].too_many_commands = false;
+        command_lab.rows[0].expire_notice(Instant::now() + COMMAND_LAB_NOTICE_DURATION);
 
         command_lab.rows[0].captured_commands.clear();
         assert!(!command_lab.row_ready_to_save(0));
@@ -537,14 +570,42 @@ mod tests {
         let too_many_list = vec![command(0x0303, &[]); 21];
         command_lab.apply_capture_result(CommandLabStatus::TooManyCommands, too_many_list.clone());
 
-        assert!(command_lab.rows[0].too_many_commands);
+        assert_eq!(
+            command_lab.rows[0].notice(),
+            Some(CommandLabRowNotice::TooManyCommands)
+        );
         assert_eq!(command_lab.rows[0].captured_commands, too_many_list);
 
-        let now = Instant::now() + COMMAND_LAB_TOO_MANY_NOTICE_DURATION;
-        assert!(command_lab.rows[0].expire_too_many_notice(now));
-        assert!(!command_lab.rows[0].too_many_commands);
+        let now = Instant::now() + COMMAND_LAB_NOTICE_DURATION;
+        assert!(command_lab.rows[0].expire_notice(now));
+        assert_eq!(command_lab.rows[0].notice(), None);
         assert_eq!(command_lab.rows[0].captured_commands, previous);
-        assert!(!command_lab.rows[0].expire_too_many_notice(now));
+        assert!(!command_lab.rows[0].expire_notice(now));
+    }
+
+    #[test]
+    fn no_commands_result_shows_notice_and_restores_previous_commands_after_duration() {
+        let mut command_lab = CommandLab::new();
+        let previous = vec![command(0x0303, &[0x01, 0x05, 0xFF])];
+        command_lab.rows[0].command = "Ready".to_string();
+        command_lab.rows[0].captured_commands = previous.clone();
+        command_lab.begin_capture(0);
+
+        command_lab.apply_capture_result(CommandLabStatus::NoCommandsRecorded, Vec::new());
+
+        assert_eq!(
+            command_lab.rows[0].notice(),
+            Some(CommandLabRowNotice::NoCommandsRecorded)
+        );
+        assert!(command_lab.rows[0].captured_commands.is_empty());
+        assert!(!command_lab.row_ready_to_save(0));
+
+        let now = Instant::now() + COMMAND_LAB_NOTICE_DURATION;
+        assert!(command_lab.rows[0].expire_notice(now));
+        assert_eq!(command_lab.rows[0].notice(), None);
+        assert_eq!(command_lab.rows[0].captured_commands, previous);
+        assert!(command_lab.row_ready_to_save(0));
+        assert!(!command_lab.rows[0].expire_notice(now));
     }
 
     #[test]
@@ -556,10 +617,26 @@ mod tests {
             vec![command(0x0303, &[])],
         );
 
-        let now = Instant::now() + COMMAND_LAB_TOO_MANY_NOTICE_DURATION
-            - Duration::from_millis(1);
-        assert!(!command_lab.rows[0].expire_too_many_notice(now));
-        assert!(command_lab.rows[0].too_many_commands);
+        let now = Instant::now() + COMMAND_LAB_NOTICE_DURATION - Duration::from_millis(1);
+        assert!(!command_lab.rows[0].expire_notice(now));
+        assert_eq!(
+            command_lab.rows[0].notice(),
+            Some(CommandLabRowNotice::TooManyCommands)
+        );
+    }
+
+    #[test]
+    fn no_commands_notice_does_not_expire_early() {
+        let mut command_lab = CommandLab::new();
+        command_lab.begin_capture(0);
+        command_lab.apply_capture_result(CommandLabStatus::NoCommandsRecorded, Vec::new());
+
+        let now = Instant::now() + COMMAND_LAB_NOTICE_DURATION - Duration::from_millis(1);
+        assert!(!command_lab.rows[0].expire_notice(now));
+        assert_eq!(
+            command_lab.rows[0].notice(),
+            Some(CommandLabRowNotice::NoCommandsRecorded)
+        );
     }
 
     #[test]
@@ -575,9 +652,42 @@ mod tests {
 
         command_lab.begin_capture(0);
 
-        assert!(!command_lab.rows[0].too_many_commands);
+        assert_eq!(command_lab.rows[0].notice(), None);
         assert_eq!(command_lab.rows[0].captured_commands, previous);
-        let now = Instant::now() + COMMAND_LAB_TOO_MANY_NOTICE_DURATION;
-        assert!(!command_lab.rows[0].expire_too_many_notice(now));
+        let now = Instant::now() + COMMAND_LAB_NOTICE_DURATION;
+        assert!(!command_lab.rows[0].expire_notice(now));
+    }
+
+    #[test]
+    fn notice_expiry_is_scheduled_only_while_a_notice_is_active() {
+        let mut command_lab = CommandLab::new();
+        assert_eq!(command_lab.notice_expires_in(), None);
+
+        command_lab.begin_capture(0);
+        command_lab.apply_capture_result(CommandLabStatus::NoCommandsRecorded, Vec::new());
+
+        let remaining = command_lab.notice_expires_in().expect("notice active");
+        assert!(remaining <= COMMAND_LAB_NOTICE_DURATION);
+
+        let now = Instant::now() + COMMAND_LAB_NOTICE_DURATION;
+        assert!(command_lab.rows[0].expire_notice(now));
+        assert_eq!(command_lab.notice_expires_in(), None);
+    }
+
+    #[test]
+    fn begin_capture_clears_a_pending_no_commands_notice() {
+        let mut command_lab = CommandLab::new();
+        command_lab.rows[0].command = "Ready".to_string();
+        let previous = vec![command(0x0303, &[])];
+        command_lab.rows[0].captured_commands = previous.clone();
+        command_lab.begin_capture(0);
+        command_lab.apply_capture_result(CommandLabStatus::NoCommandsRecorded, Vec::new());
+
+        command_lab.begin_capture(0);
+
+        assert_eq!(command_lab.rows[0].notice(), None);
+        assert!(command_lab.rows[0].captured_commands.is_empty());
+        let now = Instant::now() + COMMAND_LAB_NOTICE_DURATION;
+        assert!(!command_lab.rows[0].expire_notice(now));
     }
 }

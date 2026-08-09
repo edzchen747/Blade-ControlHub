@@ -2,7 +2,9 @@ use std::time;
 
 use eframe::egui;
 
-use crate::ui::command_lab::{NEW_ROW_ERROR_MESSAGE, command_lab_code_preview, format_command_full};
+use crate::ui::command_lab::{
+    CommandLabRowNotice, NEW_ROW_ERROR_MESSAGE, command_lab_code_preview, format_command_full,
+};
 use crate::ui::theme::{
     SETTINGS_CONTENT_TOP_SPACING, SETTINGS_KEY_BUTTON_HEIGHT, SETTINGS_KEY_BUTTON_WIDTH,
     SETTINGS_KEY_LISTEN_INTERVAL_MS, SETTINGS_ROW_SPACING, SETTINGS_TEXT_EDIT_WIDTH,
@@ -55,6 +57,10 @@ pub fn show(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Setti
         ctx.request_repaint_after(time::Duration::from_millis(SETTINGS_KEY_LISTEN_INTERVAL_MS));
     }
 
+    if let Some(remaining) = settings.command_lab.notice_expires_in() {
+        ctx.request_repaint_after(remaining);
+    }
+
     egui::ScrollArea::vertical().show(ui, |ui| {
         let mut row_to_remove = None;
         let mut record_request = None;
@@ -69,7 +75,7 @@ pub fn show(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Setti
             .collect();
 
         for (idx, row) in settings.command_lab.rows.iter_mut().enumerate() {
-            row.expire_too_many_notice(time::Instant::now());
+            row.expire_notice(time::Instant::now());
             ui.horizontal(|ui| {
                 ui.label(format!("{}:", idx + 1));
                 let mut name_edit = egui::TextEdit::singleline(&mut row.command)
@@ -108,11 +114,17 @@ pub fn show(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Setti
                     }
                 }
 
-                if row.too_many_commands {
-                    ui.label(format!(
-                        "Failed, too many commands ({})",
-                        row.captured_commands.len()
-                    ));
+                if let Some(notice) = row.notice() {
+                    let notice_text = match notice {
+                        CommandLabRowNotice::TooManyCommands => format!(
+                            "Failed, too many commands ({})",
+                            row.captured_commands.len()
+                        ),
+                        CommandLabRowNotice::NoCommandsRecorded => {
+                            "No commands were recorded".to_owned()
+                        }
+                    };
+                    ui.label(notice_text);
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -125,7 +137,8 @@ pub fn show(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Setti
                     }
                     ui.add_space(4.0);
 
-                    let can_play = !row.captured_commands.is_empty() && !row.too_many_commands;
+                    let has_notice = row.notice().is_some();
+                    let can_play = !row.captured_commands.is_empty() && !has_notice;
                     if ui
                         .add_enabled_ui(can_play, |ui| ui.button("▶").clicked())
                         .inner
@@ -134,7 +147,7 @@ pub fn show(ui: &mut eframe::egui::Ui, ctx: &egui::Context, settings: &mut Setti
                     }
                     ui.add_space(8.0);
 
-                    if !row.captured_commands.is_empty() && !row.too_many_commands {
+                    if !row.captured_commands.is_empty() && !has_notice {
                         let commands = &row.captured_commands;
                         let preview = command_lab_code_preview(commands);
                         let response = egui::Frame::none()
