@@ -18,6 +18,8 @@ const VK_SHIFT: u8 = 0x10;
 const VK_LSHIFT: u8 = 0xA0;
 const VK_RSHIFT: u8 = 0xA1;
 const VK_MENU: u8 = 0x12;
+const VK_LMENU: u8 = 0xA4;
+const VK_RMENU: u8 = 0xA5;
 const LEFT_SHIFT_MASK: u8 = 0b01;
 const RIGHT_SHIFT_MASK: u8 = 0b10;
 
@@ -154,7 +156,7 @@ fn handle_key_event(key_code: u8, pressed: bool) -> bool {
     }
 
     match key_code {
-        VK_MENU => ALT_PRESSED.store(pressed, Ordering::SeqCst),
+        VK_MENU | VK_LMENU | VK_RMENU => ALT_PRESSED.store(pressed, Ordering::SeqCst),
         VK_LSHIFT => update_shift_state(LEFT_SHIFT_MASK, pressed),
         VK_RSHIFT => update_shift_state(RIGHT_SHIFT_MASK, pressed),
         VK_SHIFT => {
@@ -187,9 +189,24 @@ fn update_shift_state(mask: u8, pressed: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::shared_state::PRIMARY_MULTIMEDIA_KEYS;
+    use std::sync::OnceLock;
+
+    static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn test_lock() -> &'static Mutex<()> {
+        TEST_LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn lock_test_state() -> MutexGuard<'static, ()> {
+        test_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     #[test]
     fn stop_clears_modifier_state() {
+        let _guard = lock_test_state();
         ALT_PRESSED.store(true, Ordering::SeqCst);
         SHIFT_PRESSED.store(true, Ordering::SeqCst);
         KEY_HOOK_RUNNING.store(true, Ordering::SeqCst);
@@ -203,6 +220,7 @@ mod tests {
 
     #[test]
     fn stopped_hook_does_not_handle_keys() {
+        let _guard = lock_test_state();
         KEY_HOOK_RUNNING.store(false, Ordering::SeqCst);
 
         assert!(!handle_key_event(VK_MENU, true));
@@ -211,6 +229,7 @@ mod tests {
 
     #[test]
     fn left_and_right_shift_keys_set_the_cycle_reverse_modifier() {
+        let _guard = lock_test_state();
         SHIFT_KEYS_DOWN.store(0, Ordering::SeqCst);
         SHIFT_PRESSED.store(false, Ordering::SeqCst);
 
@@ -223,5 +242,30 @@ mod tests {
 
         update_shift_state(RIGHT_SHIFT_MASK, false);
         assert!(!SHIFT_PRESSED.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn left_and_right_alt_keys_set_the_function_key_fallback_modifier() {
+        let _guard = lock_test_state();
+        KEY_HOOK_RUNNING.store(true, Ordering::SeqCst);
+        ALT_PRESSED.store(false, Ordering::SeqCst);
+
+        assert!(!handle_key_event(VK_LMENU, true));
+        assert!(ALT_PRESSED.load(Ordering::SeqCst));
+        PRIMARY_MULTIMEDIA_KEYS.store(true, Ordering::SeqCst);
+        assert!(
+            !handle_key_event(0x73, true),
+            "Alt+F4 must pass through as F4 instead of being handled as the multimedia action"
+        );
+        PRIMARY_MULTIMEDIA_KEYS.store(false, Ordering::SeqCst);
+        assert!(!handle_key_event(VK_LMENU, false));
+        assert!(!ALT_PRESSED.load(Ordering::SeqCst));
+
+        assert!(!handle_key_event(VK_RMENU, true));
+        assert!(ALT_PRESSED.load(Ordering::SeqCst));
+        assert!(!handle_key_event(VK_RMENU, false));
+        assert!(!ALT_PRESSED.load(Ordering::SeqCst));
+
+        KEY_HOOK_RUNNING.store(false, Ordering::SeqCst);
     }
 }
