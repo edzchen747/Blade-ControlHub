@@ -1,6 +1,14 @@
 fn sleep_until_next_frame(start: Instant) {
-    let delay = Duration::from_secs_f64(1.0 / FPS);
+    let frame = Duration::from_secs_f64(1.0 / FPS);
     let elapsed = start.elapsed();
+    // A sample that ate a large share of the frame budget means something else
+    // needs the GPU more than we do, so skip ahead a few frames and leave it be.
+    let delay = if elapsed > frame.mul_f64(BUSY_WORK_RATIO) {
+        frame.mul_f64(BUSY_BACKOFF_FRAMES)
+    } else {
+        frame
+    };
+
     if elapsed < delay {
         thread::sleep(delay - elapsed);
     }
