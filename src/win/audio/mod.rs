@@ -1,5 +1,7 @@
+pub mod bloom;
 mod mute;
 
+pub use bloom::AudioBloomEffect;
 pub use mute::{is_audio_muted, toggle_audio_mute};
 
 use tracing::warn;

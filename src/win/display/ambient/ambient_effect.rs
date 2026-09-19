@@ -223,7 +223,7 @@ fn run_ambient_loop(device_handle: DeviceHandle, current_generation: u32) {
 /// `CoInitializeEx` on this thread would not be enough: it only holds the
 /// apartment while this one thread lives, and the ambient thread is stopped and
 /// restarted whenever the effect is toggled.
-fn ensure_process_mta() {
+pub(crate) fn ensure_process_mta() {
     static MTA: OnceLock<()> = OnceLock::new();
 
     MTA.get_or_init(|| {

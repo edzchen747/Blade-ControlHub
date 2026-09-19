@@ -1,7 +1,9 @@
 mod common;
 
 use blade_controlhub::hal::DeviceController;
-use blade_controlhub::razer::enums::{BATTERY_LIMITS, PERF_MODES, PerfMode, RGB_EFFECTS};
+use blade_controlhub::razer::enums::{
+    BATTERY_LIMITS, PERF_MODES, PerfMode, RGB_EFFECTS, RGBEffect,
+};
 use common::mock_device::MockDeviceController;
 
 #[test]
@@ -61,8 +63,18 @@ fn perf_modes_constant_uses_ui_order() {
 }
 
 #[test]
-fn rgb_effects_constant_has_six_entries() {
-    assert_eq!(RGB_EFFECTS.len(), 7);
+fn rgb_effects_constant_has_eight_entries() {
+    assert_eq!(RGB_EFFECTS.len(), 8);
+}
+
+#[test]
+fn audio_bloom_cycles_immediately_after_ambient() {
+    let ambient = RGB_EFFECTS
+        .iter()
+        .position(|effect| *effect == RGBEffect::Ambient)
+        .expect("Ambient must be in the cycle");
+
+    assert_eq!(RGB_EFFECTS[ambient + 1], RGBEffect::AudioBloom);
 }
 
 #[test]

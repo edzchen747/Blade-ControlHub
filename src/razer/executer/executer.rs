@@ -16,6 +16,7 @@ use crate::razer::protocol::command;
 use crate::ui::app::app;
 use crate::ui::app_events::OsdEvent;
 use crate::utils::persist::PersistBuffer;
+use crate::win::audio::AudioBloomEffect;
 use crate::win::display::ambient::AmbientEffect;
 use crate::win::display::brightness::BrightnessWorker;
 use crate::win::display::refresh_rate::DisplayManager;

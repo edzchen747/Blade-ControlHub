@@ -34,6 +34,14 @@ impl<'a> Executer<'a> {
             DeviceCmd::SetKeyboardColor(r, g, b, brightness) => {
                 self.kb().set_keyboard_color(r, g, b, brightness)
             }
+            DeviceCmd::SetKeyRows(rows, reassert_brightness) => {
+                // Dropped once the effect has been stopped, so a frame queued
+                // before a sleep cannot repaint the keyboard after the blackout.
+                if AudioBloomEffect::is_active() {
+                    self.kb().set_key_rows(&rows, reassert_brightness);
+                }
+                AudioBloomEffect::frame_written();
+            }
             DeviceCmd::SetKeyboardBrightness(profile, brightness, tx) => {
                 let _ = tx.send(self.set_keyboard_brightness_for_profile(profile, brightness));
             }

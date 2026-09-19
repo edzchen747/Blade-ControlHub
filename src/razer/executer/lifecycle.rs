@@ -24,6 +24,10 @@ impl<'a> Executer<'a> {
 
             self.kb().keyboard_control(true);
             self.kb().enable_multimedia_keys();
+            // Before the effect starts: a host-driven effect is handed the
+            // column count at start(), so probing afterwards would leave it
+            // running on the fallback width for the whole session.
+            self.kb().init_keyboard_width();
             self.kb().set_rgb_effect(state.rgb_effect.value());
             self.kb().enable_under_glow(state.vc_lvl);
             self.kb().set_keyboard_brightness(state.key_lvl);
@@ -46,7 +50,6 @@ impl<'a> Executer<'a> {
         } else {
             self.display().get_refresh_rate(true);
         }
-        self.kb().init_keyboard_width();
         self.persist_config();
     }
 
@@ -79,6 +82,7 @@ impl<'a> Executer<'a> {
 
     fn sleep(&mut self) -> bool {
         AmbientEffect::stop();
+        AudioBloomEffect::stop();
         self.kb().set_keyboard_color(0, 0, 0, 0);
         self.kb().keyboard_control(false);
         let _ = command(self.device, 0x030a, &[5, 0], None); // reset keyboard effect
@@ -90,6 +94,7 @@ impl<'a> Executer<'a> {
 
     fn shutdown(&mut self) -> bool {
         AmbientEffect::stop();
+        AudioBloomEffect::stop();
         self.kb().restore_fn_keys();
         self.kb().keyboard_control(false);
         let _ = command(self.device, 0x030a, &[RGBEffect::Cycle as u8, 0], None);

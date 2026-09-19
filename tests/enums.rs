@@ -84,6 +84,16 @@ fn rgb_effect_from_seven_is_starlight() {
 }
 
 #[test]
+fn rgb_effect_from_twenty_six_is_audio_bloom() {
+    assert_eq!(RGBEffect::from(26), RGBEffect::AudioBloom);
+}
+
+#[test]
+fn audio_bloom_is_labelled_equalizer() {
+    assert_eq!(RGBEffect::AudioBloom.to_string(), "Equalizer");
+}
+
+#[test]
 fn rgb_effect_from_invalid_is_unknown() {
     assert_eq!(RGBEffect::from(99), RGBEffect::Unknown);
 }

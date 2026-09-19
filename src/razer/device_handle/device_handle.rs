@@ -31,6 +31,7 @@ pub enum DeviceCmd {
     DisplayLayoutChanged,
     SetKeyboardBrightness(PowerProfile, u8, mpsc::Sender<AppResult<()>>),
     SetKeyboardColor(u8, u8, u8, u8),
+    SetKeyRows(Vec<(u8, Vec<ThemeColor>)>, bool),
     #[allow(dead_code)]
     SetLidLogo(LidLogoMode),
     PlayCommandLabCommands(Vec<CapturedCommand>),
@@ -123,6 +124,14 @@ impl DeviceHandle {
 
     pub fn set_keyboard_color(&self, r: u8, g: u8, b: u8, brightness: u8) {
         self.send(DeviceCmd::SetKeyboardColor(r, g, b, brightness));
+    }
+
+    /// Fire-and-forget per-key paint of some rows, used by Audio Bloom.
+    ///
+    /// Each entry is a row index and one colour per addressable column, left to
+    /// right. Only the rows that changed need to be sent.
+    pub fn set_key_rows(&self, rows: Vec<(u8, Vec<ThemeColor>)>, reassert_brightness: bool) {
+        self.send(DeviceCmd::SetKeyRows(rows, reassert_brightness));
     }
 
     pub fn set_keyboard_brightness(&self, profile: PowerProfile, brightness: u8) -> AppResult<()> {
