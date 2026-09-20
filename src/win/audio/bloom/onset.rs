@@ -1,8 +1,8 @@
 /// Spectral-flux onset detection for kick drums.
 ///
 /// Separate from the display bank because the two want opposite things. The
-/// display bank gives each bin its own window length — four periods of its own
-/// frequency — which suits a spectrum display but makes flux meaningless: the
+/// display bank gives each bin its own window length - four periods of its own
+/// frequency - which suits a spectrum display but makes flux meaningless: the
 /// 40 Hz bin smears a transient across 85 ms while a treble bin resolves it in
 /// 1.3 ms, so differencing them compares incompatible time scales. Every bin
 /// here shares one window.
@@ -20,57 +20,68 @@
 ///   changed. Compression makes it a measure of *relative* change.
 /// * **Per-bin differences, summed.** Differencing a per-band maximum instead
 ///   reports nothing when three bins jump but the loudest holds steady.
-/// * **Median/MAD normalisation**, which makes the output unitless and lets a
-///   fixed threshold hold across quiet and loud passages alike.
+/// * **Split low bands.** Sub-bass and kick punch are measured as two
+///   independent detectors rather than one wide one, because a band spanning
+///   both dilutes whichever of them moved into the other's noise. Either
+///   firing is enough.
+/// * **Median/MAD normalisation**, which makes each band's output unitless and
+///   lets a fixed threshold hold across quiet and loud passages alike.
 struct OnsetBank {
-    low: Vec<BinSpec>,
+    /// Sub-bass, and the kick's punch range. Independent detectors.
+    sub: FluxBand,
+    kick: FluxBand,
+    /// The mids, used only as the reference for the vocal rejection test, so it
+    /// needs no history or peak-picking of its own.
     mid: Vec<BinSpec>,
-    previous_low: Vec<f32>,
     previous_mid: Vec<f32>,
-    /// Recent flux, for the median and deviation.
-    history: VecDeque<f32>,
-    history_len: usize,
     /// Sample count already analysed, so hops land on the stream rather than on
     /// whenever a frame happened to be drawn.
     processed: u64,
-    /// Hops remaining before another hit can register.
+    /// Hops remaining before another hit can register. Shared between the bands:
+    /// one strike excites both, and it should report once.
     refractory: usize,
-    /// The previous two strengths, so an onset is reported at its peak.
-    previous_strength: f32,
-    strength_before: f32,
-    previous_passed: bool,
     /// Latched for the frame: a hit anywhere in this frame's hops counts.
     hit: bool,
     odf: f32,
     strength: f32,
+    history_len: usize,
 }
 
 impl OnsetBank {
     fn new(sample_rate: f64) -> Self {
-        let low = fixed_window_bins(sample_rate, FLUX_MIN_HZ, FLUX_MAX_HZ, FLUX_BINS);
+        let hop_seconds = FLUX_HOP_SAMPLES as f32 / sample_rate as f32;
+        let history_len = ((FLUX_NORMALISE_SECONDS / hop_seconds).round() as usize).max(8);
+
         let mid = fixed_window_bins(
             sample_rate,
             FLUX_MID_MIN_HZ,
             FLUX_MID_MAX_HZ,
             FLUX_MID_BINS,
         );
-        let hop_seconds = FLUX_HOP_SAMPLES as f32 / sample_rate as f32;
 
         Self {
-            previous_low: vec![0.0; low.len()],
+            sub: FluxBand::new(
+                sample_rate,
+                FLUX_SUB_MIN_HZ,
+                FLUX_SUB_MAX_HZ,
+                FLUX_SUB_BINS,
+                history_len,
+            ),
+            kick: FluxBand::new(
+                sample_rate,
+                FLUX_KICK_MIN_HZ,
+                FLUX_KICK_MAX_HZ,
+                FLUX_KICK_BINS,
+                history_len,
+            ),
             previous_mid: vec![0.0; mid.len()],
-            low,
             mid,
-            history: VecDeque::new(),
-            history_len: ((FLUX_NORMALISE_SECONDS / hop_seconds).round() as usize).max(8),
             processed: 0,
             refractory: 0,
-            previous_strength: 0.0,
-            strength_before: 0.0,
-            previous_passed: false,
             hit: false,
             odf: 0.0,
             strength: 0.0,
+            history_len,
         }
     }
 
@@ -78,10 +89,12 @@ impl OnsetBank {
         self.hit
     }
 
+    /// The raw flux of whichever low band is currently driving detection.
     fn odf(&self) -> f32 {
         self.odf
     }
 
+    /// The stronger of the two bands' normalised strengths.
     fn strength(&self) -> f32 {
         self.strength
     }
@@ -124,41 +137,121 @@ impl OnsetBank {
     fn step(&mut self, ring: &SampleRing, hann: &[f32], ago: usize, _sample_rate: f64) {
         self.refractory = self.refractory.saturating_sub(1);
 
-        let low_flux = band_flux(ring, hann, ago, &self.low, &mut self.previous_low);
+        // A voice puts its harmonics in the mids, so a syllable that looks like
+        // an onset down low shows a matching jump up there. A kick's harmonics
+        // stay inside the low range. Compared per bin, since the three bands
+        // hold different numbers of them.
         let mid_flux = band_flux(ring, hann, ago, &self.mid, &mut self.previous_mid);
-        self.odf = low_flux;
+        let mid_per_bin = mid_flux / self.mid.len().max(1) as f32;
 
-        self.history.push_back(low_flux);
-        while self.history.len() > self.history_len {
-            self.history.pop_front();
+        self.sub.measure(ring, hann, ago, mid_per_bin);
+        self.kick.measure(ring, hann, ago, mid_per_bin);
+
+        // Report whichever band is shouting louder, for the bench.
+        if self.sub.strength >= self.kick.strength {
+            self.odf = self.sub.flux;
+            self.strength = self.sub.strength;
+        } else {
+            self.odf = self.kick.flux;
+            self.strength = self.kick.strength;
         }
 
-        let (median, deviation) = median_and_deviation(&self.history);
-        self.strength = (low_flux - median) / (deviation + FLUX_DEVIATION_FLOOR);
-
-        // A voice puts its harmonics in the mids, so a syllable that looks like
-        // an onset down here shows a matching jump up there. A kick's harmonics
-        // stay inside the low range.
-        let passed = self.strength >= FLUX_THRESHOLD && low_flux >= mid_flux * FLUX_DOMINANCE;
-
-        // Report at the peak rather than the first hop over the threshold: a
-        // rising edge clears it on several consecutive hops, so firing on the
-        // first reports one kick repeatedly.
-        let is_peak = self.previous_strength >= self.strength_before
-            && self.previous_strength > self.strength;
-        if self.refractory == 0 && is_peak && self.previous_passed {
+        // Either band peaking is a kick. They are deliberately not summed: a sub
+        // drop with a flat punch range, and a punchy kick with nothing under it,
+        // are both real, and each would be averaged away by the other.
+        let peaked = self.sub.peaked() || self.kick.peaked();
+        if self.refractory == 0 && peaked {
             self.hit = true;
             self.refractory = self.refractory_hops();
         }
 
-        self.strength_before = self.previous_strength;
-        self.previous_strength = self.strength;
-        self.previous_passed = passed;
+        self.sub.advance();
+        self.kick.advance();
     }
 
     fn refractory_hops(&self) -> usize {
         ((BASS_REFRACTORY_SECONDS * self.history_len as f32) / FLUX_NORMALISE_SECONDS).round()
             as usize
+    }
+}
+
+/// One low band's detector: its bins, its own flux history, its own threshold.
+///
+/// Holding the history per band is the point of the split. A median taken across
+/// sub and punch together is dominated by whichever of them is busier, so the
+/// quieter one never clears a threshold measured largely against the other.
+struct FluxBand {
+    bins: Vec<BinSpec>,
+    previous: Vec<f32>,
+    /// Recent flux, for this band's own median and deviation.
+    history: VecDeque<f32>,
+    history_len: usize,
+    /// The previous two strengths, so an onset is reported at its peak.
+    previous_strength: f32,
+    strength_before: f32,
+    /// Whether the hop behind the one just measured cleared the threshold, and
+    /// the pending value for the hop just measured.
+    previous_passed: bool,
+    passed: bool,
+    flux: f32,
+    strength: f32,
+}
+
+impl FluxBand {
+    fn new(sample_rate: f64, start: f64, end: f64, count: usize, history_len: usize) -> Self {
+        let bins = fixed_window_bins(sample_rate, start, end, count);
+        Self {
+            previous: vec![0.0; bins.len()],
+            bins,
+            history: VecDeque::new(),
+            history_len,
+            previous_strength: 0.0,
+            strength_before: 0.0,
+            previous_passed: false,
+            passed: false,
+            flux: 0.0,
+            strength: 0.0,
+        }
+    }
+
+    /// Measures this hop and folds it into the normalised detection function.
+    fn measure(&mut self, ring: &SampleRing, hann: &[f32], ago: usize, mid_per_bin: f32) {
+        let flux = band_flux(ring, hann, ago, &self.bins, &mut self.previous);
+        self.flux = flux;
+
+        self.history.push_back(flux);
+        while self.history.len() > self.history_len {
+            self.history.pop_front();
+        }
+
+        // The adaptive threshold: a level measured against this band's own recent
+        // past, so it rides up through a chorus and back down through a verse
+        // rather than being a figure fixed in advance. Medians rather than means
+        // so the onsets being looked for do not raise the bar against themselves.
+        let (median, deviation) = median_and_deviation(&self.history);
+        self.strength = (flux - median) / (deviation + FLUX_DEVIATION_FLOOR);
+
+        let per_bin = flux / self.bins.len().max(1) as f32;
+        self.passed =
+            self.strength >= FLUX_THRESHOLD && per_bin >= mid_per_bin * FLUX_DOMINANCE;
+    }
+
+    /// Whether the *previous* hop was a peak that cleared the threshold.
+    ///
+    /// Reported at the peak rather than at the first hop over the line: a rising
+    /// edge clears it on several consecutive hops, so firing on the first would
+    /// report one kick repeatedly.
+    fn peaked(&self) -> bool {
+        self.previous_strength >= self.strength_before
+            && self.previous_strength > self.strength
+            && self.previous_passed
+    }
+
+    /// Rolls the one-hop lookahead forward. Called after `peaked`.
+    fn advance(&mut self) {
+        self.strength_before = self.previous_strength;
+        self.previous_strength = self.strength;
+        self.previous_passed = self.passed;
     }
 }
 

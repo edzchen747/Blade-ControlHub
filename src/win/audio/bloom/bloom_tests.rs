@@ -348,6 +348,36 @@ mod tests {
 
     /// Feeds segments of `(hz, amplitude, ticks)` through the note bank and
     /// counts the hits detected during the final segment.
+    /// As `hits_in_final_segment`, but each segment is a *mix* of tones.
+    ///
+    /// Needed to hold one low band busy while the other is struck, which is the
+    /// case the split exists for and which a single tone cannot express.
+    fn hits_in_final_mix(segments: &[(&[(f64, f32)], usize)]) -> usize {
+        let mut bank = NoteBank::new(TEST_SAMPLE_RATE, band_count(EVEN_COLUMNS));
+        let per_tick = (TEST_SAMPLE_RATE * TICK as f64) as usize;
+        let mut phases = [0.0f64; 8];
+        let mut hits = 0usize;
+
+        for (index, (tones, ticks)) in segments.iter().copied().enumerate() {
+            let measuring = index + 1 == segments.len();
+            for _ in 0..ticks {
+                for _ in 0..per_tick {
+                    let mut sample = 0.0f32;
+                    for (tone, (frequency, amplitude)) in tones.iter().copied().enumerate() {
+                        sample += phases[tone].sin() as f32 * amplitude;
+                        phases[tone] += std::f64::consts::TAU * frequency / TEST_SAMPLE_RATE;
+                    }
+                    bank.samples_mut().push(sample);
+                }
+                bank.analyze(TICK);
+                if measuring && bank.bass_hit() {
+                    hits += 1;
+                }
+            }
+        }
+        hits
+    }
+
     fn hits_in_final_segment(segments: &[(f64, f32, usize)]) -> usize {
         let mut bank = NoteBank::new(TEST_SAMPLE_RATE, band_count(EVEN_COLUMNS));
         let per_tick = (TEST_SAMPLE_RATE * TICK as f64) as usize;
@@ -392,6 +422,35 @@ mod tests {
             hits_in_final_segment(&[(50.0, 0.0, 60), (50.0, 0.5, 6)]),
             1,
             "a kick out of silence should register exactly once"
+        );
+    }
+
+    /// The punch band has to fire on its own merits.
+    ///
+    /// A loud steady sub tone runs throughout, so under a single wide low band
+    /// its magnitude would dominate the shared median and a 100 Hz strike would
+    /// have to clear a bar set by something it has nothing to do with.
+    #[test]
+    fn a_punch_kick_registers_under_a_steady_sub_tone() {
+        let quiet: &[(f64, f32)] = &[(35.0, 0.45)];
+        let struck: &[(f64, f32)] = &[(35.0, 0.45), (100.0, 0.5)];
+        assert_eq!(
+            hits_in_final_mix(&[(quiet, 60), (struck, 6)]),
+            1,
+            "a punch-range kick should register even with the sub band held busy"
+        );
+    }
+
+    /// And the sub band likewise, which is the case that prompted the split:
+    /// a drop under a mix whose punch range never moves.
+    #[test]
+    fn a_sub_drop_registers_under_a_steady_punch_tone() {
+        let quiet: &[(f64, f32)] = &[(110.0, 0.45)];
+        let struck: &[(f64, f32)] = &[(110.0, 0.45), (40.0, 0.5)];
+        assert_eq!(
+            hits_in_final_mix(&[(quiet, 60), (struck, 6)]),
+            1,
+            "a sub drop should register even with the punch band held busy"
         );
     }
 

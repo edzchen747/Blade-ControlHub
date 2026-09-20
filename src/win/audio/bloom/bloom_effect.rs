@@ -19,7 +19,7 @@ use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree};
 
 /// Target frame rate. Everything is driven by the measured `dt`, so if the HID
 /// path cannot keep up the animation slows rather than desyncing.
-const FPS: f64 = 30.0;
+const FPS: f64 = 60.0;
 /// The tick length the smoothing rates are expressed against, so changing `FPS`
 /// does not change how fast anything settles.
 const REFERENCE_TICK: f32 = 1.0 / 60.0;
@@ -81,21 +81,47 @@ const FLUX_WINDOW_SAMPLES: usize = 2048;
 /// and 75% overlap, which is normal practice for onset detection.
 const FLUX_HOP_SAMPLES: usize = 512;
 
-/// The range the kick detector listens over, and how finely it is divided.
+/// The two low ranges the kick detector listens over, analysed separately.
 ///
 /// Low bands only, so this stays a kick detector. Summing the whole spectrum
 /// locks to the beat better still (0.70 against 0.55 on a capture) but fires on
 /// snares and hats too, at which point the boost stops meaning "bass".
-const FLUX_MIN_HZ: f64 = 40.0;
-const FLUX_MAX_HZ: f64 = 500.0;
-const FLUX_BINS: usize = 24;
+///
+/// They are split because one flux figure spanning 40-500 Hz hides the thing it
+/// is looking for. A sub-bass drop and a kick attack land in different parts of
+/// the range, and a band wide enough to hold both dilutes either one into the
+/// other's noise - a dense mix can hold the wide band's total almost flat while
+/// the sub region moves sharply underneath it. Each band now carries its own
+/// flux, its own median history and its own threshold test, and a peak in
+/// *either* registers a hit.
+///
+/// One honest limitation: the sub band's bottom sits below what the analysis
+/// window can resolve. 2048 samples at 48 kHz is 43 ms, shorter than a single
+/// period of 20 Hz, so the lowest bins here cannot be separated from one
+/// another and effectively report the same thing. They are kept because they do
+/// still respond to energy arriving in the region, and separating them properly
+/// would need a longer window - which would cost the transient timing that
+/// matters more than sub-bass pitch resolution ever could.
+const FLUX_SUB_MIN_HZ: f64 = 20.0;
+const FLUX_SUB_MAX_HZ: f64 = 60.0;
+const FLUX_SUB_BINS: usize = 8;
+const FLUX_KICK_MIN_HZ: f64 = 60.0;
+const FLUX_KICK_MAX_HZ: f64 = 150.0;
+const FLUX_KICK_BINS: usize = 12;
 
 /// The mid range the low flux is compared against, to reject voices.
 const FLUX_MID_MIN_HZ: f64 = 500.0;
 const FLUX_MID_MAX_HZ: f64 = 4000.0;
 const FLUX_MID_BINS: usize = 12;
-/// Low flux must be at least this multiple of mid flux for a hit to count.
-const FLUX_DOMINANCE: f32 = 0.4;
+/// A low band's flux must be at least this multiple of the mid flux for a hit
+/// to count - compared per bin, not as raw sums.
+///
+/// Per bin because the bands no longer hold equal numbers of them. Flux is a sum
+/// over bins, so comparing sums directly would make a narrow band look weak for
+/// no reason but its width, and the sub band would never clear the test. 0.2 per
+/// bin is the same comparison the fitted 0.4 made on sums, which ran 24 low bins
+/// against 12 mid ones.
+const FLUX_DOMINANCE: f32 = 0.2;
 
 /// Compression applied to each bin magnitude before differencing.
 ///
@@ -124,11 +150,15 @@ const FLUX_DEVIATION_FLOOR: f32 = 0.05;
 const FLUX_THRESHOLD: f32 = 4.0;
 /// The shortest gap between two hits.
 ///
-/// Counting onsets straight off a capture with no refractory at all gave 22 in
-/// 20 s, with the gaps clustered at 0.6-0.7 s and nothing genuinely paired. A
-/// refractory this long therefore costs no real hits, and without it a single
-/// kick reports several times as its energy crosses the analysis window.
-const BASS_REFRACTORY_SECONDS: f32 = 0.30;
+/// 150 ms, which puts the ceiling at 400 BPM - far above anything a drummer
+/// plays, so it cannot cost a real beat. Counting onsets straight off a capture
+/// with no refractory gave 22 in 20 s with the gaps clustered at 0.6-0.7 s, so
+/// there is a wide margin either side of this figure.
+///
+/// It guards against the sub-bass tail of a kick re-triggering behind its own
+/// attack, which now matters more than it did: two bands fire independently and
+/// the sub band is exactly the one that rings on after the strike.
+const BASS_REFRACTORY_SECONDS: f32 = 0.15;
 
 // -- Frequency bands ---------------------------------------------------------
 
@@ -476,7 +506,7 @@ fn run_bloom_loop(device_handle: DeviceHandle, columns: usize, current_generatio
 
 /// Picks out the rows whose colours actually moved since the last frame.
 ///
-/// A full matrix is seven HID writes, which is a lot to spend every frame at 30
+/// A full matrix is seven HID writes, which is a lot to spend every frame at 60
 /// fps. During quiet passages most rows sit still, so sending only what changed
 /// keeps the average cost far below the worst case.
 fn changed_rows(
