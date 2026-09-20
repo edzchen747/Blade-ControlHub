@@ -26,8 +26,13 @@ struct EqualizerMatrix {
     hue: f32,
     /// The bass bar's own envelope, 0..1 of the row.
     bar_fill: f32,
+    /// How long the input has been silent, against `BAR_SILENCE_DELAY_SECONDS`.
+    /// A short gap is not yet silence.
+    silence_elapsed: f32,
     /// Seconds left on the current bass boost.
     boost_remaining: f32,
+    /// Seconds left on the white flash that marks a boost firing.
+    flash_remaining: f32,
     /// Per block column: the key nominated to drop, and the roll it has to beat.
     /// Redrawn every `BLOCK_DITHER_SECONDS`.
     dither: [(f32, usize); CENTRE_BLOCK_WIDTH],
@@ -50,9 +55,11 @@ impl EqualizerMatrix {
             half_sides: vec![None; bands],
             hue: 0.0,
             bar_fill: 0.0,
+            silence_elapsed: BAR_SILENCE_DELAY_SECONDS,
             dither: [(1.0, 0); CENTRE_BLOCK_WIDTH],
             dither_elapsed: BLOCK_DITHER_SECONDS,
             boost_remaining: 0.0,
+            flash_remaining: 0.0,
             boost_envelope: 0.0,
             boost_bass: 0.0,
             rng: 0x9E37_79B9,
@@ -77,11 +84,18 @@ impl EqualizerMatrix {
         //
         // Hit detection lives in the note bank, which holds the raw magnitudes
         // that tell a kick from a vocal transient.
-        self.update_boost(levels.first().copied().unwrap_or(0.0), bass_hit, dt);
+        self.update_boost(
+            levels.first().copied().unwrap_or(0.0),
+            raw.first().copied().unwrap_or(0.0),
+            bass_hit,
+            dt,
+        );
 
         self.update_dither(dt);
 
-        let target = bar_target(raw, self.boost_envelope);
+        self.update_silence(raw, dt);
+
+        let target = bar_target(raw, self.boost_envelope, self.silence_settled());
         let rate = if target >= self.bar_fill {
             BAR_ATTACK
         } else {
@@ -111,14 +125,22 @@ impl EqualizerMatrix {
 
     /// Advances the one-shot boost envelope.
     ///
-    /// The boost restarts on every kick-drum hit and runs for
-    /// `BASS_BOOST_SECONDS`, fading as it goes.
-    fn update_boost(&mut self, bass: f32, bass_hit: bool, dt: f32) {
-        if bass_hit {
+    /// The boost restarts on every kick-drum hit that carries enough weight, and
+    /// runs for `BASS_BOOST_SECONDS`, fading as it goes.
+    ///
+    /// `raw_bass` is the unsmoothed band level, used for the loudness gate so a
+    /// sharp kick is judged on its own height rather than on an envelope still
+    /// climbing towards it.
+    fn update_boost(&mut self, bass: f32, raw_bass: f32, bass_hit: bool, dt: f32) {
+        // A kick still counts as a kick; it just does not earn the boost unless
+        // there is real level behind it. See `BASS_BOOST_MIN_LEVEL`.
+        if bass_hit && raw_bass >= BASS_BOOST_MIN_LEVEL {
             self.boost_remaining = BASS_BOOST_SECONDS;
+            self.flash_remaining = BAND_FLASH_SECONDS;
         }
 
         self.boost_remaining = (self.boost_remaining - dt).max(0.0);
+        self.flash_remaining = (self.flash_remaining - dt).max(0.0);
 
         // Fading rather than cutting out: a hard edge at the end of the window
         // would snap every band down a row at once.
@@ -183,11 +205,26 @@ impl EqualizerMatrix {
 
         self.apply_bloom(&mut values, bass);
 
+        // Washing the colour out rather than replacing it: `value` still
+        // carries each key's brightness, so an unlit key stays unlit through
+        // the flash instead of the whole board turning on.
+        let flash = self.flash_envelope();
+        // Keeps the dark end of the hue circle out of the cycle. The bar takes
+        // this too - it is the same colour, just not the flash.
+        let base = saturation_for_hue(self.hue);
+
         values
             .iter()
-            .map(|row| {
-                row.iter()
-                    .map(|value| hsv_to_rgb(self.hue, 1.0, *value).to_theme_color())
+            .enumerate()
+            .map(|(row, columns)| {
+                let saturation = if row == BAR_ROW {
+                    base
+                } else {
+                    base.min(1.0 - flash)
+                };
+                columns
+                    .iter()
+                    .map(|value| hsv_to_rgb(self.hue, saturation, *value).to_theme_color())
                     .collect()
             })
             .collect()
@@ -349,6 +386,28 @@ impl EqualizerMatrix {
         }
     }
 
+    /// How white the bands are drawn right now, 1.0 as a boost fires.
+    fn flash_envelope(&self) -> f32 {
+        (self.flash_remaining / BAND_FLASH_SECONDS).clamp(0.0, 1.0)
+    }
+
+    /// Tracks how long the input has been quiet.
+    ///
+    /// Any audio at all resets it, so the delay only ever measures an unbroken
+    /// run of silence.
+    fn update_silence(&mut self, raw: &[f32], dt: f32) {
+        if is_silent(raw) {
+            self.silence_elapsed += dt;
+        } else {
+            self.silence_elapsed = 0.0;
+        }
+    }
+
+    /// Whether the quiet has lasted long enough to be treated as silence.
+    fn silence_settled(&self) -> bool {
+        self.silence_elapsed >= BAR_SILENCE_DELAY_SECONDS
+    }
+
     /// How many columns of the bass bar are lit, counting from the left edge.
     ///
     /// Plain rounding, with no minimum of one key: a fill that is still decaying
@@ -390,7 +449,9 @@ fn centre_block_brightness(bar_fill: f32) -> f32 {
 ///
 /// The floor applies only while something is playing. With no audio at all the
 /// target is zero, so the bar and the centre block both go dark rather than
-/// leaving a stub lit against a silent system.
+/// leaving a stub lit against a silent system - but only once `settled` says the
+/// quiet has outlasted `BAR_SILENCE_DELAY_SECONDS`. Through a shorter gap the
+/// bar holds its floor, so a momentary drop-out does not read as a flicker.
 ///
 /// `boost` is the one-shot envelope, and it decides what the bar is *about*.
 ///
@@ -402,14 +463,12 @@ fn centre_block_brightness(bar_fill: f32) -> f32 {
 /// Giving the bass the full span at all times is what kept the bar pinned near
 /// the top: its two terms were both high almost all the time, so there was
 /// nowhere left for a kick to move it to.
-fn bar_target(levels: &[f32], boost: f32) -> f32 {
+fn bar_target(levels: &[f32], boost: f32, settled: bool) -> f32 {
     let bass = levels.first().copied().unwrap_or(0.0);
     let loudest_other = levels.iter().skip(1).copied().fold(0.0f32, f32::max);
 
-    // The band gate already zeroes anything under the noise floor, so silence
-    // arrives here as an exact zero.
-    if bass.max(loudest_other) <= f32::EPSILON {
-        return 0.0;
+    if is_silent(levels) {
+        return if settled { 0.0 } else { BAR_MIN_FILL };
     }
 
     let ordinary = bass.max(loudest_other) * BAR_OTHER_SHARE;
@@ -418,6 +477,14 @@ fn bar_target(levels: &[f32], boost: f32) -> f32 {
     let driver = ordinary + (promoted - ordinary) * boost.clamp(0.0, 1.0);
 
     (BAR_MIN_FILL + driver * BAR_BASS_SPAN).clamp(BAR_MIN_FILL, 1.0)
+}
+
+/// Whether nothing at all is playing.
+///
+/// The band gate already zeroes anything under the noise floor, so silence
+/// arrives here as an exact zero rather than as something merely small.
+fn is_silent(levels: &[f32]) -> bool {
+    levels.iter().copied().fold(0.0f32, f32::max) <= f32::EPSILON
 }
 
 /// How much the bass can multiply a band's height, at full bass.

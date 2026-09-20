@@ -38,7 +38,10 @@ pub fn probe_live_audio(seconds: u64, warmup: u64, dump: Option<&str>) -> Result
         for band in 0..matrix.bands {
             header.push_str(&format!(",level{band}"));
         }
-        header.push_str(",odf,strength,hit");
+        for band in 0..bank.onset_band_count() {
+            header.push_str(&format!(",flux{band},fstr{band},energy{band}"));
+        }
+        header.push_str(",odf,strength,selected,fallback,hit");
         rows.push(header);
     }
 
@@ -90,7 +93,17 @@ fn dump_row(bank: &NoteBank, seconds: f64) -> String {
     for value in bank.levels() {
         row.push_str(&format!(",{value:.4}"));
     }
+    for band in 0..bank.onset_band_count() {
+        row.push_str(&format!(
+            ",{:.6},{:.4},{:.6}",
+            bank.onset_band_flux(band),
+            bank.onset_band_strength(band),
+            bank.onset_band_energy(band)
+        ));
+    }
     row.push_str(&format!(",{:.6},{:.4}", bank.onset_odf(), bank.onset_strength()));
+    row.push_str(&format!(",{}", bank.onset_selected_band()));
+    row.push_str(if bank.onset_in_fallback() { ",1" } else { ",0" });
     row.push_str(if bank.bass_hit() { ",1" } else { ",0" });
     row
 }
@@ -107,6 +120,13 @@ struct Samples {
     dominance: Vec<f32>,
     strength: Vec<f32>,
     hits: Vec<Instant>,
+    /// Which band held the floor on each tick, and each band's energy, so the
+    /// selection can be judged rather than taken on trust.
+    selected: Vec<usize>,
+    band_energy: Vec<Vec<f32>>,
+    /// Ticks spent with the gap fallback open, and hits emitted while it was.
+    fallback_ticks: usize,
+    fallback_hits: usize,
 }
 
 impl Samples {
@@ -137,8 +157,23 @@ impl Samples {
         self.dominance.push(power[0] / loudest_other_power.max(1e-6));
         self.strength.push(bank.onset_strength());
 
+        self.selected.push(bank.onset_selected_band());
+        if self.band_energy.len() < bank.onset_band_count() {
+            self.band_energy.resize(bank.onset_band_count(), Vec::new());
+        }
+        for (band, series) in self.band_energy.iter_mut().enumerate() {
+            series.push(bank.onset_band_energy(band));
+        }
+
+        if bank.onset_in_fallback() {
+            self.fallback_ticks += 1;
+        }
+
         if bank.bass_hit() {
             self.hits.push(now);
+            if bank.onset_in_fallback() {
+                self.fallback_hits += 1;
+            }
         }
     }
 
@@ -176,6 +211,8 @@ impl Samples {
             );
         }
         println!();
+
+        self.report_selection();
 
         distribution(
             "Bass band level (drives the height multiplier)",
@@ -216,6 +253,53 @@ impl Samples {
         println!("Summary");
         println!("  bar at 90%+      {near_max:>6.1}% of the time");
         println!("  bass band full   {topped:>6.1}% of the time");
+        println!();
+    }
+}
+
+impl Samples {
+    /// Which band the detector settled on, and how hard it had to lean on the
+    /// fallback to keep the beat going.
+    ///
+    /// A band that holds the floor for nearly the whole run is the healthy
+    /// case. Repeated toggling means `BAND_PRESENCE_ENGAGE` and `RELEASE` sit
+    /// too close together; a high fallback share means selection has picked a
+    /// band the beat does not actually live in.
+    fn report_selection(&self) {
+        let ticks = self.selected.len();
+        if ticks == 0 {
+            return;
+        }
+
+        println!("Band selection");
+        for band in 0..self.band_energy.len() {
+            let held = self.selected.iter().filter(|value| **value == band).count();
+            let share = held as f64 / ticks as f64 * 100.0;
+            let energy = &self.band_energy[band];
+            let mean = energy.iter().sum::<f32>() / energy.len().max(1) as f32;
+            let label = match band {
+                0 => "sub  20-60Hz",
+                1 => "punch 60-150Hz",
+                _ => "band",
+            };
+            println!(
+                "  {label:<15} held {share:>6.1}%   mean energy {mean:.3}  {}",
+                bar_glyph(share)
+            );
+        }
+
+        let switches = self
+            .selected
+            .windows(2)
+            .filter(|pair| pair[0] != pair[1])
+            .count();
+        println!("  switches         {switches}");
+        println!(
+            "  fallback open    {:>6.1}% of ticks, {} of {} hits",
+            self.fallback_ticks as f64 / ticks as f64 * 100.0,
+            self.fallback_hits,
+            self.hits.len()
+        );
         println!();
     }
 }

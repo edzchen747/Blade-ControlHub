@@ -425,6 +425,376 @@ mod tests {
         );
     }
 
+    // -- Bass boost gate ----------------------------------------------------
+
+    #[test]
+    fn a_kick_under_the_minimum_level_does_not_fire_the_boost() {
+        let mut matrix = EqualizerMatrix::new(MATRIX_COLUMNS);
+        let quiet = BASS_BOOST_MIN_LEVEL * 0.5;
+
+        matrix.update_boost(quiet, quiet, true, TICK);
+
+        assert_eq!(
+            matrix.boost_envelope, 0.0,
+            "a kick with no weight behind it should register without boosting"
+        );
+    }
+
+    #[test]
+    fn a_kick_at_the_minimum_level_fires_the_boost() {
+        let mut matrix = EqualizerMatrix::new(MATRIX_COLUMNS);
+        let loud = BASS_BOOST_MIN_LEVEL;
+
+        matrix.update_boost(loud, loud, true, TICK);
+
+        assert!(
+            matrix.boost_envelope > 0.0,
+            "a kick that clears the bar should still boost"
+        );
+    }
+
+    /// The gate reads the raw level, not the smoothed one.
+    ///
+    /// They diverge exactly when it matters: on the first tick of a sharp kick
+    /// the envelope is still climbing, so judging on it would reject the very
+    /// transients the boost exists for.
+    #[test]
+    fn the_boost_gate_judges_the_raw_level_not_the_smoothed_one() {
+        let mut matrix = EqualizerMatrix::new(MATRIX_COLUMNS);
+        let lagging = BASS_BOOST_MIN_LEVEL * 0.5;
+        let actual = BASS_BOOST_MIN_LEVEL * 2.0;
+
+        matrix.update_boost(lagging, actual, true, TICK);
+
+        assert!(
+            matrix.boost_envelope > 0.0,
+            "a loud kick should boost even while the smoothed level trails it"
+        );
+    }
+
+    // -- Hue brightness floor -----------------------------------------------
+
+    const RED: f32 = 0.0;
+    const GREEN: f32 = 1.0 / 3.0;
+    const CYAN: f32 = 0.5;
+    const BLUE: f32 = 2.0 / 3.0;
+    const VIOLET: f32 = 0.75;
+
+    /// The colour a hue is actually drawn in, at full brightness.
+    fn drawn(hue: f32) -> Rgb01 {
+        hsv_to_rgb(hue, saturation_for_hue(hue), 1.0)
+    }
+
+    #[test]
+    fn every_hue_in_the_cycle_clears_the_brightness_floor() {
+        // Walked finely, because the cycle passes through all of them.
+        for step in 0..360 {
+            let hue = step as f32 / 360.0;
+            let luminance = relative_luminance(drawn(hue));
+            assert!(
+                luminance >= MIN_HUE_LUMINANCE - 1e-3,
+                "hue {hue:.3} is drawn at luminance {luminance:.3}, below the floor"
+            );
+        }
+    }
+
+    #[test]
+    fn the_bright_hues_are_left_untouched() {
+        for hue in [GREEN, CYAN, 1.0 / 6.0] {
+            assert_eq!(
+                saturation_for_hue(hue),
+                1.0,
+                "hue {hue:.3} is already bright and should keep full saturation"
+            );
+        }
+    }
+
+    #[test]
+    fn the_dark_hues_are_lifted_rather_than_skipped() {
+        for hue in [BLUE, VIOLET] {
+            let saturation = saturation_for_hue(hue);
+            assert!(
+                saturation < 1.0,
+                "hue {hue:.3} should be desaturated towards white"
+            );
+            assert!(
+                saturation > 0.5,
+                "hue {hue:.3} should stay recognisably itself, not wash out to white"
+            );
+        }
+    }
+
+    /// Lifting must not turn blue into something that is no longer blue.
+    #[test]
+    fn a_lifted_blue_is_still_blue() {
+        let blue = drawn(BLUE);
+        assert!(
+            blue.b > blue.r && blue.b > blue.g,
+            "bright blue should still lead on the blue channel, got {blue:?}"
+        );
+    }
+
+    #[test]
+    fn a_lifted_red_is_still_red() {
+        let red = drawn(RED);
+        assert!(
+            red.r > red.g && red.r > red.b,
+            "red should still lead on the red channel, got {red:?}"
+        );
+    }
+
+    /// The flash still wins over the hue floor.
+    #[test]
+    fn a_flash_whites_out_even_a_hue_that_keeps_full_saturation() {
+        let mut matrix = flashing_matrix();
+        matrix.hue = GREEN;
+        let loud = levels(1.0, 1.0, matrix.bands);
+        let frame = matrix.render(&loud);
+
+        let lit = frame
+            .iter()
+            .take(BAR_ROW)
+            .flatten()
+            .copied()
+            .find(|key| is_lit(*key))
+            .expect("the bands should be lit at full level");
+
+        assert!(
+            lit.r == lit.g && lit.g == lit.b,
+            "the flash should override the hue entirely, got {:?}",
+            (lit.r, lit.g, lit.b)
+        );
+    }
+
+    // -- Boost flash --------------------------------------------------------
+
+    /// A matrix mid-flash and nothing else.
+    ///
+    /// The flash is set directly rather than by firing a boost, because a real
+    /// boost also raises `boost_bass`, which lights every band through the bass
+    /// skirt. That would leave these tests unable to tell the flash apart from
+    /// the skirt underneath it.
+    fn flashing_matrix() -> EqualizerMatrix {
+        let mut matrix = EqualizerMatrix::new(MATRIX_COLUMNS);
+        matrix.flash_remaining = BAND_FLASH_SECONDS;
+        matrix
+    }
+
+    #[test]
+    fn a_boost_activation_starts_the_flash() {
+        let mut matrix = EqualizerMatrix::new(MATRIX_COLUMNS);
+        let loud = BASS_BOOST_MIN_LEVEL * 2.0;
+
+        matrix.update_boost(loud, loud, true, 0.0);
+
+        assert!(
+            matrix.flash_envelope() > 0.99,
+            "a boost should light the flash at full white"
+        );
+    }
+
+    #[test]
+    fn a_kick_too_quiet_to_boost_does_not_flash() {
+        let mut matrix = EqualizerMatrix::new(MATRIX_COLUMNS);
+        let quiet = BASS_BOOST_MIN_LEVEL * 0.5;
+
+        matrix.update_boost(quiet, quiet, true, 0.0);
+
+        assert_eq!(
+            matrix.flash_envelope(),
+            0.0,
+            "the flash marks a boost, so a kick that does not boost must not flash"
+        );
+    }
+
+    #[test]
+    fn a_flash_draws_the_bands_white() {
+        let matrix = flashing_matrix();
+        let loud = levels(1.0, 1.0, matrix.bands);
+        let frame = matrix.render(&loud);
+
+        // Any band row, not row 0: without a boost the bass multiplier is 1, so
+        // no band stands more than the single row nearest the centre.
+        let lit = frame
+            .iter()
+            .take(BAR_ROW)
+            .flatten()
+            .copied()
+            .find(|key| is_lit(*key))
+            .expect("the bands should have something lit at full level");
+
+        assert!(
+            lit.r == lit.g && lit.g == lit.b,
+            "a flashing band key should be neutral white, got {:?}",
+            (lit.r, lit.g, lit.b)
+        );
+    }
+
+    #[test]
+    fn the_flash_leaves_the_bar_its_own_colour() {
+        let mut matrix = flashing_matrix();
+        // The bar's width comes from its own envelope, which `render` reads
+        // rather than recomputes.
+        matrix.bar_fill = 1.0;
+        let loud = levels(1.0, 1.0, matrix.bands);
+        let frame = matrix.render(&loud);
+
+        let lit = frame[BAR_ROW]
+            .iter()
+            .copied()
+            .find(|key| is_lit(*key))
+            .expect("a full bar should be lit");
+
+        assert!(
+            lit.r != lit.g || lit.g != lit.b,
+            "the bar keeps its hue through a flash: it is a meter, not a band"
+        );
+    }
+
+    /// The flash must not light keys that were dark.
+    ///
+    /// Desaturating rather than overwriting is what buys this - `value` still
+    /// carries the brightness, so a key at zero stays at zero.
+    #[test]
+    fn the_flash_does_not_light_a_dark_key() {
+        let matrix = flashing_matrix();
+        let quiet = levels(0.0, 0.0, matrix.bands);
+        let frame = matrix.render(&quiet);
+
+        assert!(
+            frame.iter().flatten().all(|key| !is_lit(*key)),
+            "a flash should wash out what is lit, not turn the board on"
+        );
+    }
+
+    #[test]
+    fn the_flash_fades_out_within_its_window() {
+        let mut matrix = flashing_matrix();
+        assert!(matrix.flash_envelope() > 0.99, "it starts fully white");
+
+        matrix.update_boost(0.0, 0.0, false, BAND_FLASH_SECONDS * 0.5);
+        let half = matrix.flash_envelope();
+        assert!(
+            half > 0.0 && half < 1.0,
+            "it fades across the window rather than cutting out, got {half}"
+        );
+
+        matrix.update_boost(0.0, 0.0, false, BAND_FLASH_SECONDS);
+        assert_eq!(matrix.flash_envelope(), 0.0, "and is gone by the end of it");
+    }
+
+    // -- Band selection -----------------------------------------------------
+
+    /// Feeds a steady mix for long enough that the energy followers settle, and
+    /// reports which band ended up with the floor.
+    fn selected_band_after(tones: &[(f64, f32)], seconds: f32) -> usize {
+        let mut bank = NoteBank::new(TEST_SAMPLE_RATE, band_count(EVEN_COLUMNS));
+        feed(&mut bank, tones, (seconds / TICK).round() as usize);
+        bank.onset_selected_band()
+    }
+
+    #[test]
+    fn a_mix_with_no_sub_content_selects_the_punch_band() {
+        // Nothing under 60 Hz at all, which is most guitar music.
+        let selected = selected_band_after(&[(95.0, 0.5), (130.0, 0.4)], 8.0);
+        assert_eq!(selected, 1, "with an empty sub band the punch range should hold the floor");
+    }
+
+    /// Starts from the punch band deliberately.
+    ///
+    /// Selection begins at band 0, so asserting "sub is selected" from a fresh
+    /// bank would pass whether or not the rule works at all. Playing a sub-less
+    /// mix first forces the floor away, so the assertion has something to prove.
+    #[test]
+    fn a_mix_with_strong_sub_content_takes_the_floor_back() {
+        let mut bank = NoteBank::new(TEST_SAMPLE_RATE, band_count(EVEN_COLUMNS));
+        let ticks = (8.0 / TICK).round() as usize;
+
+        feed(&mut bank, &[(95.0, 0.5), (130.0, 0.4)], ticks);
+        assert_eq!(
+            bank.onset_selected_band(),
+            1,
+            "precondition: a sub-less mix should have moved the floor to the punch band"
+        );
+
+        feed(&mut bank, &[(35.0, 0.5), (95.0, 0.4)], ticks);
+        assert_eq!(
+            bank.onset_selected_band(),
+            0,
+            "a real sub-bass should take the floor back from the punch range"
+        );
+    }
+
+    /// The Schmitt trigger, tested on the selection rule itself.
+    ///
+    /// Driving this with audio would prove nothing: the point is the behaviour
+    /// between the two bars, and setting the energies directly is the only way
+    /// to sit in that gap deliberately.
+    #[test]
+    fn selection_does_not_flap_between_the_two_bars() {
+        let mut onset = OnsetBank::new(TEST_SAMPLE_RATE);
+
+        // Sub clearly present: it takes the floor.
+        onset.bands[0].energy = 1.0;
+        onset.bands[1].energy = 1.0;
+        onset.update_selection();
+        assert_eq!(onset.selected, 0);
+
+        // Sub sags to half the punch band - below ENGAGE but above RELEASE, so
+        // an incumbent keeps its place where a challenger would not get in.
+        onset.bands[0].energy = 0.5;
+        onset.update_selection();
+        assert_eq!(onset.selected, 0, "the incumbent should hold between the bars");
+
+        // Below RELEASE it finally gives way.
+        onset.bands[0].energy = 0.2;
+        onset.update_selection();
+        assert_eq!(onset.selected, 1, "below the release bar the floor should pass over");
+
+        // And coming back, half is no longer enough to retake it.
+        onset.bands[0].energy = 0.5;
+        onset.update_selection();
+        assert_eq!(onset.selected, 1, "a challenger needs the higher bar to take over");
+
+        onset.bands[0].energy = 0.8;
+        onset.update_selection();
+        assert_eq!(onset.selected, 0, "clearing the engage bar should win the floor back");
+    }
+
+    #[test]
+    fn selection_holds_when_everything_is_quiet() {
+        let mut onset = OnsetBank::new(TEST_SAMPLE_RATE);
+        onset.bands[0].energy = 1.0;
+        onset.bands[1].energy = 1.0;
+        onset.update_selection();
+        assert_eq!(onset.selected, 0);
+
+        // Silence between tracks must not re-decide the band on noise.
+        onset.bands[0].energy = 0.0;
+        onset.bands[1].energy = BAND_PRESENCE_FLOOR * 0.5;
+        onset.update_selection();
+        assert_eq!(onset.selected, 0, "a quiet gap should hold the selection, not re-judge it");
+    }
+
+    #[test]
+    fn the_fallback_opens_only_after_the_selected_band_misses_a_beat() {
+        let mut onset = OnsetBank::new(TEST_SAMPLE_RATE);
+        onset.beat_interval_hops = 100.0;
+
+        onset.hops_since_hit = 100;
+        onset.update_fallback();
+        assert!(!onset.in_fallback(), "one beat's silence is not a miss");
+
+        onset.hops_since_hit = (100.0 * BAND_FALLBACK_GAPS) as usize + 1;
+        onset.update_fallback();
+        assert!(onset.in_fallback(), "past the gap the other bands should be let through");
+
+        // A hit from the selected band closes it again.
+        onset.hops_since_hit = 0;
+        onset.update_fallback();
+        assert!(!onset.in_fallback(), "the fallback should close once the band fires again");
+    }
+
     /// The punch band has to fire on its own merits.
     ///
     /// A loud steady sub tone runs throughout, so under a single wide low band
@@ -747,36 +1117,42 @@ mod tests {
         }
 
         let frame = matrix.render(&loud);
-        let mut seen: Option<ThemeColor> = None;
-        let mut lit = 0;
+        let lit: Vec<ThemeColor> = frame
+            .iter()
+            .flatten()
+            .copied()
+            .filter(|key| is_lit(*key))
+            .collect();
+        assert!(!lit.is_empty(), "nothing lit up at all");
 
-        for key in frame.iter().flatten().copied() {
-            if !is_lit(key) {
-                continue;
-            }
-            lit += 1;
-            // Brightness varies now — bloom and the centre block are both
-            // partial — but every key is still a pure, unmixed hue.
-            assert_eq!(key.r.min(key.g).min(key.b), 0, "not fully saturated: {key:?}");
+        // Compared against the *brightest* key, so every scale factor is <= 1.
+        // Scaling a dim key up instead multiplies its byte-rounding error up
+        // with it: `MIN_HUE_LUMINANCE` means the small channels are no longer
+        // exact zeros, so a key like (31, 4, 2) carries ~12% error per channel
+        // that an 8x scale turns into a false failure.
+        let brightest = lit
+            .iter()
+            .copied()
+            .max_by_key(|key| key.r.max(key.g).max(key.b))
+            .expect("checked non-empty");
+        let peak = brightest.r.max(brightest.g).max(brightest.b) as f32;
 
-            // Same hue means the same channel ratios.
-            match seen {
-                None => seen = Some(key),
-                Some(first) => {
-                    let scale = key.r.max(key.g).max(key.b) as f32
-                        / first.r.max(first.g).max(first.b) as f32;
-                    for (channel, reference) in
-                        [(key.r, first.r), (key.g, first.g), (key.b, first.b)]
-                    {
-                        assert!(
-                            (channel as f32 - reference as f32 * scale).abs() <= 2.0,
-                            "the board should be a single hue: {key:?} vs {first:?}"
-                        );
-                    }
-                }
+        for key in lit {
+            // Brightness varies - bloom and the centre block are both partial -
+            // but the hue must not. Saturation is deliberately not checked: the
+            // luminance floor mixes white into the darker hues on purpose.
+            let scale = key.r.max(key.g).max(key.b) as f32 / peak;
+            for (channel, reference) in [
+                (key.r, brightest.r),
+                (key.g, brightest.g),
+                (key.b, brightest.b),
+            ] {
+                assert!(
+                    (channel as f32 - reference as f32 * scale).abs() <= 2.0,
+                    "the board should be a single hue: {key:?} vs {brightest:?}"
+                );
             }
         }
-        assert!(lit > 0, "nothing lit up at all");
     }
 
     #[test]
@@ -811,8 +1187,57 @@ mod tests {
         let matrix = matrix();
         let quiet = levels(0.0, 0.0, matrix.bands);
 
-        assert_eq!(bar_target(&quiet, 0.0), 0.0);
+        assert_eq!(bar_target(&quiet, 0.0, true), 0.0);
         assert_eq!(settled_bar(&quiet).bar_columns(), 0);
+    }
+
+    #[test]
+    fn a_short_gap_holds_the_bar_at_its_floor_instead_of_going_dark() {
+        let matrix = matrix();
+        let quiet = levels(0.0, 0.0, matrix.bands);
+
+        assert_eq!(
+            bar_target(&quiet, 0.0, false),
+            BAR_MIN_FILL,
+            "before the delay is up, quiet should read as a gap and hold the floor"
+        );
+    }
+
+    /// The delay has to be an unbroken run, not a total.
+    #[test]
+    fn silence_is_only_deemed_after_the_delay_and_any_audio_resets_it() {
+        let mut matrix = matrix();
+        let quiet = levels(0.0, 0.0, matrix.bands);
+        let loud = levels(0.8, 0.5, matrix.bands);
+
+        matrix.silence_elapsed = 0.0;
+        matrix.update_silence(&quiet, BAR_SILENCE_DELAY_SECONDS * 0.5);
+        assert!(!matrix.silence_settled(), "half the delay is not yet silence");
+
+        // A single frame of audio puts the clock back to the start.
+        matrix.update_silence(&loud, BAR_SILENCE_DELAY_SECONDS * 0.5);
+        assert!(!matrix.silence_settled(), "audio should reset the silence clock");
+
+        matrix.update_silence(&quiet, BAR_SILENCE_DELAY_SECONDS * 0.75);
+        assert!(
+            !matrix.silence_settled(),
+            "the delay measures an unbroken run, not a running total"
+        );
+
+        matrix.update_silence(&quiet, BAR_SILENCE_DELAY_SECONDS * 0.5);
+        assert!(matrix.silence_settled(), "past the delay it is silence");
+    }
+
+    /// A fresh matrix must start settled.
+    ///
+    /// Otherwise the effect would paint a lit stub for half a second every time
+    /// it starts against a system that is not playing anything.
+    #[test]
+    fn a_new_matrix_starts_already_deeming_silence() {
+        assert!(
+            matrix().silence_settled(),
+            "starting unsettled would light a stub on a silent system"
+        );
     }
 
     #[test]
@@ -822,7 +1247,7 @@ mod tests {
         let mut whisper = levels(0.0, 0.0, matrix.bands);
         whisper[2] = 0.001;
 
-        let target = bar_target(&whisper, 0.0);
+        let target = bar_target(&whisper, 0.0, true);
         assert!(
             (BAR_MIN_FILL..BAR_MIN_FILL + 0.01).contains(&target),
             "a whisper should sit at the floor, not below or well above: {target}"
@@ -836,7 +1261,7 @@ mod tests {
         let loud = levels(1.0, 0.0, matrix.bands);
 
         // Off the boost it competes with the rest at the ordinary share.
-        let resting = bar_target(&loud, 0.0);
+        let resting = bar_target(&loud, 0.0, true);
         let expected = BAR_MIN_FILL + BAR_OTHER_SHARE * BAR_BASS_SPAN;
         assert!(
             (resting - expected).abs() < 1e-5,
@@ -844,7 +1269,7 @@ mod tests {
         );
 
         // A kick hands it the whole span.
-        let promoted = bar_target(&loud, 1.0);
+        let promoted = bar_target(&loud, 1.0, true);
         assert!(
             (promoted - (BAR_MIN_FILL + BAR_BASS_SPAN)).abs() < 1e-5,
             "a kick should take the bar to the top of the span: {promoted}"
@@ -858,15 +1283,15 @@ mod tests {
         let bands = matrix.bands;
 
         // Same loudest value, whether it is the bass or something above it.
-        let from_bass = bar_target(&levels(0.8, 0.2, bands), 0.0);
-        let from_mids = bar_target(&levels(0.2, 0.8, bands), 0.0);
+        let from_bass = bar_target(&levels(0.8, 0.2, bands), 0.0, true);
+        let from_mids = bar_target(&levels(0.2, 0.8, bands), 0.0, true);
         assert!(
             (from_bass - from_mids).abs() < 1e-5,
             "the bass should get no special treatment off the boost: {from_bass} vs {from_mids}"
         );
 
         // And a quieter board gives a lower bar.
-        assert!(bar_target(&levels(0.3, 0.3, bands), 0.0) < from_bass);
+        assert!(bar_target(&levels(0.3, 0.3, bands), 0.0, true) < from_bass);
     }
 
     #[test]
@@ -887,8 +1312,8 @@ mod tests {
         let bands = band_count(EVEN_COLUMNS);
         let kick = levels(0.3, 0.0, bands);
 
-        let plain = bar_target(&kick, 0.0);
-        let punched = bar_target(&kick, 1.0);
+        let plain = bar_target(&kick, 0.0, true);
+        let punched = bar_target(&kick, 1.0, true);
 
         // +200% on the bass term, so a third-strength kick reads as near full.
         let expected = BAR_MIN_FILL + (0.3 * (1.0 + BAR_BASS_BOOST)) * BAR_BASS_SPAN;
@@ -901,9 +1326,9 @@ mod tests {
         let bands = band_count(EVEN_COLUMNS);
         let kick = levels(0.3, 0.0, bands);
 
-        let full = bar_target(&kick, 1.0);
-        let half = bar_target(&kick, 0.5);
-        let gone = bar_target(&kick, 0.0);
+        let full = bar_target(&kick, 1.0, true);
+        let half = bar_target(&kick, 0.5, true);
+        let gone = bar_target(&kick, 0.0, true);
 
         assert!(full > half && half > gone, "{gone} / {half} / {full}");
     }
@@ -912,7 +1337,7 @@ mod tests {
     fn the_bar_boost_cannot_overfill_the_row() {
         let bands = band_count(EVEN_COLUMNS);
         // 0.5 boosted by 200% would be 1.5 without the cap.
-        let target = bar_target(&levels(0.5, 0.0, bands), 1.0);
+        let target = bar_target(&levels(0.5, 0.0, bands), 1.0, true);
 
         assert!(
             (target - (BAR_MIN_FILL + BAR_BASS_SPAN)).abs() < 1e-5,
@@ -1005,7 +1430,7 @@ mod tests {
         }
 
         assert!(
-            matrix.bar_fill > bar_target(&loud, 0.0) * 0.9,
+            matrix.bar_fill > bar_target(&loud, 0.0, true) * 0.9,
             "a faster fall must not cost it the attack: {}",
             matrix.bar_fill
         );

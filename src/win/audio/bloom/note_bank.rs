@@ -169,6 +169,33 @@ impl NoteBank {
         self.onset.strength()
     }
 
+    /// Which low band currently has the floor, and whether the gap fallback has
+    /// opened it to the others. For the bench: without these the dump shows
+    /// that a band was chosen but never why.
+    fn onset_selected_band(&self) -> usize {
+        self.onset.selected_band()
+    }
+
+    fn onset_in_fallback(&self) -> bool {
+        self.onset.in_fallback()
+    }
+
+    fn onset_band_count(&self) -> usize {
+        self.onset.band_count()
+    }
+
+    fn onset_band_energy(&self, index: usize) -> f32 {
+        self.onset.band_energy(index)
+    }
+
+    fn onset_band_flux(&self, index: usize) -> f32 {
+        self.onset.band_flux_value(index)
+    }
+
+    fn onset_band_strength(&self, index: usize) -> f32 {
+        self.onset.band_strength(index)
+    }
+
     /// Whether the last tick carried a kick-drum hit.
     fn bass_hit(&self) -> bool {
         self.onset.hit()

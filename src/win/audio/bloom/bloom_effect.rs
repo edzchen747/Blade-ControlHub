@@ -56,6 +56,54 @@ const BASS_BOOST_OUTER: f32 = 1.0;
 /// board at full height for as long as the note lasted, which reads as a stuck
 /// visualiser rather than a reactive one.
 const BASS_BOOST_SECONDS: f32 = 0.5;
+/// How loud the bass band has to be for a detected kick to fire the boost.
+///
+/// Detection is deliberately relative - flux is normalised against its own
+/// recent median so one threshold works in a quiet verse and a loud chorus
+/// alike. That is right for *finding* a kick and wrong for deciding whether it
+/// deserves to throw the whole board to full height: a faint tap in a near-silent
+/// passage clears the same bar as the drop it was meant to catch.
+///
+/// This is the absolute check the relative one cannot make. A hit still
+/// registers; it just does not get the boost unless there is real weight behind
+/// it.
+///
+/// Measured against the *raw* band level rather than the smoothed one, so a
+/// sharp kick is judged on its actual height instead of on an envelope that has
+/// not caught up with it yet.
+///
+/// One honest caveat: the bass band is AGC-normalised, so this is "quiet
+/// relative to the band's recent peak" rather than quiet in absolute terms. The
+/// `BASS_AGC_FLOOR` on the peak follower stops that stretch running away in
+/// silence, which is what makes the test meaningful at all. Gating on absolute
+/// magnitude would mean plumbing `NoteBank::power` through to here.
+const BASS_BOOST_MIN_LEVEL: f32 = 0.30;
+/// How long the bands flash white when a boost fires.
+///
+/// Drawn by desaturating rather than by overwriting the colour, so a key's
+/// brightness is untouched and one that is unlit stays unlit. The flash marks
+/// the bands only; the bar keeps its hue throughout, because it reads as a
+/// meter and whiting it out would swamp the length cue it exists to give.
+///
+/// It fades across the window instead of cutting out at the end, for the same
+/// reason `BASS_BOOST_SECONDS` does: a hard edge snaps the whole board at once.
+const BAND_FLASH_SECONDS: f32 = 0.10;
+
+/// The least perceived brightness any hue in the cycle may be drawn at.
+///
+/// HSV treats every hue as equally bright at a given value, and the eye does
+/// not. Full-value blue is `rgb(0, 0, 255)`, which carries about 7% of the
+/// luminance of full-value green - so a cycle that walks the hue circle at
+/// constant value visibly sinks into darkness through the blues and purples and
+/// comes back out the other side.
+///
+/// The fix is to desaturate rather than to skip. Jumping over that arc would put
+/// a visible seam in a cycle that takes `RAINBOW_PERIOD_SECONDS` to come round,
+/// and it would lose the blues altogether; mixing white into them instead keeps
+/// the whole circle and turns the dark navy into a bright blue and the deep
+/// purple into a bright violet. Hues already above the floor - the greens,
+/// cyans, yellows - are left at full saturation and do not change at all.
+const MIN_HUE_LUMINANCE: f32 = 0.32;
 // Kick detection: spectral flux over a dedicated fixed-window bin bank.
 //
 // Every constant here was fitted against real captures rather than synthetic
@@ -91,9 +139,12 @@ const FLUX_HOP_SAMPLES: usize = 512;
 /// is looking for. A sub-bass drop and a kick attack land in different parts of
 /// the range, and a band wide enough to hold both dilutes either one into the
 /// other's noise - a dense mix can hold the wide band's total almost flat while
-/// the sub region moves sharply underneath it. Each band now carries its own
-/// flux, its own median history and its own threshold test, and a peak in
-/// *either* registers a hit.
+/// the sub region moves sharply underneath it. Each band carries its own flux,
+/// its own median history and its own threshold test.
+///
+/// Only *one* of them emits at a time - see `BAND_PRESENCE_SECONDS`. Firing on
+/// both makes a track that uses both read as too busy to hold a beat, so the
+/// detector picks the deeper band when the song actually has one.
 ///
 /// One honest limitation: the sub band's bottom sits below what the analysis
 /// window can resolve. 2048 samples at 48 kHz is 43 ms, shorter than a single
@@ -108,6 +159,49 @@ const FLUX_SUB_BINS: usize = 8;
 const FLUX_KICK_MIN_HZ: f64 = 60.0;
 const FLUX_KICK_MAX_HZ: f64 = 150.0;
 const FLUX_KICK_BINS: usize = 12;
+
+/// How long the detector looks back when deciding which band a song lives in.
+///
+/// Songs differ in where their low end sits: some carry a real sub-bass, some
+/// have nothing under ~60 Hz and put the whole kick in the punch range. Firing
+/// on both is wrong for either, so each band's recent energy is tracked and the
+/// *deepest* one that is genuinely present gets the floor to itself.
+///
+/// Presence is judged on energy rather than on how many onsets a band produced.
+/// The question being asked is "does this song have deep bass", which is about
+/// content, not about where the beat happens to land - and the gap fallback
+/// below covers the case where those two differ.
+const BAND_PRESENCE_SECONDS: f32 = 5.0;
+/// The share of the loudest band's energy needed to take the floor, and the
+/// smaller share needed to keep it once held.
+///
+/// A ratio rather than an absolute level because music is roughly pink: the
+/// 20-60 Hz region is usually louder in absolute terms than 60-150 Hz, so an
+/// absolute test would select sub on very nearly everything. What separates a
+/// sub-heavy mix from a thin one is how the two regions compare - typically
+/// 0.1-0.3 with no deliberate sub against 0.8-2.0 with one.
+///
+/// The two figures differ on purpose. A challenger has to reach `ENGAGE` to take
+/// over while the incumbent only has to hold `RELEASE`, which is a Schmitt
+/// trigger: without the gap, a track sitting near the boundary would swap bands
+/// every few seconds.
+const BAND_PRESENCE_ENGAGE: f32 = 0.60;
+const BAND_PRESENCE_RELEASE: f32 = 0.35;
+/// Below this the selection is held rather than re-judged.
+///
+/// On the compressed scale, so near-silence reads about 0.01 and music 0.7-2.4.
+/// Without it a quiet passage would re-decide the band on nothing but noise.
+/// This is the least-grounded constant here and wants fitting against a capture.
+const BAND_PRESENCE_FLOOR: f32 = 0.05;
+/// How many beats the selected band may stay silent before the others are let
+/// through, and the interval assumed before a beat has been measured.
+///
+/// Energy presence can pick a band the beat does not actually land in - a track
+/// with a sustained sub drone under punch-range drums is exactly that case. This
+/// is what stops the visualiser going dark through it, and through breakdowns
+/// where the sub simply drops out for a few bars.
+const BAND_FALLBACK_GAPS: f32 = 1.5;
+const BAND_FALLBACK_DEFAULT_SECONDS: f32 = 1.0;
 
 /// The mid range the low flux is compared against, to reject voices.
 const FLUX_MID_MIN_HZ: f64 = 500.0;
@@ -252,6 +346,17 @@ const RAINBOW_PERIOD_SECONDS: f32 = 45.0;
 /// The bar never drops below this much of the row *while there is audio*.
 /// Silence takes it to nothing instead, so the keyboard goes properly dark.
 const BAR_MIN_FILL: f32 = 0.10;
+/// How long the audio has to stay quiet before it counts as silence.
+///
+/// Without this the bar collapses to nothing on any momentary gap, then has to
+/// climb back, which reads as a flicker rather than as the system going quiet.
+/// The beat of rest between tracks, a breath in a quiet passage and a single
+/// dropped buffer all look identical to silence at the moment they arrive.
+///
+/// Through the delay the bar holds at `BAR_MIN_FILL`, the same floor it keeps
+/// while something is playing, so a brief gap is invisible. Only once the
+/// quiet outlasts this does the target drop to zero and the row go dark.
+const BAR_SILENCE_DELAY_SECONDS: f32 = 0.5;
 /// How much of the row the bass band alone commands, from `BAR_MIN_FILL` up.
 const BAR_BASS_SPAN: f32 = 0.80;
 /// The share of the row any ordinary band commands.
