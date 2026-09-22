@@ -5,6 +5,26 @@ enum HalfSide {
     Bottom,
 }
 
+/// What the board is showing: the visualiser, the dormant colour cycle, or one
+/// of the crossings between them.
+///
+/// The two fades carry their progress, `0.0` at black and `1.0` at the full
+/// dormant board, so a crossing interrupted part way reverses from where it had
+/// got to rather than from the end it was heading for.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Dormancy {
+    /// The visualiser, drawn normally.
+    Awake,
+    /// Silence has settled and the board is rising into the colour cycle.
+    FadingIn(f32),
+    /// The whole keyboard lit in the cycling colour.
+    Dormant,
+    /// Audio has returned and the board is falling back to black.
+    FadingOut(f32),
+    /// Black, for the seconds left before the visualiser takes over again.
+    Waking(f32),
+}
+
 /// The mirrored four-quadrant equalizer, plus the bass bar on the last row.
 ///
 /// Rows 0-5 are mirrored about a horizontal axis between rows 2 and 3, and about
@@ -29,6 +49,8 @@ struct EqualizerMatrix {
     /// How long the input has been silent, against `BAR_SILENCE_DELAY_SECONDS`.
     /// A short gap is not yet silence.
     silence_elapsed: f32,
+    /// Whether the visualiser or the dormant colour cycle owns the board.
+    dormancy: Dormancy,
     /// Seconds left on the current bass boost.
     boost_remaining: f32,
     /// Seconds left on the white flash that marks a boost firing.
@@ -56,6 +78,7 @@ impl EqualizerMatrix {
             hue: 0.0,
             bar_fill: 0.0,
             silence_elapsed: BAR_SILENCE_DELAY_SECONDS,
+            dormancy: Dormancy::Awake,
             dither: [(1.0, 0); CENTRE_BLOCK_WIDTH],
             dither_elapsed: BLOCK_DITHER_SECONDS,
             boost_remaining: 0.0,
@@ -94,6 +117,7 @@ impl EqualizerMatrix {
         self.update_dither(dt);
 
         self.update_silence(raw, dt);
+        self.update_dormancy(raw, dt);
 
         let target = bar_target(raw, self.boost_envelope, self.silence_settled());
         let rate = if target >= self.bar_fill {
@@ -186,6 +210,12 @@ impl EqualizerMatrix {
     }
 
     fn render(&self, levels: &[f32]) -> Vec<Vec<ThemeColor>> {
+        // The dormant states own the whole board, so the visualiser is not
+        // drawn at all while one of them is running.
+        if let Some(brightness) = self.dormant_brightness() {
+            return self.render_dormant(brightness);
+        }
+
         // Resolved once per frame rather than once per key.
         let band_rows: Vec<(usize, usize)> = (0..self.bands)
             .map(|band| self.band_rows(levels, band))
@@ -406,6 +436,93 @@ impl EqualizerMatrix {
     /// Whether the quiet has lasted long enough to be treated as silence.
     fn silence_settled(&self) -> bool {
         self.silence_elapsed >= BAR_SILENCE_DELAY_SECONDS
+    }
+
+    /// Advances the crossing between the visualiser and the dormant cycle.
+    ///
+    /// The two directions are triggered on deliberately different tests.
+    /// Falling asleep waits on `silence_settled`, so a gap between tracks does
+    /// not start it; waking goes on the first frame carrying any audio at all,
+    /// because the whole point is for the board to be back before the listener
+    /// notices the music is.
+    ///
+    /// Either fade reverses from wherever it has reached if the input changes
+    /// its mind part way, rather than finishing and then turning round.
+    fn update_dormancy(&mut self, raw: &[f32], dt: f32) {
+        let audible = !is_silent(raw);
+        let settled = self.silence_settled();
+        let step = dt / DORMANT_FADE_SECONDS;
+
+        self.dormancy = match self.dormancy {
+            Dormancy::Awake => {
+                if settled {
+                    Dormancy::FadingIn(0.0)
+                } else {
+                    Dormancy::Awake
+                }
+            }
+            Dormancy::FadingIn(level) => {
+                if audible {
+                    Dormancy::FadingOut(level)
+                } else if level + step >= 1.0 {
+                    Dormancy::Dormant
+                } else {
+                    Dormancy::FadingIn(level + step)
+                }
+            }
+            Dormancy::Dormant => {
+                if audible {
+                    Dormancy::FadingOut(1.0)
+                } else {
+                    Dormancy::Dormant
+                }
+            }
+            Dormancy::FadingOut(level) => {
+                // Back to sleep only once the quiet has settled again, the same
+                // test that started the fade in the first place.
+                if settled {
+                    Dormancy::FadingIn(level)
+                } else if level - step <= 0.0 {
+                    Dormancy::Waking(DORMANT_WAKE_BLACK_SECONDS)
+                } else {
+                    Dormancy::FadingOut(level - step)
+                }
+            }
+            Dormancy::Waking(remaining) => {
+                if settled {
+                    Dormancy::FadingIn(0.0)
+                } else if remaining - dt <= 0.0 {
+                    Dormancy::Awake
+                } else {
+                    Dormancy::Waking(remaining - dt)
+                }
+            }
+        };
+    }
+
+    /// How brightly the dormant board is drawn, or `None` while the visualiser
+    /// owns the keyboard.
+    ///
+    /// The black hold before waking is `Some(0.0)` rather than `None`: the
+    /// board is dark on purpose there, and handing it back to the visualiser
+    /// early would show a frame of bands in the middle of the pause.
+    fn dormant_brightness(&self) -> Option<f32> {
+        match self.dormancy {
+            Dormancy::Awake => None,
+            Dormancy::FadingIn(level) | Dormancy::FadingOut(level) => {
+                Some(level.clamp(0.0, 1.0))
+            }
+            Dormancy::Dormant => Some(1.0),
+            Dormancy::Waking(_) => Some(0.0),
+        }
+    }
+
+    /// The whole keyboard in the cycle's current colour, at `brightness`.
+    fn render_dormant(&self, brightness: f32) -> Vec<Vec<ThemeColor>> {
+        let colour = hsv_to_rgb(self.hue, saturation_for_hue(self.hue), brightness)
+            .to_theme_color();
+
+        vec![vec![colour; self.columns]; MATRIX_ROWS]
     }
 
     /// How many columns of the bass bar are lit, counting from the left edge.

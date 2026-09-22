@@ -372,6 +372,29 @@ const LEVEL_RELEASE: f32 = 0.10;
 /// Seconds for the single shared colour to travel the whole hue circle.
 const RAINBOW_PERIOD_SECONDS: f32 = 45.0;
 
+// -- Dormant mode ------------------------------------------------------------
+
+/// How long the keyboard takes to cross between the visualiser and the dormant
+/// colour cycle, in either direction.
+///
+/// With nothing playing the visualiser is a black keyboard, which reads as the
+/// effect having stopped rather than as the music having. Dormant mode lights
+/// the whole board in the same cycling colour the bands are drawn in, so an
+/// idle keyboard still shows the effect is running.
+///
+/// The wait before it starts is `BAR_SILENCE_DELAY_SECONDS`, reusing the
+/// existing gap-versus-silence judgement rather than making a second one: the
+/// board should not sink into the cycle over the beat of rest between tracks.
+const DORMANT_FADE_SECONDS: f32 = 0.5;
+/// How long the board is held black between the dormant fade-out and the
+/// visualiser resuming.
+///
+/// The visualiser keeps running underneath throughout, so it comes back mid-
+/// track rather than from a standing start. The pause is there to separate the
+/// two states: crossing straight from a full board into a full-height first
+/// frame reads as a glitch, while a beat of black reads as a hand-off.
+const DORMANT_WAKE_BLACK_SECONDS: f32 = 0.5;
+
 // -- Bass bar (row 6) --------------------------------------------------------
 
 /// The bar never drops below this much of the row *while there is audio*.

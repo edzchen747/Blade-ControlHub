@@ -130,12 +130,15 @@ mod tests {
     }
 
     #[test]
-    fn silence_leaves_the_whole_keyboard_dark() {
+    fn silence_leaves_the_visualizer_dark() {
         let mut matrix = matrix();
         let quiet = levels(0.0, 0.0, matrix.bands);
         for _ in 0..400 {
             matrix.update(&quiet, &quiet, false, TICK);
         }
+        // What the bands and the bar draw with nothing playing, with the
+        // dormant cycle that now covers them taken out of the way.
+        matrix.dormancy = Dormancy::Awake;
         let frame = matrix.render(&quiet);
 
         for (row, keys) in frame.iter().enumerate() {
@@ -144,6 +147,170 @@ mod tests {
                 "row {row} should be dark in silence"
             );
         }
+    }
+
+    // -- Dormant mode -------------------------------------------------------
+
+    /// A matrix with the visualiser running, as it is whenever music has been
+    /// playing. A fresh one starts already deeming silence, which would put the
+    /// fade in on the very first tick.
+    fn awake_matrix() -> EqualizerMatrix {
+        let mut matrix = matrix();
+        audio_for(&mut matrix, TICK);
+        assert_eq!(matrix.dormancy, Dormancy::Awake);
+        matrix
+    }
+
+    /// Advances the matrix against silence.
+    fn quiet_for(matrix: &mut EqualizerMatrix, seconds: f32) {
+        let quiet = levels(0.0, 0.0, matrix.bands);
+        let mut left = seconds;
+        while left > 0.0 {
+            let dt = left.min(TICK);
+            matrix.update(&quiet, &quiet, false, dt);
+            left -= dt;
+        }
+    }
+
+    /// Advances the matrix against a steady signal.
+    fn audio_for(matrix: &mut EqualizerMatrix, seconds: f32) {
+        let loud = levels(0.6, 0.5, matrix.bands);
+        let mut left = seconds;
+        while left > 0.0 {
+            let dt = left.min(TICK);
+            matrix.update(&loud, &loud, false, dt);
+            left -= dt;
+        }
+    }
+
+    /// The brightest key anywhere on the board.
+    fn peak_brightness(frame: &[Vec<ThemeColor>]) -> u8 {
+        frame
+            .iter()
+            .flatten()
+            .map(|key| key.r.max(key.g).max(key.b))
+            .max()
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn silence_holds_the_board_dark_for_the_delay_before_the_fade_starts() {
+        let mut matrix = awake_matrix();
+
+        quiet_for(&mut matrix, BAR_SILENCE_DELAY_SECONDS * 0.9);
+        assert_eq!(
+            matrix.dormancy,
+            Dormancy::Awake,
+            "the gap between tracks must not start the cycle"
+        );
+
+        quiet_for(&mut matrix, BAR_SILENCE_DELAY_SECONDS * 0.2);
+        assert!(
+            matches!(matrix.dormancy, Dormancy::FadingIn(_)),
+            "past the delay the board should start rising: {:?}",
+            matrix.dormancy
+        );
+    }
+
+    #[test]
+    fn the_board_fades_up_to_the_full_colour_cycle() {
+        let mut matrix = awake_matrix();
+        quiet_for(&mut matrix, BAR_SILENCE_DELAY_SECONDS);
+
+        let starting = peak_brightness(&matrix.render(&levels(0.0, 0.0, matrix.bands)));
+        quiet_for(&mut matrix, DORMANT_FADE_SECONDS * 0.5);
+        let midway = peak_brightness(&matrix.render(&levels(0.0, 0.0, matrix.bands)));
+        quiet_for(&mut matrix, DORMANT_FADE_SECONDS * 0.6);
+
+        assert_eq!(matrix.dormancy, Dormancy::Dormant, "the fade should finish");
+        assert!(starting < midway, "{starting} -> {midway} is not a rise");
+
+        let frame = matrix.render(&levels(0.0, 0.0, matrix.bands));
+        assert_eq!(frame.len(), MATRIX_ROWS);
+        for (row, keys) in frame.iter().enumerate() {
+            assert_eq!(
+                lit_columns_in(keys).len(),
+                EVEN_COLUMNS,
+                "row {row} should be fully lit while dormant"
+            );
+            assert!(
+                keys.windows(2).all(|pair| pair[0] == pair[1]),
+                "row {row} should be one colour"
+            );
+        }
+        assert_eq!(peak_brightness(&frame), 255, "dormant is full brightness");
+    }
+
+    #[test]
+    fn audio_fades_the_cycle_out_holds_black_and_then_shows_the_visualizer() {
+        let mut matrix = awake_matrix();
+        quiet_for(&mut matrix, BAR_SILENCE_DELAY_SECONDS + DORMANT_FADE_SECONDS * 1.1);
+        assert_eq!(matrix.dormancy, Dormancy::Dormant);
+
+        // The first frame carrying audio starts the way back, without waiting.
+        audio_for(&mut matrix, TICK);
+        assert!(
+            matches!(matrix.dormancy, Dormancy::FadingOut(_)),
+            "audio should turn the board round at once: {:?}",
+            matrix.dormancy
+        );
+
+        audio_for(&mut matrix, DORMANT_FADE_SECONDS + TICK);
+        assert!(
+            matches!(matrix.dormancy, Dormancy::Waking(_)),
+            "the fade should land on the black hold: {:?}",
+            matrix.dormancy
+        );
+        let loud = levels(0.6, 0.5, matrix.bands);
+        assert_eq!(
+            peak_brightness(&matrix.render(&loud)),
+            0,
+            "the hold before the visualiser is black"
+        );
+
+        audio_for(&mut matrix, DORMANT_WAKE_BLACK_SECONDS + TICK);
+        assert_eq!(matrix.dormancy, Dormancy::Awake);
+        assert!(
+            peak_brightness(&matrix.render(&loud)) > 0,
+            "the visualiser should be drawing again"
+        );
+    }
+
+    #[test]
+    fn audio_part_way_through_the_fade_in_reverses_from_where_it_reached() {
+        let mut matrix = awake_matrix();
+        quiet_for(&mut matrix, BAR_SILENCE_DELAY_SECONDS + DORMANT_FADE_SECONDS * 0.5);
+        let Dormancy::FadingIn(reached) = matrix.dormancy else {
+            panic!("expected a fade in, got {:?}", matrix.dormancy);
+        };
+
+        audio_for(&mut matrix, TICK);
+        match matrix.dormancy {
+            Dormancy::FadingOut(level) => assert!(
+                level <= reached && level > 0.0,
+                "the fade should turn round at {reached}, not restart: {level}"
+            ),
+            other => panic!("expected a fade out, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn silence_returning_mid_wake_sends_the_board_back_to_sleep() {
+        let mut matrix = awake_matrix();
+        quiet_for(&mut matrix, BAR_SILENCE_DELAY_SECONDS + DORMANT_FADE_SECONDS * 1.1);
+        // A tick of slack: a fade summed in frame-sized steps lands on zero a
+        // hair late rather than exactly on it.
+        audio_for(&mut matrix, DORMANT_FADE_SECONDS + TICK * 2.0);
+        assert!(
+            matches!(matrix.dormancy, Dormancy::Waking(_)),
+            "the fade should have reached the black hold: {:?}",
+            matrix.dormancy
+        );
+
+        // A single burst of audio and nothing after it must not leave the
+        // keyboard parked on the dark visualiser.
+        quiet_for(&mut matrix, BAR_SILENCE_DELAY_SECONDS + DORMANT_FADE_SECONDS * 1.1);
+        assert_eq!(matrix.dormancy, Dormancy::Dormant);
     }
 
     // -- Vertical mirroring -------------------------------------------------
@@ -1229,6 +1396,9 @@ mod tests {
         for _ in 0..400 {
             matrix.update(levels, levels, false, TICK);
         }
+        // These are tests of the bar and the block, not of dormancy: a silent
+        // input would otherwise hand the whole board to the colour cycle.
+        matrix.dormancy = Dormancy::Awake;
         matrix
     }
 
