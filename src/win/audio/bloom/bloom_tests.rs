@@ -472,6 +472,56 @@ mod tests {
         );
     }
 
+    // -- Output latency delay -----------------------------------------------
+
+    /// Reads back the `count` most recent samples the ring holds, oldest first.
+    fn tail(ring: &SampleRing, count: usize) -> Vec<f32> {
+        (0..count).map(|i| ring.get_ending(0, count, i)).collect()
+    }
+
+    #[test]
+    fn no_reported_latency_means_no_delay_at_all() {
+        let mut ring = SampleRing::new();
+        let mut delay = OutputDelay::new(0);
+
+        for sample in [0.1, 0.2, 0.3] {
+            delay.push(&mut ring, sample);
+        }
+
+        assert_eq!(ring.written(), 3, "samples should pass straight through");
+        assert_eq!(tail(&ring, 3), vec![0.1, 0.2, 0.3]);
+    }
+
+    #[test]
+    fn a_reported_latency_holds_the_first_samples_back() {
+        let mut ring = SampleRing::new();
+        let mut delay = OutputDelay::new(4);
+
+        for sample in [0.1, 0.2, 0.3, 0.4] {
+            delay.push(&mut ring, sample);
+        }
+
+        assert_eq!(
+            ring.written(),
+            0,
+            "nothing should reach the analyser until the delay has filled"
+        );
+    }
+
+    #[test]
+    fn samples_emerge_in_order_once_the_delay_has_filled() {
+        let mut ring = SampleRing::new();
+        let mut delay = OutputDelay::new(4);
+
+        for step in 1..=7 {
+            delay.push(&mut ring, step as f32);
+        }
+
+        // Seven in, four held: the first three come out, oldest first.
+        assert_eq!(ring.written(), 3);
+        assert_eq!(tail(&ring, 3), vec![1.0, 2.0, 3.0]);
+    }
+
     // -- Hue brightness floor -----------------------------------------------
 
     const RED: f32 = 0.0;

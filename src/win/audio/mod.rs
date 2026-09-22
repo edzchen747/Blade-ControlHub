@@ -1,8 +1,11 @@
 pub mod bloom;
+mod endpoint_watch;
 mod mute;
 
 pub use bloom::AudioBloomEffect;
 pub use mute::{is_audio_muted, toggle_audio_mute};
+
+pub(crate) use endpoint_watch::{DefaultEndpointWatcher, endpoint_info};
 
 use tracing::warn;
 use windows::{
@@ -76,17 +79,53 @@ impl Drop for ComApartment {
     }
 }
 
-/// Creates an `IAudioEndpointVolume` for the calling thread.
-pub(crate) fn create_endpoint(io: AudioType) -> windows::core::Result<IAudioEndpointVolume> {
+/// The device Windows currently treats as the default for `io`.
+///
+/// Resolved fresh on every call rather than cached, which is what lets
+/// everything built on it follow the user changing their output device without
+/// having to be told. One definition of "the output device" for the whole app:
+/// the mute indicator and the Equalizer's loopback capture must agree on which
+/// endpoint that is, and they only do so as long as the selection lives here
+/// and not at each call site.
+pub(crate) fn default_endpoint(io: AudioType) -> windows::core::Result<IMMDevice> {
     let selection = io.endpoint_selection();
 
     unsafe {
         let enumerator: IMMDeviceEnumerator =
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
 
-        let device = enumerator.GetDefaultAudioEndpoint(selection.direction, selection.role)?;
-        device.Activate(CLSCTX_ALL, None)
+        enumerator.GetDefaultAudioEndpoint(selection.direction, selection.role)
     }
+}
+
+/// The id of the current default endpoint for `io`.
+///
+/// Stable for a given device, so comparing it against a stored copy is how a
+/// long-lived capture notices the default has moved out from under it. A
+/// capture bound to the old endpoint keeps succeeding and simply returns
+/// nothing, so there is no error to watch for instead.
+pub(crate) fn default_endpoint_id(io: AudioType) -> Option<String> {
+    let device = default_endpoint(io).ok()?;
+    unsafe { device.GetId().ok().map(|id| take_com_string(id)) }
+}
+
+/// Reads a COM-allocated wide string and frees it.
+pub(crate) unsafe fn take_com_string(value: windows::core::PWSTR) -> String {
+    if value.is_null() {
+        return String::new();
+    }
+
+    unsafe {
+        let text = value.to_string().unwrap_or_default();
+        CoTaskMemFree(Some(value.0 as *const std::ffi::c_void));
+        text
+    }
+}
+
+/// Creates an `IAudioEndpointVolume` for the calling thread.
+pub(crate) fn create_endpoint(io: AudioType) -> windows::core::Result<IAudioEndpointVolume> {
+    let device = default_endpoint(io)?;
+    unsafe { device.Activate(CLSCTX_ALL, None) }
 }
 
 pub(crate) fn with_endpoint<R>(

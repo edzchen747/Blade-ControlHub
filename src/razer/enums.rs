@@ -51,7 +51,7 @@ pub enum RGBEffect {
     // The variant name is what serde writes into config.json (and into
     // CycleState.items), so it stays put; only the label the UI and OSD show
     // changes. Renaming it would make an existing config fail to deserialise.
-    #[strum(serialize = "Equalizer")]
+    #[strum(serialize = "Audio Bloom")]
     AudioBloom = 26,
     Static = 6,
     Starlight = 25,

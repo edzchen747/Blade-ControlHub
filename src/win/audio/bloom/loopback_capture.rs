@@ -35,18 +35,36 @@ struct LoopbackCapture {
     sample_rate: u32,
     channels: u16,
     format: SampleFormat,
+    /// Samples held back so the visuals line up with what is actually heard.
+    ///
+    /// Loopback taps the render stream, which is upstream of everything between
+    /// the mixer and the ear. On Bluetooth that gap is large enough to see - the
+    /// keyboard reacts before the sound arrives - so the audio is delayed by
+    /// whatever the endpoint reports before it is analysed. Delaying the samples
+    /// rather than the rendered frames is the same thing and far cheaper: one
+    /// queue of floats instead of a history of matrices.
+    delay: OutputDelay,
+    /// The endpoint this capture is bound to.
+    ///
+    /// Held so the loop can notice the default moving elsewhere. A capture does
+    /// not fail when that happens - the endpoint stays valid and just stops
+    /// carrying audio - so the id is the only thing that tells us apart from a
+    /// genuinely silent system.
+    device_id: String,
 }
 
 impl LoopbackCapture {
     fn open() -> Result<Self, String> {
         unsafe {
-            let enumerator: IMMDeviceEnumerator =
-                CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
-                    .map_err(|error| format!("Could not create the device enumerator: {error}"))?;
-
-            let device = enumerator
-                .GetDefaultAudioEndpoint(eRender, eConsole)
+            // The same endpoint the mute indicator reads, by construction.
+            let device = default_endpoint(AudioType::Speakers)
                 .map_err(|error| format!("No default render endpoint: {error}"))?;
+
+            let device_id = device
+                .GetId()
+                .ok()
+                .map(|id| take_com_string(id))
+                .unwrap_or_default();
 
             let client: IAudioClient = device
                 .Activate(CLSCTX_ALL, None)
@@ -87,18 +105,40 @@ impl LoopbackCapture {
                 .Start()
                 .map_err(|error| format!("Could not start loopback capture: {error}"))?;
 
+            let delay_samples = reported_latency_samples(sample_rate);
+            if delay_samples > 0 {
+                info!(
+                    delay_ms = delay_samples as f64 * 1000.0 / sample_rate as f64,
+                    "Offsetting the visualiser by the endpoint's reported output latency"
+                );
+            }
+
             Ok(Self {
                 client,
                 capture,
                 sample_rate,
                 channels,
                 format,
+                delay: OutputDelay::new(delay_samples),
+                device_id,
             })
         }
     }
 
     fn sample_rate(&self) -> u32 {
         self.sample_rate
+    }
+
+    /// Whether the system's default output has moved to a different endpoint.
+    ///
+    /// An unreadable default reports `false` rather than `true`: a transient
+    /// failure to enumerate is not evidence that the device changed, and acting
+    /// on it would tear down a capture that is working.
+    fn endpoint_changed(&self) -> bool {
+        match default_endpoint_id(AudioType::Speakers) {
+            Some(current) => current != self.device_id,
+            None => false,
+        }
     }
 
     fn channels(&self) -> u16 {
@@ -128,7 +168,9 @@ impl LoopbackCapture {
                     .map_err(|error| format!("GetBuffer failed: {error}"))?;
 
                 if flags & BUFFER_FLAG_SILENT != 0 || data.is_null() {
-                    ring.push_silence(frames as usize);
+                    for _ in 0..frames {
+                        self.emit(ring, 0.0);
+                    }
                 } else {
                     self.push_frames(ring, data, frames as usize);
                 }
@@ -140,16 +182,21 @@ impl LoopbackCapture {
         }
     }
 
+    fn emit(&mut self, ring: &mut SampleRing, sample: f32) {
+        self.delay.push(ring, sample);
+    }
+
     /// Downmixes one packet to mono and appends it.
-    unsafe fn push_frames(&self, ring: &mut SampleRing, data: *const u8, frames: usize) {
+    unsafe fn push_frames(&mut self, ring: &mut SampleRing, data: *const u8, frames: usize) {
         let channels = self.channels.max(1) as usize;
         let scale = 1.0 / channels as f32;
+        let format = self.format;
 
         for frame in 0..frames {
             let mut sum = 0.0f32;
             for channel in 0..channels {
                 let index = frame * channels + channel;
-                sum += match self.format {
+                sum += match format {
                     SampleFormat::Float32 => unsafe { *(data as *const f32).add(index) },
                     SampleFormat::Pcm16 => {
                         let raw = unsafe { *(data as *const i16).add(index) };
@@ -161,7 +208,7 @@ impl LoopbackCapture {
                     }
                 };
             }
-            ring.push(sum * scale);
+            self.emit(ring, sum * scale);
         }
     }
 }
@@ -172,6 +219,67 @@ impl Drop for LoopbackCapture {
             let _ = self.client.Stop();
         }
     }
+}
+
+/// Holds audio back so the visuals line up with what is actually heard.
+///
+/// Its own type so the behaviour can be tested: a `LoopbackCapture` needs a
+/// real endpoint and cannot be built in a unit test, but this can.
+struct OutputDelay {
+    queue: VecDeque<f32>,
+    samples: usize,
+}
+
+impl OutputDelay {
+    fn new(samples: usize) -> Self {
+        Self {
+            queue: VecDeque::new(),
+            samples,
+        }
+    }
+
+    /// Appends one sample, releasing the one from `samples` ago.
+    ///
+    /// Nothing reaches the ring until the queue has filled, so the visuals
+    /// start late by exactly the delay rather than racing ahead and settling.
+    fn push(&mut self, ring: &mut SampleRing, sample: f32) {
+        if self.samples == 0 {
+            ring.push(sample);
+            return;
+        }
+
+        self.queue.push_back(sample);
+        while self.queue.len() > self.samples {
+            if let Some(delayed) = self.queue.pop_front() {
+                ring.push(delayed);
+            }
+        }
+    }
+}
+
+/// How far to hold audio back so the visuals match what is heard, in samples.
+///
+/// What the endpoint reports is preferred over anything assumed. A wired
+/// endpoint here reports 0 ms and gets no offset at all. Only when a *Bluetooth*
+/// endpoint reports nothing does `BLUETOOTH_FALLBACK_OFFSET_MS` stand in, on the
+/// grounds that a silent wired device genuinely has no delay while a silent
+/// Bluetooth one is a gap in what Windows exposes.
+///
+/// Clamped to a second, because a nonsense report should cost a bounded queue
+/// and a visibly late visualiser rather than unbounded memory.
+fn reported_latency_samples(sample_rate: u32) -> usize {
+    let Some(info) = endpoint_info(AudioType::Speakers) else {
+        return 0;
+    };
+
+    let latency_ms = match info.stream_latency_ms {
+        Some(reported) if reported > 0.0 => reported,
+        _ if info.is_bluetooth() => BLUETOOTH_FALLBACK_OFFSET_MS,
+        _ => return 0,
+    };
+
+    let samples = (latency_ms / 1000.0 * f64::from(sample_rate)).round();
+    (samples as usize).min(sample_rate as usize)
 }
 
 /// Reads rate, channel count and sample encoding out of a `WAVEFORMATEX`,

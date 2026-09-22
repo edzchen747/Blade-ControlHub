@@ -26,12 +26,6 @@ impl SampleRing {
         self.written += 1;
     }
 
-    fn push_silence(&mut self, frames: usize) {
-        for _ in 0..frames.min(MAX_WINDOW) {
-            self.push(0.0);
-        }
-    }
-
     fn written(&self) -> u64 {
         self.written
     }

@@ -19,6 +19,17 @@ pub fn probe_live_audio(seconds: u64, warmup: u64, dump: Option<&str>) -> Result
 
     println!();
     println!("Listening on the default render endpoint");
+    println!(
+        "  endpoint         {}",
+        default_endpoint_id(AudioType::Speakers).unwrap_or_else(|| "<unreadable>".to_string())
+    );
+    if let Some(info) = endpoint_info(AudioType::Speakers) {
+        println!("  name             {}", info.name);
+        println!("  bus              {}", info.bus);
+        println!("  bluetooth        {}", info.is_bluetooth());
+        println!("  stream latency   {}", millis(info.stream_latency_ms));
+        println!("  device period    {}", millis(info.device_period_ms));
+    }
     println!("  sample rate      {} Hz", capture.sample_rate());
     println!("  bands            {}", matrix.bands);
     println!(
@@ -49,8 +60,21 @@ pub fn probe_live_audio(seconds: u64, warmup: u64, dump: Option<&str>) -> Result
     let warmup_end = Instant::now() + Duration::from_secs(warmup);
     let mut last = Instant::now();
 
+    let mut last_endpoint_check = Instant::now();
+    let endpoint_watcher = DefaultEndpointWatcher::new(AudioType::Speakers).ok();
+
     loop {
         let start = Instant::now();
+
+        let endpoint_may_have_moved = match &endpoint_watcher {
+            Some(watcher) => watcher.take_change(),
+            None => start.duration_since(last_endpoint_check) >= ENDPOINT_CHECK_INTERVAL,
+        };
+        if endpoint_may_have_moved {
+            last_endpoint_check = start;
+            follow_default_endpoint(&mut capture, &mut bank, matrix.bands);
+        }
+
         capture.pump(bank.samples_mut())?;
 
         let now = Instant::now();
@@ -83,6 +107,14 @@ pub fn probe_live_audio(seconds: u64, warmup: u64, dump: Option<&str>) -> Result
     }
 
     Ok(())
+}
+
+/// A timing the endpoint may simply refuse to report.
+fn millis(value: Option<f64>) -> String {
+    match value {
+        Some(value) => format!("{value:.1} ms"),
+        None => "unavailable".to_string(),
+    }
 }
 
 fn dump_row(bank: &NoteBank, seconds: f64) -> String {

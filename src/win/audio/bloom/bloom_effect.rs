@@ -8,12 +8,15 @@ use std::sync::{Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
+use crate::win::audio::{
+    AudioType, DefaultEndpointWatcher, default_endpoint, default_endpoint_id, endpoint_info,
+    take_com_string,
+};
 use windows::Win32::Media::Audio::{
     AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, IAudioCaptureClient, IAudioClient,
-    IMMDeviceEnumerator, MMDeviceEnumerator, WAVEFORMATEX, WAVEFORMATEXTENSIBLE, eConsole,
-    eRender,
+    WAVEFORMATEX, WAVEFORMATEXTENSIBLE,
 };
-use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree};
+use windows::Win32::System::Com::{CLSCTX_ALL, CoTaskMemFree};
 
 // -- Timing ------------------------------------------------------------------
 
@@ -28,6 +31,25 @@ const REFERENCE_TICK: f32 = 1.0 / 60.0;
 const FULL_REFRESH_FRAMES: u64 = 30;
 /// How long to wait before retrying after the capture endpoint drops out.
 const BLOOM_RECOVERY_DELAY: Duration = Duration::from_secs(3);
+/// The offset assumed for a Bluetooth endpoint that will not report its own.
+///
+/// Bluetooth playback reaches the ear well after it passes the render stream
+/// this captures, so without compensation the keyboard reacts before the sound
+/// arrives. When the endpoint reports a figure that is used instead; this only
+/// covers the case where Windows exposes nothing and the alternative is no
+/// correction at all.
+///
+/// Applied to Bluetooth alone, because a wired endpoint reporting nothing
+/// almost certainly has nothing to report, while a Bluetooth one reporting
+/// nothing is a gap in what the API surfaces rather than an absence of delay.
+const BLUETOOTH_FALLBACK_OFFSET_MS: f64 = 50.0;
+/// How often to re-read the default endpoint when there is no subscription.
+///
+/// Only the fallback. Normally Windows reports the change through
+/// `DefaultEndpointWatcher` and this never runs; it exists so that a failure to
+/// register the callback degrades to a slower reaction rather than to the
+/// effect being stuck on one device again.
+const ENDPOINT_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
 // -- Matrix geometry ---------------------------------------------------------
 
@@ -189,10 +211,19 @@ const BAND_PRESENCE_ENGAGE: f32 = 0.60;
 const BAND_PRESENCE_RELEASE: f32 = 0.35;
 /// Below this the selection is held rather than re-judged.
 ///
-/// On the compressed scale, so near-silence reads about 0.01 and music 0.7-2.4.
 /// Without it a quiet passage would re-decide the band on nothing but noise.
-/// This is the least-grounded constant here and wants fitting against a capture.
-const BAND_PRESENCE_FLOOR: f32 = 0.05;
+///
+/// Measured, after an estimate of 0.05 turned out to be an order of magnitude
+/// too high: on a real capture the two low bands sat at 0.030 and 0.032, so the
+/// floor was above every reading and `update_selection` returned early on every
+/// hop. Selection never ran at all and the band stayed on whatever it was
+/// initialised to, which looked exactly like a band being chosen and held.
+///
+/// The estimate was wrong because it reasoned about the compressed scale of a
+/// whole band (`ln(1+100m)` over a strong signal) rather than the *per-bin mean*
+/// this actually averages, which is far smaller. 0.005 leaves roughly a factor
+/// of six below the measured level while still sitting well above silence.
+const BAND_PRESENCE_FLOOR: f32 = 0.005;
 /// How many beats the selected band may stay silent before the others are let
 /// through, and the interval assumed before a beat has been measured.
 ///
@@ -573,9 +604,30 @@ fn run_bloom_loop(device_handle: DeviceHandle, columns: usize, current_generatio
     let mut previous: Vec<Vec<ThemeColor>> = Vec::new();
     let mut frames: u64 = 0;
     let mut last_tick = Instant::now();
+    let mut last_endpoint_check = Instant::now();
+
+    // Windows tells us when the default output moves, rather than the loop
+    // asking once a second forever. Registered before the first tick so a
+    // change arriving during startup is still caught.
+    let endpoint_watcher = match DefaultEndpointWatcher::new(AudioType::Speakers) {
+        Ok(watcher) => Some(watcher),
+        Err(error) => {
+            warn!(%error, "Could not subscribe to output device changes; falling back to polling");
+            None
+        }
+    };
 
     while THREAD_GENERATION.load(Ordering::SeqCst) == current_generation {
         let start = Instant::now();
+
+        let endpoint_may_have_moved = match &endpoint_watcher {
+            Some(watcher) => watcher.take_change(),
+            None => start.duration_since(last_endpoint_check) >= ENDPOINT_CHECK_INTERVAL,
+        };
+        if endpoint_may_have_moved {
+            last_endpoint_check = start;
+            follow_default_endpoint(&mut capture, &mut bank, matrix.bands);
+        }
 
         if let Err(error) = capture.pump(bank.samples_mut()) {
             warn!(%error, "Audio bloom loopback capture failed");
@@ -606,6 +658,52 @@ fn run_bloom_loop(device_handle: DeviceHandle, columns: usize, current_generatio
         }
 
         sleep_until_next_frame(start);
+    }
+}
+
+/// Moves the capture onto the default output device when it changes.
+///
+/// Without this the effect works only on whichever device was default when it
+/// started. Changing output leaves the original endpoint valid but idle, so the
+/// capture keeps succeeding and returns nothing, which is indistinguishable
+/// from a silent system - the keyboard simply goes dark until the old device is
+/// made default again.
+///
+/// The id is still compared even when a notification prompted the call. The
+/// callback fires for changes this capture does not care about, and comparing
+/// costs one cheap COM call against needlessly tearing down a working stream.
+///
+/// A failure to reopen is left for the next signal rather than torn down. The
+/// new endpoint is often busy for a moment during a switch, and a capture that
+/// works is worth more than a tidy error path.
+fn follow_default_endpoint(capture: &mut LoopbackCapture, bank: &mut NoteBank, bands: usize) {
+    if !capture.endpoint_changed() {
+        return;
+    }
+
+    let replacement = match LoopbackCapture::open() {
+        Ok(replacement) => replacement,
+        Err(error) => {
+            warn!(%error, "Output device changed but the new endpoint could not be opened");
+            return;
+        }
+    };
+
+    let rate_changed = replacement.sample_rate() != capture.sample_rate();
+    info!(
+        sample_rate = replacement.sample_rate(),
+        channels = replacement.channels(),
+        rate_changed,
+        "Audio bloom following the output device change"
+    );
+    *capture = replacement;
+
+    // Every filter coefficient is derived from the sample rate, so a device at
+    // a different rate needs the bank rebuilt rather than reused. Same-rate
+    // switches keep theirs, which preserves the AGC and the band selection
+    // instead of making the visualiser re-learn the track it is already on.
+    if rate_changed {
+        *bank = NoteBank::new(capture.sample_rate() as f64, bands);
     }
 }
 

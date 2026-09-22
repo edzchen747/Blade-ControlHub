@@ -88,9 +88,12 @@ fn rgb_effect_from_twenty_six_is_audio_bloom() {
     assert_eq!(RGBEffect::from(26), RGBEffect::AudioBloom);
 }
 
+/// The label is what the UI and OSD show; the variant name is what serde
+/// writes to config.json. They are deliberately different, so this pins the
+/// label without tying it to the on-disk representation.
 #[test]
-fn audio_bloom_is_labelled_equalizer() {
-    assert_eq!(RGBEffect::AudioBloom.to_string(), "Equalizer");
+fn audio_bloom_is_labelled_audio_bloom() {
+    assert_eq!(RGBEffect::AudioBloom.to_string(), "Audio Bloom");
 }
 
 #[test]
