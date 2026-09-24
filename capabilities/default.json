@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Everything the settings window needs: core events for the runtime's state pushes, and opening the USBPcap download page in the user's browser. The window's own commands are declared by the invoke handler and need no permission here.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "opener:allow-open-url"
+  ]
+}

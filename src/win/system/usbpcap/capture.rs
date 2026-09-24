@@ -76,6 +76,12 @@ const PCAP_GLOBAL_HEADER_LEN: usize = 24;
 const PCAP_RECORD_HEADER_LEN: usize = 16;
 /// USB setup packet size preceding the control-transfer data fragment.
 const USB_SETUP_PACKET_LEN: usize = 8;
+
+/// Offset of the packed USBPCAP_BUFFER_PACKET_HEADER `info` byte.
+const USBPCAP_INFO_OFFSET: usize = 16;
+/// `USBPCAP_INFO_PDO_TO_FDO` from USBPcap.h: the frame travelled device to
+/// host, i.e. it is a response rather than a command.
+const USBPCAP_INFO_PDO_TO_FDO: u8 = 0x01;
 /// Data fragment layout: [5-byte report prefix][1-byte argument count]
 /// [2-byte command][arguments].
 const FRAGMENT_PREFIX_LEN: usize = 5;
@@ -850,7 +856,12 @@ impl<'a> CaptureSink<'a> {
                 break;
             }
             self.records += 1;
-            if frame_len(&self.pending[..record_len]).is_some_and(|len| len == frame_len_filter) {
+            // A Razer command and its response are both 90-byte control
+            // transfers, so a length filter alone records every command twice:
+            // once as the request and once as the echo the device sends back.
+            if frame_len(&self.pending[..record_len]).is_some_and(|len| len == frame_len_filter)
+                && is_host_to_device(&self.pending[..record_len])
+            {
                 self.output.write_all(&self.pending[..record_len])?;
                 if let Some(command) =
                     extract_command(&self.pending[PCAP_RECORD_HEADER_LEN..record_len])
@@ -873,6 +884,70 @@ impl<'a> CaptureSink<'a> {
         }
     }
 }
+
+/// Whether the record is a host-to-device transfer, i.e. a command being sent
+/// rather than the device's reply.
+fn is_host_to_device(record: &[u8]) -> bool {
+    let Some(info) = record.get(PCAP_RECORD_HEADER_LEN + USBPCAP_INFO_OFFSET) else {
+        return false;
+    };
+    info & USBPCAP_INFO_PDO_TO_FDO == 0
+}
+
+/// Commands this process sent while a capture was running.
+///
+/// USBPcap records every control transfer on the Razer device's root hub,
+/// which includes ControlHub's own writes. The executor is gated while a
+/// capture runs, but a command already in flight when the capture opens, or
+/// any write that does not pass through that gate, still reaches the wire.
+/// Recording what we send lets the finished capture subtract it, so a capture
+/// only ever contains traffic from other applications.
+static SELF_EMITTED: Mutex<Vec<CapturedCommand>> = Mutex::new(Vec::new());
+
+fn self_emitted() -> std::sync::MutexGuard<'static, Vec<CapturedCommand>> {
+    SELF_EMITTED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Notes a command this process is putting on the wire. Called for every HID
+/// write; does nothing unless a capture is running.
+pub fn record_self_emitted(command: u16, args: &[u8]) {
+    let mut log = self_emitted();
+    // A runaway effect must not grow this without bound if a capture is left
+    // active; the cap is far above any plausible five-second capture.
+    if log.len() >= MAX_SELF_EMITTED {
+        return;
+    }
+    log.push(CapturedCommand {
+        command,
+        args: args.to_vec(),
+    });
+}
+
+/// Starts a fresh self-emitted log for a new capture.
+pub fn reset_self_emitted() {
+    self_emitted().clear();
+}
+
+/// Removes this process's own commands from `captured`, one occurrence per
+/// command we recorded sending.
+pub fn without_self_emitted(mut captured: Vec<CapturedCommand>) -> Vec<CapturedCommand> {
+    let mut ours = std::mem::take(&mut *self_emitted());
+    if ours.is_empty() {
+        return captured;
+    }
+    captured.retain(|command| match ours.iter().position(|mine| mine == command) {
+        Some(index) => {
+            ours.remove(index);
+            false
+        }
+        None => true,
+    });
+    captured
+}
+
+const MAX_SELF_EMITTED: usize = 4096;
 
 /// Total frame length from the packed USBPCAP_BUFFER_PACKET_HEADER:
 /// `headerLen + dataLength`, which Wireshark reports as `frame.len`.
@@ -945,6 +1020,84 @@ mod tests {
         let truncated = &record[..PCAP_RECORD_HEADER_LEN + 36 + 11];
         assert_eq!(extract_command(&truncated[PCAP_RECORD_HEADER_LEN..]), None);
         assert_eq!(extract_command(&[]), None);
+    }
+
+    /// Marks a record as the device's reply rather than a command.
+    fn as_response(mut record: Vec<u8>) -> Vec<u8> {
+        record[PCAP_RECORD_HEADER_LEN + USBPCAP_INFO_OFFSET] |= USBPCAP_INFO_PDO_TO_FDO;
+        record
+    }
+
+    #[test]
+    fn transfer_direction_is_read_from_the_usbpcap_info_byte() {
+        let request = command_record([0; 5], 0, [0x03, 0x0b], &[]);
+
+        assert!(is_host_to_device(&request));
+        assert!(!is_host_to_device(&as_response(request)));
+        assert!(!is_host_to_device(&[]));
+    }
+
+    #[test]
+    fn sink_ignores_the_device_reply_to_a_command() {
+        let mut written = Vec::new();
+        let commands = AtomicU64::new(0);
+        let command_list = Mutex::new(Vec::new());
+        {
+            let mut sink = CaptureSink::new(&mut written, &commands, &command_list);
+            sink.feed(&[0u8; PCAP_GLOBAL_HEADER_LEN], 126).unwrap();
+            let request = command_record([0; 5], 1, [0x03, 0x0b], &[7]);
+            sink.feed(&request, 126).unwrap();
+            sink.feed(&as_response(request), 126).unwrap();
+        }
+
+        // Both frames are 126 bytes, so a length filter alone would count the
+        // command twice.
+        assert_eq!(commands.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            command_list.lock().unwrap().as_slice(),
+            [CapturedCommand {
+                command: 0x030b,
+                args: vec![7]
+            }]
+        );
+    }
+
+    #[test]
+    fn self_emitted_commands_are_removed_one_occurrence_at_a_time() {
+        reset_self_emitted();
+        record_self_emitted(0x030b, &[1, 2]);
+        record_self_emitted(0x030b, &[1, 2]);
+
+        let ours = CapturedCommand {
+            command: 0x030b,
+            args: vec![1, 2],
+        };
+        let theirs = CapturedCommand {
+            command: 0x0303,
+            args: vec![9],
+        };
+
+        let kept = without_self_emitted(vec![
+            ours.clone(),
+            theirs.clone(),
+            ours.clone(),
+            ours.clone(),
+        ]);
+
+        // Two recorded writes remove two occurrences; the third is somebody
+        // else sending the same bytes and must survive.
+        assert_eq!(kept, vec![theirs, ours]);
+    }
+
+    #[test]
+    fn a_capture_with_no_self_emitted_commands_is_untouched() {
+        reset_self_emitted();
+        let captured = vec![CapturedCommand {
+            command: 0x0303,
+            args: vec![1, 5, 255],
+        }];
+
+        assert_eq!(without_self_emitted(captured.clone()), captured);
     }
 
     #[test]

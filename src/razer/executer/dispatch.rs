@@ -89,7 +89,10 @@ impl<'a> Executer<'a> {
             DeviceCmd::SetMuteIndicator(io, muted) => {
                 AudioHandler::new(self.device).set_mute_indicator(io, muted);
             }
-            DeviceCmd::CycleBatteryLimit => self.battery().cycle_battery_limit(),
+            DeviceCmd::CycleBatteryLimit => {
+                let limit = self.battery().cycle_battery_limit();
+                self.record_battery_limit(limit);
+            }
             DeviceCmd::SetBatteryLimit(limit, tx) => {
                 let _ = tx.send(self.set_battery_limit(limit));
             }

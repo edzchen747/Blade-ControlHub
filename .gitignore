@@ -1,2 +1,5 @@
 target/
 config.json
+ui/node_modules/
+ui/dist/
+gen/

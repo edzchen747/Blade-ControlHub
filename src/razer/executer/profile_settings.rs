@@ -137,7 +137,20 @@ impl<'a> Executer<'a> {
 
     fn set_battery_limit(&mut self, limit: BatteryLimit) -> crate::error::AppResult<()> {
         self.battery().set_battery_limit(limit);
+        self.record_battery_limit(limit);
         Ok(())
+    }
+
+    /// Keeps the settings snapshot's battery-care cache in step with a write.
+    ///
+    /// Snapshots only query the device periodically, so without this the
+    /// window reads back the pre-change value and snaps the control to it,
+    /// making a write that did land look like it was ignored. Resetting the
+    /// query counter also makes the next snapshot re-read the device, so a
+    /// write the firmware rejected still converges on hardware truth.
+    pub(super) fn record_battery_limit(&mut self, limit: BatteryLimit) {
+        self.cached_battery_limit = limit;
+        self.settings_snapshot_queries = 0;
     }
 
     fn display_layout_changed(&mut self) {

@@ -2,38 +2,41 @@
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#1e1e2e"/><stop offset="100%" stop-color="#181825"/></linearGradient>
     <linearGradient id="ui" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#7c73e3"/><stop offset="100%" stop-color="#6c63d3"/></linearGradient>
-    <linearGradient id="ipc" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#e69f66"/><stop offset="100%" stop-color="#d48f56"/></linearGradient>
+    <linearGradient id="bridge" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#e69f66"/><stop offset="100%" stop-color="#d48f56"/></linearGradient>
     <linearGradient id="runtime" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#6ccca1"/><stop offset="100%" stop-color="#5cb890"/></linearGradient>
     <linearGradient id="device" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#4dbbd6"/><stop offset="100%" stop-color="#3ca7c2"/></linearGradient>
     <linearGradient id="lib" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#e07a5f"/><stop offset="100%" stop-color="#cc6a4f"/></linearGradient>
-    <linearGradient id="hw" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#3da877"/><stop offset="100%" stop-color="#2d8867"/></linearGradient>
+    <linearGradient id="hw" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#3da877"/><stop offset="100%" stop-color="#2d8f63"/></linearGradient>
     <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%"><feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000" flood-opacity=".3"/></filter>
     <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#a0a0b0"/></marker>
+    <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#e69f66"/></marker>
   </defs>
 
   <rect width="1080" height="710" rx="12" fill="url(#bg)"/>
   <text x="540" y="37" text-anchor="middle" fill="#cdd6f4" font-size="21" font-weight="700">Blade ControlHub — Runtime Architecture</text>
 
   <rect x="55" y="58" width="970" height="113" rx="10" fill="#2a2a3d" stroke="#7c73e3" stroke-width="1.5" filter="url(#shadow)"/>
-  <text x="540" y="82" text-anchor="middle" fill="#a9a3ff" font-size="12" font-weight="600" letter-spacing="1">USER INTERFACES</text>
+  <text x="540" y="82" text-anchor="middle" fill="#a9a3ff" font-size="12" font-weight="600" letter-spacing="1">USER INTERFACES — ONE PROCESS</text>
   <rect x="85" y="98" width="225" height="54" rx="8" fill="url(#ui)" filter="url(#shadow)"/>
-  <text x="198" y="120" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">Settings Client</text><text x="198" y="138" text-anchor="middle" fill="#eee" font-size="10">egui / eframe · no HID ownership</text>
+  <text x="198" y="120" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">Settings Window</text><text x="198" y="138" text-anchor="middle" fill="#eee" font-size="10">WebView2 · Svelte · no HID ownership</text>
   <rect x="428" y="98" width="225" height="54" rx="8" fill="url(#ui)" filter="url(#shadow)"/>
-  <text x="540" y="120" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">Tray</text><text x="540" y="138" text-anchor="middle" fill="#eee" font-size="10">main runtime UI</text>
+  <text x="540" y="120" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">Tray</text><text x="540" y="138" text-anchor="middle" fill="#eee" font-size="10">Tauri event loop · main thread</text>
   <rect x="770" y="98" width="225" height="54" rx="8" fill="url(#ui)" filter="url(#shadow)"/>
-  <text x="883" y="120" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">Click-through OSD</text><text x="883" y="138" text-anchor="middle" fill="#eee" font-size="10">dedicated Win32 window thread</text>
+  <text x="883" y="120" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">Click-through OSD</text><text x="883" y="138" text-anchor="middle" fill="#eee" font-size="10">own Win32 thread · resvg · no webview</text>
 
-  <line x1="198" y1="152" x2="198" y2="207" stroke="#e69f66" stroke-width="2" marker-end="url(#arrow)"/>
-  <text x="210" y="186" fill="#e69f66" font-size="10">named-pipe IPC</text>
+  <line x1="176" y1="152" x2="176" y2="207" stroke="#e69f66" stroke-width="2" marker-end="url(#arrow-accent)"/>
+  <text x="188" y="178" fill="#e69f66" font-size="10">commands</text>
+  <line x1="232" y1="207" x2="232" y2="152" stroke="#e69f66" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#arrow-accent)"/>
+  <text x="244" y="200" fill="#e69f66" font-size="10">state pushes</text>
   <line x1="540" y1="152" x2="540" y2="207" stroke="#a0a0b0" stroke-width="2" marker-end="url(#arrow)"/>
   <line x1="883" y1="152" x2="780" y2="207" stroke="#a0a0b0" stroke-width="2" marker-end="url(#arrow)"/>
 
   <rect x="55" y="207" width="970" height="181" rx="10" fill="#2a2a3d" stroke="#6ccca1" stroke-width="1.5" filter="url(#shadow)"/>
-  <text x="540" y="232" text-anchor="middle" fill="#81e2b4" font-size="12" font-weight="600" letter-spacing="1">MAIN RUNTIME — SINGLE HARDWARE OWNER</text>
-  <rect x="82" y="253" width="246" height="111" rx="8" fill="url(#ipc)" filter="url(#shadow)"/>
-  <text x="205" y="278" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">IPC Server + Runtime State</text><text x="205" y="298" text-anchor="middle" fill="#eee" font-size="10">SettingsState snapshot</text><text x="205" y="314" text-anchor="middle" fill="#eee" font-size="10">reactive update notifications</text><text x="205" y="330" text-anchor="middle" fill="#eee" font-size="10">special-key capture events</text>
+  <text x="540" y="232" text-anchor="middle" fill="#81e2b4" font-size="12" font-weight="600" letter-spacing="1">RUNTIME — SINGLE HARDWARE OWNER</text>
+  <rect x="82" y="253" width="246" height="111" rx="8" fill="url(#bridge)" filter="url(#shadow)"/>
+  <text x="205" y="278" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">ui::webui</text><text x="205" y="298" text-anchor="middle" fill="#eee" font-size="10">Tauri commands · off the event loop</text><text x="205" y="314" text-anchor="middle" fill="#eee" font-size="10">coalesced SettingsState snapshots</text><text x="205" y="330" text-anchor="middle" fill="#eee" font-size="10">special-key + Command Lab events</text>
   <rect x="417" y="253" width="246" height="111" rx="8" fill="url(#runtime)" filter="url(#shadow)"/>
-  <text x="540" y="278" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">Event Routing + UI</text><text x="540" y="298" text-anchor="middle" fill="#eee" font-size="10">tray · OSD · app events</text><text x="540" y="314" text-anchor="middle" fill="#eee" font-size="10">OSD disable scopes</text><text x="540" y="330" text-anchor="middle" fill="#eee" font-size="10">runtime lifecycle / shutdown</text>
+  <text x="540" y="278" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">Event Routing (ui::app)</text><text x="540" y="298" text-anchor="middle" fill="#eee" font-size="10">tray · OSD · app events</text><text x="540" y="314" text-anchor="middle" fill="#eee" font-size="10">OSD disable scopes</text><text x="540" y="330" text-anchor="middle" fill="#eee" font-size="10">runtime lifecycle / shutdown</text>
   <rect x="752" y="253" width="246" height="111" rx="8" fill="url(#runtime)" filter="url(#shadow)"/>
   <text x="875" y="278" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">Windows Workers</text><text x="875" y="298" text-anchor="middle" fill="#eee" font-size="10">input · power/standby · display/GPU</text><text x="875" y="314" text-anchor="middle" fill="#eee" font-size="10">ambient · brightness · external events</text><text x="875" y="330" text-anchor="middle" fill="#eee" font-size="10">commands/events only — no HID owner</text>
 
@@ -42,7 +45,7 @@
   <text x="360" y="407" fill="#a0a0b0" font-size="10">commands</text><text x="680" y="407" fill="#a0a0b0" font-size="10">normal / urgent commands</text>
 
   <rect x="245" y="435" width="590" height="94" rx="10" fill="url(#device)" filter="url(#shadow)"/>
-  <text x="540" y="463" text-anchor="middle" fill="#fff" font-size="15" font-weight="700">razer::DeviceHandle → razer::Executer</text><text x="540" y="484" text-anchor="middle" fill="#eefaff" font-size="11">one command channel and one executor own Device, AppConfig, persistence, display helpers, and HID dispatch</text><text x="540" y="504" text-anchor="middle" fill="#eefaff" font-size="11">normal UI/ambient work is separated from urgent pre-sleep cleanup</text>
+  <text x="540" y="463" text-anchor="middle" fill="#fff" font-size="15" font-weight="700">razer::DeviceHandle → razer::Executer</text><text x="540" y="484" text-anchor="middle" fill="#eefaff" font-size="11">one command channel and one executor own Device, AppConfig, persistence, display helpers, and HID dispatch</text><text x="540" y="504" text-anchor="middle" fill="#eefaff" font-size="11">a successful command marks runtime state stale, which is what wakes the window's state push</text>
 
   <line x1="540" y1="529" x2="540" y2="566" stroke="#a0a0b0" stroke-width="2" marker-end="url(#arrow)"/>
   <rect x="320" y="566" width="440" height="59" rx="10" fill="url(#lib)" filter="url(#shadow)"/>

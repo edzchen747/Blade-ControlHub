@@ -1,10 +1,13 @@
-use eframe::egui;
+//! Colours and sizing shared by the runtime surfaces (OSD, tray, window icon).
+//!
+//! Deliberately free of any UI-toolkit types: the OSD paints through `resvg`
+//! into a layered Win32 window and the settings window is HTML, so a common
+//! colour type here would only be a conversion tax on both.
+
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::config::ThemeColor;
 use crate::razer::enums::PerfMode;
-
-pub use super::layout::*;
 
 pub const DEFAULT_ICON_COLOR: &str = "#95A5A6";
 
@@ -14,61 +17,28 @@ pub const APP_TOOLTIP: &str = "Blade ControlHub";
 
 pub const SETTINGS_WINDOW_TITLE: &str = "Blade ControlHub";
 
+/// Square edge of the rendered tray icon, in pixels.
+pub const TRAY_ICON_SIZE: u32 = 64;
+
+/// The tray glyph is drawn slightly larger than its viewBox so it reads at
+/// 16 px after Windows downscales it.
+pub const TRAY_ICON_SCALE_FACTOR: f32 = 1.2;
+
+/// Square edge of the rendered settings-window icon, in pixels.
+pub const SETTINGS_ICON_SIZE: u32 = 64;
+
+/// Fraction of screen height kept between the settings window and the bottom
+/// right corner of the primary monitor.
+pub const SETTINGS_PADDING_RATIO: f32 = 0.1;
+
+pub const OSD_DISPLAY_DURATION_MS: u64 = 1500;
+
+pub const FADE_OUT_SPEED: f32 = 2.0;
+
+pub const TOTAL_ANIM_TIME_MS: f32 = OSD_DISPLAY_DURATION_MS as f32 + 800.0 / FADE_OUT_SPEED;
+
 static RUNTIME_THEME_COLOR: AtomicU32 =
     AtomicU32::new(theme_color_to_u32(ThemeColor::new(0xff, 0xd7, 0x00)));
-
-pub const OSD_BACKGROUND_R: f32 = 30.0;
-pub const OSD_BACKGROUND_G: f32 = 30.0;
-pub const OSD_BACKGROUND_B: f32 = 30.0;
-pub const OSD_BACKGROUND_A: f32 = 230.0;
-
-pub const OSD_ACCENT_R: f32 = 255.0;
-pub const OSD_ACCENT_G: f32 = 215.0;
-pub const OSD_ACCENT_B: f32 = 0.0;
-pub const OSD_ACCENT_A: f32 = 230.0;
-
-pub const OSD_TEXT_R: f32 = 255.0;
-pub const OSD_TEXT_G: f32 = 255.0;
-pub const OSD_TEXT_B: f32 = 255.0;
-pub const OSD_TEXT_A: f32 = 230.0;
-
-#[derive(Clone, Copy, Debug)]
-pub struct OsdColors {
-    pub background: egui::Color32,
-    pub accent: egui::Color32,
-    pub text: egui::Color32,
-}
-
-impl OsdColors {
-    #[inline]
-    pub fn with_alpha(alpha: f32) -> Self {
-        Self {
-            background: egui::Color32::from_rgba_premultiplied(
-                (Self::clamp(OSD_BACKGROUND_R * alpha)) as u8,
-                (Self::clamp(OSD_BACKGROUND_G * alpha)) as u8,
-                (Self::clamp(OSD_BACKGROUND_B * alpha)) as u8,
-                (Self::clamp(OSD_BACKGROUND_A * alpha)) as u8,
-            ),
-            accent: egui::Color32::from_rgba_premultiplied(
-                (Self::clamp(OSD_ACCENT_R * alpha)) as u8,
-                (Self::clamp(OSD_ACCENT_G * alpha)) as u8,
-                (Self::clamp(OSD_ACCENT_B * alpha)) as u8,
-                (Self::clamp(OSD_ACCENT_A * alpha)) as u8,
-            ),
-            text: egui::Color32::from_rgba_premultiplied(
-                (Self::clamp(OSD_TEXT_R * alpha)) as u8,
-                (Self::clamp(OSD_TEXT_G * alpha)) as u8,
-                (Self::clamp(OSD_TEXT_B * alpha)) as u8,
-                (Self::clamp(OSD_TEXT_A * alpha)) as u8,
-            ),
-        }
-    }
-
-    #[inline]
-    fn clamp(v: f32) -> f32 {
-        v.clamp(0.0, 255.0)
-    }
-}
 
 pub fn set_runtime_theme_color(color: ThemeColor) {
     RUNTIME_THEME_COLOR.store(theme_color_to_u32(color), Ordering::SeqCst);
@@ -78,25 +48,13 @@ pub fn runtime_theme_color() -> ThemeColor {
     theme_color_from_u32(RUNTIME_THEME_COLOR.load(Ordering::SeqCst))
 }
 
-pub fn theme_color32(color: ThemeColor) -> egui::Color32 {
-    egui::Color32::from_rgb(color.r, color.g, color.b)
-}
-
-pub fn scaled_theme_color32(color: ThemeColor, scale: f32) -> egui::Color32 {
-    let scale = scale.clamp(0.0, 1.0);
-    egui::Color32::from_rgb(
-        (color.r as f32 * scale).round() as u8,
-        (color.g as f32 * scale).round() as u8,
-        (color.b as f32 * scale).round() as u8,
-    )
-}
-
-pub fn theme_text_color(color: ThemeColor) -> egui::Color32 {
+/// Black or white, whichever stays readable on top of `color`.
+pub fn theme_text_color(color: ThemeColor) -> ThemeColor {
     let luminance = 0.2126 * color.r as f32 + 0.7152 * color.g as f32 + 0.0722 * color.b as f32;
     if luminance > 145.0 {
-        egui::Color32::BLACK
+        ThemeColor::new(0, 0, 0)
     } else {
-        egui::Color32::WHITE
+        ThemeColor::new(0xff, 0xff, 0xff)
     }
 }
 
@@ -104,9 +62,9 @@ pub fn perf_mode_hex_color(mode: PerfMode) -> &'static str {
     perf_mode_color_components(mode).0
 }
 
-pub fn perf_mode_color32(mode: PerfMode) -> egui::Color32 {
+pub fn perf_mode_rgb(mode: PerfMode) -> ThemeColor {
     let (_, r, g, b) = perf_mode_color_components(mode);
-    egui::Color32::from_rgb(r, g, b)
+    ThemeColor::new(r, g, b)
 }
 
 fn perf_mode_color_components(mode: PerfMode) -> (&'static str, u8, u8, u8) {
@@ -133,4 +91,34 @@ fn theme_color_from_u32(value: u32) -> ThemeColor {
         ((value >> 8) & 0xff) as u8,
         (value & 0xff) as u8,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_theme_color_round_trips_through_its_packed_form() {
+        set_runtime_theme_color(ThemeColor::new(0x12, 0x34, 0x56));
+
+        assert_eq!(runtime_theme_color(), ThemeColor::new(0x12, 0x34, 0x56));
+    }
+
+    #[test]
+    fn theme_text_color_flips_at_the_luminance_threshold() {
+        assert_eq!(
+            theme_text_color(ThemeColor::new(0xff, 0xd7, 0x00)),
+            ThemeColor::new(0, 0, 0)
+        );
+        assert_eq!(
+            theme_text_color(ThemeColor::new(0x20, 0x20, 0x40)),
+            ThemeColor::new(0xff, 0xff, 0xff)
+        );
+    }
+
+    #[test]
+    fn perf_mode_hex_and_rgb_describe_the_same_colour() {
+        assert_eq!(perf_mode_hex_color(PerfMode::Turbo), "#D50000");
+        assert_eq!(perf_mode_rgb(PerfMode::Turbo), ThemeColor::new(0xd5, 0, 0));
+    }
 }

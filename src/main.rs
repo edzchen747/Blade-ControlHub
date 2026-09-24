@@ -2,7 +2,6 @@
 
 use blade_controlhub::{
     config,
-    error::AppError,
     error::AppResult,
     razer::{self, device_handle::device},
     runtime::launch_args,
@@ -16,12 +15,7 @@ use blade_controlhub::{
 use tracing::info;
 
 fn main() -> AppResult<()> {
-    if launch_args::current_process_is_settings_mode() {
-        return ui::settings_window::run()
-            .map_err(|error| AppError::Internal(format!("settings UI failed: {error:?}")));
-    }
-
-    if let Some(path) = command_lab_capture_arg() {
+    if let Some(path) = launch_args::command_lab_capture_path() {
         // Elevated capture child: must exit before close_running_instances()
         // so it does not shut down the parent runtime it works for.
         std::process::exit(win::system::usbpcap::capture::run_command_lab_capture_process(&path));
@@ -41,18 +35,10 @@ fn main() -> AppResult<()> {
     utils::reload::close_running_instances();
     ui::app::init();
     start_razer_service()?;
+    // Hands the main thread to the Tauri event loop, which owns the tray and
+    // the settings window, and returns once the app is asked to exit.
     ui::app::run();
     Ok(())
-}
-
-fn command_lab_capture_arg() -> Option<std::path::PathBuf> {
-    let mut args = std::env::args();
-    while let Some(arg) = args.next() {
-        if arg == "--command-lab-capture" {
-            return args.next().map(std::path::PathBuf::from);
-        }
-    }
-    None
 }
 
 fn refresh_launch_elevation() {
@@ -89,8 +75,7 @@ fn start_razer_service() -> AppResult<()> {
     win::external_events::ExternalChangeMonitor::start();
     win::system::display_gpu::GpuDisplayMonitor::start();
     info!("Razer service started");
-    let notify_startup = !std::env::args().any(|arg| arg == "--silent");
-    device().initialize(notify_startup);
+    device().initialize(!launch_args::is_silent_start());
     Ok(())
 }
 

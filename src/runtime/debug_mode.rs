@@ -16,6 +16,6 @@ mod tests {
     fn debug_mode_flag_is_case_insensitive() {
         assert!(is_debug_mode_arg("--debug"));
         assert!(is_debug_mode_arg("--DEBUG"));
-        assert!(!is_debug_mode_arg("--settings"));
+        assert!(!is_debug_mode_arg("--silent"));
     }
 }

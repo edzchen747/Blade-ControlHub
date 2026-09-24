@@ -1,0 +1,43 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Blade ControlHub",
+  "version": "1.0.0",
+  "identifier": "com.bladecontrolhub.app",
+  "build": {
+    "frontendDist": "ui/dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm --prefix ui run dev",
+    "beforeBuildCommand": "npm --prefix ui run build:fast"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Blade ControlHub",
+        "width": 880,
+        "height": 620,
+        "minWidth": 720,
+        "minHeight": 520,
+        "resizable": true,
+        "maximizable": true,
+        "visible": false,
+        "skipTaskbar": false,
+        "decorations": true,
+        "center": false,
+        "focus": false,
+        "theme": null
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'",
+      "assetProtocol": { "enable": false }
+    }
+  },
+  "bundle": {
+    "active": false,
+    "targets": [],
+    "icon": ["icon.ico"]
+  },
+  "plugins": {}
+}

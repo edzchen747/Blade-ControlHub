@@ -182,7 +182,7 @@ fn handle_razer_special_key(key_code: u8) {
         0x00 => FN_PRESSED.store(false, Ordering::SeqCst),
         _ => {
             let key = razer_key::Key::from(key_code);
-            crate::ipc::server::record_razer_key_code(key_code);
+            crate::ui::webui::record_razer_key_code(key_code);
             if !KEYMAP_LISTENING.load(Ordering::SeqCst) {
                 if let Some(action) = KEY_MAP.get(&key.into()) {
                     let _ = action.execute();

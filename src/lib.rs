@@ -2,7 +2,6 @@ pub mod config;
 pub mod core;
 pub mod error;
 pub mod hal;
-pub mod ipc;
 pub mod razer;
 pub mod runtime;
 pub mod ui;

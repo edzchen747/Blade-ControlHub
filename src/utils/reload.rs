@@ -3,7 +3,7 @@ use std::time::Duration;
 use sysinfo::System;
 use tracing::{error, warn};
 
-use crate::runtime::launch_args::is_settings_mode_arg;
+use crate::runtime::launch_args::is_helper_mode_arg;
 use crate::ui::app::app;
 use crate::ui::app_events::AppEvent;
 
@@ -98,7 +98,7 @@ pub fn close_running_instances() {
     let mut found_old = false;
     for (pid, process) in sys.processes() {
         if is_app_process_name(process.name())
-            && !is_settings_mode_process(process)
+            && !is_helper_mode_process(process)
             && *pid != current_pid
         {
             if process.kill() {
@@ -120,11 +120,13 @@ fn is_app_process_name(name: &str) -> bool {
         .any(|app_name| name.eq_ignore_ascii_case(app_name))
 }
 
-fn is_settings_mode_process(process: &sysinfo::Process) -> bool {
+/// A helper child (an elevated Command Lab capture) is left alone: a still
+/// running parent may be waiting on its output.
+fn is_helper_mode_process(process: &sysinfo::Process) -> bool {
     process
         .cmd()
         .iter()
-        .any(|arg| is_settings_mode_arg(arg.as_str()))
+        .any(|arg| is_helper_mode_arg(arg.as_str()))
 }
 
 #[cfg(test)]
@@ -151,9 +153,8 @@ mod tests {
     }
 
     #[test]
-    fn settings_mode_arg_is_detected_case_insensitively() {
-        assert!(is_settings_mode_arg("--settings"));
-        assert!(is_settings_mode_arg("--SETTINGS"));
-        assert!(!is_settings_mode_arg("--silent"));
+    fn helper_mode_processes_are_spared_by_instance_cleanup() {
+        assert!(is_helper_mode_arg("--command-lab-capture"));
+        assert!(!is_helper_mode_arg("--silent"));
     }
 }

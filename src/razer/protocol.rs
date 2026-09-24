@@ -1,5 +1,9 @@
+use std::sync::atomic::Ordering;
+
+use crate::core::shared_state::COMMAND_LAB_CAPTURE_ACTIVE;
 use crate::error::{AppError, AppResult};
-use crate::runtime::settings_updates;
+use crate::ui::webui::notify_settings_changed;
+use crate::win::system::usbpcap::capture::record_self_emitted;
 use librazer::{device::Device, packet::Packet};
 use tracing::{debug, warn};
 
@@ -36,6 +40,12 @@ fn command_with_settings_update(
     let mut errors: Vec<anyhow::Error> = vec![];
     for _attempt in 1..=HID_COMMAND_ATTEMPTS {
         let report = new_report(command, args)?;
+        // Note every attempt, including retries: USBPcap sees one frame per
+        // submitted transfer, so the Command Lab capture has to subtract one
+        // per attempt to be left with only other applications' traffic.
+        if COMMAND_LAB_CAPTURE_ACTIVE.load(Ordering::SeqCst) {
+            record_self_emitted(command, args);
+        }
         match device.send(report) {
             Ok(response) => {
                 if response.get_args().len() >= args.len()
@@ -43,7 +53,7 @@ fn command_with_settings_update(
                 {
                     let result = response_result_bytes(&response, result_indices)?;
                     if notify_settings {
-                        settings_updates::notify_settings_updated();
+                        notify_settings_changed();
                     }
                     return Ok(result);
                 } else {

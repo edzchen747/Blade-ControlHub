@@ -45,23 +45,28 @@ A lightweight, native Windows application for Razer Blade laptops that provides 
 
 ![Blade ControlHub architecture](./assets/architecture.svg)
 
-The main runtime is the sole owner of hardware access. It hosts the tray, OSD,
-keyboard and Windows monitors, runtime settings snapshot, and local named-pipe
-IPC server. The settings window is a separate egui client: it reads the runtime
-snapshot and sends explicit commands over IPC; it never opens a HID device or
-persists configuration itself.
+One process, one owner of the hardware. Tauri's event loop runs on the main
+thread and hosts the tray icon and the settings window (a WebView2 view over an
+embedded Svelte UI). The OSD keeps its own Win32 thread and message pump, so
+overlay latency never depends on the webview.
 
-- **UI:** the tray and click-through OSD run in the main runtime; the settings
-  client communicates through `ipc::{client,server,protocol}`.
+- **UI:** `ui::webui` builds the Tauri app, its tray and its command surface;
+  the settings window calls those commands and receives pushed state, and never
+  opens a HID device or persists configuration itself. See
+  [`docs/UI-SPEC.md`](./docs/UI-SPEC.md) for what the window is meant to do.
+- **OSD:** `ui::osd_controller` owns a stack of click-through layered windows
+  rendered with `resvg`. It is fully independent of the UI toolkit.
 - **Hardware:** `razer::DeviceHandle` serializes normal and urgent commands to
   the single `razer::Executer`, which owns `librazer::Device`, config updates,
-  and persistence.
+  and persistence. Every window command is moved off the event loop before it
+  touches the device.
 - **Windows services:** input hooks, power/standby, display/GPU, external
   monitor, brightness, and ambient workers publish commands or events without
   becoming additional HID owners.
-- **State:** `runtime::SettingsState` is an IPC-friendly runtime snapshot;
-  persisted `AppConfig` keeps AC and battery profiles while device-backed state
-  is queried by the executor.
+- **State:** `runtime::SettingsState` is the runtime snapshot; a successful HID
+  command marks it stale and `ui::webui::push` coalesces those into at most one
+  snapshot per window. The window never polls. Persisted `AppConfig` keeps the
+  AC and battery profiles while device-backed state is queried by the executor.
 
 ## Hardware Control
 
@@ -80,11 +85,32 @@ Each profile independently controls: keyboard backlight level, RGB effect, backl
 
 ## Building
 
+Requires a Rust toolchain and Node.js (the build script compiles the Svelte UI
+and Tauri embeds the result in the executable).
+
 ```bash
 cargo build --release
 ```
 
-The binary is produced at `target/release/blade-controlhub.exe`.
+The single self-contained binary is produced at
+`target/release/blade-controlhub.exe`. There is no separate UI bundle to ship.
+
+The UI is embedded because the `embedded-ui` feature is on by default, which
+turns on Tauri's `custom-protocol`. The Tauri CLI normally supplies that flag;
+this project builds with plain cargo, so it is a default instead.
+
+To iterate on the UI with hot reload, start the Vite dev server and build
+without that feature, which makes Tauri load `build.devUrl` instead:
+
+```bash
+npm --prefix ui run dev          # in one terminal
+cargo run --no-default-features  # in another
+```
+
+### Runtime requirement
+
+The settings window uses the Microsoft Edge WebView2 runtime, which ships with
+Windows 11 and recent Windows 10. Nothing else is required.
 
 ## Usage
 

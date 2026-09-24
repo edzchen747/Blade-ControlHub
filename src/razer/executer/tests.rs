@@ -18,6 +18,17 @@ mod tests {
         assert!(!should_query_battery_limit(0));
     }
 
+    /// `record_battery_limit` resets the counter to zero after a write, and a
+    /// snapshot increments before testing it, so the next snapshot re-reads the
+    /// device. Without that, the window reads back the cached pre-change value
+    /// and snaps the control away from what the user just picked.
+    #[test]
+    fn a_write_makes_the_next_snapshot_re_read_the_device() {
+        let counter_after_write = 0;
+
+        assert!(should_query_battery_limit(counter_after_write + 1));
+    }
+
     #[test]
     fn capture_drain_discards_commands_but_keeps_shutdown() {
         let (tx, _rx) = std::sync::mpsc::channel();

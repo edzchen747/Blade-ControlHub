@@ -1,6 +1,7 @@
 use librazer::device::Device;
 
 use crate::{
+    core::shared_state::SHIFT_PRESSED,
     error::AppResult,
     razer::{
         enums::{BATTERY_LIMITS, BatteryLimit},
@@ -8,6 +9,7 @@ use crate::{
     },
     ui::{app::app, app_events::OsdEvent, theme::TOTAL_ANIM_TIME_MS},
 };
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 pub struct BatteryHandler<'a> {
@@ -42,7 +44,9 @@ impl<'a> BatteryHandler<'a> {
             .unwrap_or(BatteryLimit::Unknown))
     }
 
-    pub fn cycle_battery_limit(&mut self) {
+    /// Advances the limit and returns the value now on the device, so the
+    /// caller can keep the settings snapshot's cache in step.
+    pub fn cycle_battery_limit(&mut self) -> BatteryLimit {
         let mut current_limit = self.battery_limit().unwrap_or(BatteryLimit::Unknown);
         if Instant::now() < *self.battery_cycle_timeout {
             let limit = next_battery_limit(current_limit);
@@ -57,13 +61,70 @@ impl<'a> BatteryHandler<'a> {
         app(OsdEvent::BatteryLimit(current_limit as u8, index as u8, length as u8).into());
         *self.battery_cycle_timeout =
             Instant::now() + Duration::from_millis(TOTAL_ANIM_TIME_MS as u64);
+        current_limit
     }
 }
 
+/// The next limit in the cycle, or the previous one while Shift is held.
+///
+/// Battery limit is the one cycling control that does not go through
+/// `CycleState`, because its value is read back from the firmware rather than
+/// tracked in the config. It still has to honour Shift the same way.
 fn next_battery_limit(current: BatteryLimit) -> BatteryLimit {
+    step_battery_limit(current, SHIFT_PRESSED.load(Ordering::SeqCst))
+}
+
+fn step_battery_limit(current: BatteryLimit, reverse: bool) -> BatteryLimit {
+    let length = BATTERY_LIMITS.len();
     let index = BATTERY_LIMITS
         .iter()
         .position(|&limit| limit == current)
         .unwrap_or_default();
-    BATTERY_LIMITS[(index + 1) % BATTERY_LIMITS.len()]
+    let next = if reverse {
+        index.checked_sub(1).unwrap_or(length - 1)
+    } else {
+        (index + 1) % length
+    };
+    BATTERY_LIMITS[next]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cycling_forward_walks_the_list_and_wraps() {
+        assert_eq!(
+            step_battery_limit(BatteryLimit::Off, false),
+            BatteryLimit::Limit50
+        );
+        assert_eq!(
+            step_battery_limit(BatteryLimit::Limit80, false),
+            BatteryLimit::Off
+        );
+    }
+
+    #[test]
+    fn holding_shift_walks_the_list_backwards_and_wraps() {
+        assert_eq!(
+            step_battery_limit(BatteryLimit::Limit50, true),
+            BatteryLimit::Off
+        );
+        assert_eq!(
+            step_battery_limit(BatteryLimit::Off, true),
+            BatteryLimit::Limit80
+        );
+    }
+
+    #[test]
+    fn an_unknown_limit_starts_the_cycle_from_the_first_entry() {
+        assert_eq!(
+            step_battery_limit(BatteryLimit::Unknown, false),
+            BatteryLimit::Limit50
+        );
+        assert_eq!(
+            step_battery_limit(BatteryLimit::Unknown, true),
+            BatteryLimit::Limit80
+        );
+    }
 }
