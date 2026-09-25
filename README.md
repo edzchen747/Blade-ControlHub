@@ -110,6 +110,21 @@ npm --prefix ui run dev          # in one terminal
 cargo run --no-default-features  # in another
 ```
 
+### Tests
+
+```bash
+cargo test                # runtime
+npm --prefix ui test      # settings window
+```
+
+`cargo test` links the executable, so Windows refuses to replace it while a
+build of ControlHub is running — close it first, or keep the running copy and
+use a scratch target directory:
+
+```bash
+CARGO_TARGET_DIR=target/test cargo test
+```
+
 ### Runtime requirement
 
 The settings window uses the Microsoft Edge WebView2 runtime, which ships with

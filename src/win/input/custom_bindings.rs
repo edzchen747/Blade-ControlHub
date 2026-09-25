@@ -224,6 +224,24 @@ fn write_bindings() -> std::sync::RwLockWriteGuard<'static, Resolved> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard};
+
+    /// The binding tables and the synthesis guard are process-wide, and cargo
+    /// runs the tests of one binary on several threads. Without a lock they
+    /// race: one test's `replace` lands while another is asserting against the
+    /// tables it just installed, and which test fails is down to timing.
+    ///
+    /// Every test that reads or writes that shared state takes this first. A
+    /// test that fails while holding it poisons the mutex, which is recovered
+    /// rather than propagated — one genuine failure should not be reported as
+    /// a dozen.
+    static SHARED_STATE: Mutex<()> = Mutex::new(());
+
+    fn exclusive() -> MutexGuard<'static, ()> {
+        SHARED_STATE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     fn binding(key_code: u16, action: KeyAction) -> KeyBinding {
         KeyBinding {
@@ -235,6 +253,7 @@ mod tests {
 
     #[test]
     fn replacing_bindings_swaps_both_tables() {
+        let _shared = exclusive();
         replace(&KeyBindings {
             razer: vec![binding(0x24, KeyAction::ToggleUi)],
             hypershift: vec![binding(0x4b, KeyAction::ToggleUi)],
@@ -251,6 +270,7 @@ mod tests {
 
     #[test]
     fn incomplete_rows_are_never_bound() {
+        let _shared = exclusive();
         replace(&KeyBindings {
             razer: vec![binding(
                 0x25,
@@ -275,6 +295,7 @@ mod tests {
     /// One unfinished row must not take the rest of its table down with it.
     #[test]
     fn an_incomplete_row_does_not_disturb_the_complete_ones() {
+        let _shared = exclusive();
         replace(&KeyBindings {
             razer: vec![
                 binding(0x24, KeyAction::ToggleUi),
@@ -300,6 +321,7 @@ mod tests {
     /// the later row wins rather than the table being rejected.
     #[test]
     fn a_duplicated_key_code_resolves_to_the_last_row() {
+        let _shared = exclusive();
         replace(&KeyBindings {
             razer: vec![
                 binding(0x24, KeyAction::ToggleUi),
@@ -328,6 +350,7 @@ mod tests {
     /// and VK_HOME.
     #[test]
     fn the_two_tables_do_not_collide_on_a_shared_code() {
+        let _shared = exclusive();
         replace(&KeyBindings {
             razer: vec![binding(0x24, KeyAction::ToggleUi)],
             hypershift: vec![binding(
@@ -354,6 +377,7 @@ mod tests {
     /// though K is `vkey::Key::Unknown`.
     #[test]
     fn a_hypershift_binding_works_for_a_key_the_vkey_enum_does_not_name() {
+        let _shared = exclusive();
         assert_eq!(
             crate::win::input::vkey::Key::from(0x4b),
             crate::win::input::vkey::Key::Unknown,
@@ -374,6 +398,7 @@ mod tests {
     /// consult this table first, so a hit here is what overrides the default.
     #[test]
     fn a_binding_can_claim_a_key_the_built_in_map_handles() {
+        let _shared = exclusive();
         use crate::win::input::{KeyType, key_map::KEY_MAP, razer_key};
 
         assert!(
@@ -405,6 +430,7 @@ mod tests {
     /// would ignore Hypershift for the rest of the session.
     #[test]
     fn synthesizing_a_macro_clears_its_guard_afterwards() {
+        let _shared = exclusive();
         assert!(!is_synthesizing());
 
         // No steps means no simulated input, so this stays safe under test while
@@ -416,6 +442,7 @@ mod tests {
 
     #[test]
     fn a_do_nothing_action_is_not_even_dispatched() {
+        let _shared = exclusive();
         // `run` returns without spawning, which is what makes "do nothing" a way
         // to silence a key rather than a no-op worker per press.
         run(KeyAction::None);
