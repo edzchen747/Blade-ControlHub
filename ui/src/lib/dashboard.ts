@@ -23,6 +23,13 @@ export const NOTHING_HIDDEN: HiddenDashboardControls = { captures: [], controls:
 export const itemKey = (item: DashboardItem): string => `${item.kind}:${item.name}`;
 
 /**
+ * Where a line comes from, named after what it does. Two lines can carry the
+ * same name, so while editing this is the only thing telling them apart.
+ */
+export const itemSource = (item: DashboardItem): string =>
+  item.kind === "control" ? "Control toggle" : "Replay capture";
+
+/**
  * Everything the user has built, controls first: a control is the finished
  * thing, and a capture is the raw material it is made of. Captures are sorted
  * by name; controls keep the order they were created in, which is the order the

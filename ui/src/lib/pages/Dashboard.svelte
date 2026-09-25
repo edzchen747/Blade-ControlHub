@@ -13,6 +13,7 @@
     NOTHING_HIDDEN,
     dashboardItems,
     itemKey,
+    itemSource,
     withItemShown,
     type DashboardItem,
   } from "../dashboard";
@@ -313,27 +314,29 @@
         </button>
       {/snippet}
 
-      {#if editingControls}
-        <p class="hint">Clear a checkbox to keep it off the Dashboard.</p>
-      {:else if visibleItems.length === 0}
+      {#if !editingControls && visibleItems.length === 0}
         <p class="hint">Everything is hidden. Use Edit to choose what to show.</p>
       {/if}
 
+      <!-- Editing adds a checkbox and says where the line came from. It changes
+           nothing else: every row keeps the control it has the rest of the
+           time, so the section does not rearrange itself under the user. -->
       {#each shownItems as item (itemKey(item))}
         <div class="control-line" class:dimmed={item.hidden}>
           {#if editingControls}
-            <label class="show">
-              <input
-                type="checkbox"
-                checked={!item.hidden}
-                onchange={(event) => setItemShown(item, event.currentTarget.checked)}
-              />
-              <span>{item.name}</span>
-            </label>
-            <span class="muted">{item.kind === "control" ? "Control" : "Capture"}</span>
-          {:else if item.kind === "control"}
+            <input
+              class="show"
+              type="checkbox"
+              checked={!item.hidden}
+              aria-label={`Show ${item.name} on the Dashboard`}
+              onchange={(event) => setItemShown(item, event.currentTarget.checked)}
+            />
+          {/if}
+
+          {#if item.kind === "control"}
             <Toggle
               label={item.name}
+              suffix={editingControls ? itemSource(item) : undefined}
               checked={item.enabled}
               error={store.errors[`custom-control:${item.name}`]}
               onchange={(checked) => flipCustomControl(item.name, checked)}
@@ -342,7 +345,12 @@
             <!-- A capture has no state to show, so it is a button rather than
                  a switch: pressing it replays the commands once. -->
             <div class="row-between">
-              <span>{item.name}</span>
+              <span class="capture">
+                {item.name}
+                <!-- Two lines can carry the same name, so while editing this is
+                     the only thing telling them apart. -->
+                {#if editingControls}<span class="source">{itemSource(item)}</span>{/if}
+              </span>
               <button type="button" onclick={() => replayCapture(item.name)}>Replay</button>
             </div>
           {/if}
@@ -357,10 +365,22 @@
 {/if}
 
 <style>
-  /* Each line owns its own control, so the section stacks rather than grids:
-     a switch, a button and a checkbox do not share a column. */
-  .control-line > :global(*) {
-    width: 100%;
+  /* The row's own control takes the whole width, as it does with no checkbox
+     beside it: editing must not move anything the user was just looking at. */
+  .control-line {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-sm);
+  }
+
+  .control-line > :global(:not(.show)) {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .show {
+    flex: 0 0 auto;
+    cursor: pointer;
   }
 
   /* A hidden line is still listed while editing, so it has to read as off
@@ -369,25 +389,10 @@
     opacity: 0.55;
   }
 
-  .show {
-    display: flex;
-    align-items: center;
-    gap: var(--gap-sm);
-    cursor: pointer;
-    min-width: 0;
-  }
-
-  .show span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .control-line:has(.show) {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--gap);
+  .capture .source {
+    margin-left: var(--gap-xs);
+    color: var(--fg-muted);
+    font-size: 12.5px;
   }
 
   .mode-dot {

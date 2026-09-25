@@ -1,6 +1,8 @@
 <script lang="ts">
   interface Props {
     label: string;
+    /** Shown beside the label: a fact about the control, not about its state. */
+    suffix?: string;
     /** The consequence of switching it on, shown under the label. */
     hint?: string;
     checked: boolean;
@@ -9,13 +11,16 @@
     onchange: (checked: boolean) => void;
   }
 
-  let { label, hint, checked, disabled = false, error, onchange }: Props = $props();
+  let { label, suffix, hint, checked, disabled = false, error, onchange }: Props = $props();
 </script>
 
 <div class="toggle-row" class:disabled>
   <label>
     <span class="text">
-      <span class="label">{label}</span>
+      <span class="label">
+        {label}
+        {#if suffix}<span class="suffix">{suffix}</span>{/if}
+      </span>
       {#if hint}<span class="hint">{hint}</span>{/if}
       {#if error}<span class="field-error">{error}</span>{/if}
     </span>
@@ -52,6 +57,13 @@
 
   .label {
     line-height: 1.3;
+  }
+
+  /* Sits on the label's own line, so adding one does not make the row taller. */
+  .suffix {
+    margin-left: var(--gap-xs);
+    color: var(--fg-muted);
+    font-size: 12.5px;
   }
 
   input {

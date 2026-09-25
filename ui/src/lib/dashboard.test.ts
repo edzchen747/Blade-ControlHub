@@ -4,6 +4,7 @@ import {
   NOTHING_HIDDEN,
   dashboardItems,
   itemKey,
+  itemSource,
   repointedControls,
   withItemShown,
   type DashboardItem,
@@ -114,6 +115,12 @@ describe("hiding a line", () => {
     expect(items.find((item) => item.kind === "control")?.hidden).toBe(false);
     expect(items.find((item) => item.kind === "capture")?.hidden).toBe(true);
     expect(itemKey(items[0]!)).not.toBe(itemKey(items[1]!));
+  });
+
+  // While editing, two lines of the same name are told apart by this alone.
+  it("names where each line came from", () => {
+    expect(itemSource(items("control", "Snap Tap"))).toBe("Control toggle");
+    expect(itemSource(items("capture", "Snap Tap"))).toBe("Replay capture");
   });
 
   it("writes the name to the list its kind belongs to", () => {
