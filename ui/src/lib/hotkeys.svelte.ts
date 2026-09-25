@@ -51,8 +51,6 @@ export interface KeyFacts {
   /** Fn, as reported by the HID reader. Never a virtual key. */
   fnPressed: boolean;
   altPressed: boolean;
-  /** Whether the key is going into something the user is editing. */
-  typing: boolean;
   primaryMultimediaKeys: boolean;
   hypershiftKeys: readonly number[];
 }
@@ -60,15 +58,19 @@ export interface KeyFacts {
 /**
  * Whether this key is the runtime's business at all. Everything else is left to
  * the page, so typing a label or a command still works.
+ *
+ * None of this depends on what has focus. The hook sees these keys in every other
+ * app, text fields included, so a focused toggle, slider or input here must not
+ * be the one place the top row stops being media keys. Keyboard navigation is
+ * unaffected: Tab, the arrows and Space are never the runtime's keys, and an F-key
+ * the runtime does not consume keeps its default.
  */
 export function isRuntimeKey(facts: KeyFacts): boolean {
-  // Modifiers go through even while typing: they are state the runtime needs for
-  // keys that never reach this window, and forwarding one never consumes it, so
-  // Shift still capitalises.
+  // Modifiers are state the runtime needs for keys that never reach this window,
+  // and forwarding one never consumes it, so Shift still capitalises.
   if (isModifier(facts.keyCode)) return true;
   if (facts.fnPressed) return true;
-  if (facts.keyCode >= VK_F1 && facts.keyCode <= VK_F12) return !facts.typing;
-  return false;
+  return facts.keyCode >= VK_F1 && facts.keyCode <= VK_F12;
 }
 
 /**
@@ -146,7 +148,6 @@ class Hotkeys {
       keyCode,
       fnPressed: this.fnPressed,
       altPressed: event.altKey,
-      typing: isTyping(event),
       primaryMultimediaKeys: store.state?.primary_multimedia_keys ?? false,
       hypershiftKeys: store.state?.key_bindings.hypershift.map((row) => row.key_code) ?? [],
     };
@@ -193,18 +194,6 @@ export function virtualKey(event: Pick<KeyboardEvent, "code" | "key">): number |
   if (/^[0-9]$/.test(key)) return key.charCodeAt(0);
   if (/^[a-zA-Z]$/.test(key)) return key.toUpperCase().charCodeAt(0);
   return null;
-}
-
-/** Whether the key is going into something the user is editing. */
-function isTyping(event: KeyboardEvent): boolean {
-  const target = event.target;
-  if (!(target instanceof HTMLElement)) return false;
-  return (
-    target.isContentEditable ||
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement
-  );
 }
 
 export const hotkeys = new Hotkeys();

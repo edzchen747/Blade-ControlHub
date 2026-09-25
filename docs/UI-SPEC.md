@@ -422,7 +422,9 @@ It does. `ui/src/lib/hotkeys.svelte.ts` forwards its own key events to the
 dispatch the hook runs, so no mapping logic is duplicated. What the window
 forwards:
 
-- **F1–F12**, unless the key is going into something the user is editing.
+- **F1–F12**, whatever has focus. The hook sees the top row in every other app,
+  text fields included, so a focused toggle, slider or input must not be the one
+  place it stops working. An F-key the runtime does not consume keeps its default.
 - **anything pressed with Fn**, including from a text field, since Fn+D is a
   Hypershift press wherever the caret is.
 - **Shift and Alt, always, and never consumed.** These are global state the

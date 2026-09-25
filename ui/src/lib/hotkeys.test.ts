@@ -25,7 +25,6 @@ function facts(overrides: Partial<KeyFacts> = {}): KeyFacts {
     keyCode: VK_D,
     fnPressed: false,
     altPressed: false,
-    typing: false,
     primaryMultimediaKeys: true,
     hypershiftKeys: [],
     ...overrides,
@@ -76,12 +75,12 @@ describe("virtualKey", () => {
 });
 
 describe("isRuntimeKey", () => {
-  it("forwards modifiers even while the user is typing", () => {
+  it("forwards modifiers", () => {
     // Shift is what makes the cycling controls run backwards, including for a
     // Razer key that never reaches this window at all — so the runtime needs it
     // whatever the focus is doing.
     for (const keyCode of [VK_LSHIFT, VK_RSHIFT, VK_LALT, VK_RALT]) {
-      expect(isRuntimeKey(facts({ keyCode, typing: true }))).toBe(true);
+      expect(isRuntimeKey(facts({ keyCode }))).toBe(true);
     }
   });
 
@@ -93,14 +92,12 @@ describe("isRuntimeKey", () => {
     expect(isRuntimeKey(facts({ keyCode: VK_D }))).toBe(false);
   });
 
-  it("does not steal the top row from a text field", () => {
-    expect(isRuntimeKey(facts({ keyCode: VK_F1 }))).toBe(true);
-    expect(isRuntimeKey(facts({ keyCode: VK_F1, typing: true }))).toBe(false);
-  });
-
-  it("forwards Fn combos even from a text field", () => {
-    // Fn+D is a Hypershift press wherever the caret happens to be.
-    expect(isRuntimeKey(facts({ keyCode: VK_D, fnPressed: true, typing: true }))).toBe(true);
+  it("forwards the whole top row", () => {
+    // Whatever has focus: the hook sees the top row in every other app, so a
+    // focused toggle, slider or text field here must not turn the media keys off.
+    for (let keyCode = VK_F1; keyCode <= VK_F12; keyCode++) {
+      expect(isRuntimeKey(facts({ keyCode }))).toBe(true);
+    }
   });
 });
 
