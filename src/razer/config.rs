@@ -51,6 +51,105 @@ mod tests {
     use crate::razer::enums::{PERF_MODES, PerfMode};
     use crate::runtime::debug_mode;
 
+    /// A control switched on while plugged in and off on battery, which is
+    /// what makes the two profiles replay different captures.
+    fn split_control() -> CustomToggle {
+        let mut toggle = CustomToggle::new("Snap Tap", "snap tap on", "snap tap off");
+        toggle.set_enabled(PowerProfile::Ac, true);
+        toggle.set_enabled(PowerProfile::Battery, false);
+        toggle
+    }
+
+    fn with_control(toggle: CustomToggle) -> AppConfig {
+        let mut config = AppConfig::default();
+        config.custom_toggles.push(toggle);
+        config
+    }
+
+    #[test]
+    fn each_profile_replays_the_side_it_was_left_on() {
+        let config = with_control(split_control());
+
+        assert_eq!(
+            config.profile_toggle_captures(PowerProfile::Ac),
+            ["snap tap on"]
+        );
+        assert_eq!(
+            config.profile_toggle_captures(PowerProfile::Battery),
+            ["snap tap off"]
+        );
+    }
+
+    /// The reported bug: a control set differently per profile and then hidden
+    /// kept flipping every time the charger was plugged in or pulled out.
+    /// Hiding it takes it out of both profiles.
+    #[test]
+    fn a_hidden_control_is_part_of_neither_profile() {
+        let mut config = with_control(split_control());
+        config.hidden_dashboard_controls.controls = vec!["Snap Tap".to_owned()];
+
+        assert!(config.profile_toggle_captures(PowerProfile::Ac).is_empty());
+        assert!(
+            config
+                .profile_toggle_captures(PowerProfile::Battery)
+                .is_empty()
+        );
+    }
+
+    /// Hiding records nothing about the sides, so showing the control again
+    /// puts it back into both profiles exactly as it was left.
+    #[test]
+    fn showing_a_control_again_restores_the_sides_it_remembered() {
+        let mut config = with_control(split_control());
+        config.hidden_dashboard_controls.controls = vec!["Snap Tap".to_owned()];
+        config.hidden_dashboard_controls.controls.clear();
+
+        assert_eq!(
+            config.profile_toggle_captures(PowerProfile::Ac),
+            ["snap tap on"]
+        );
+        assert_eq!(
+            config.profile_toggle_captures(PowerProfile::Battery),
+            ["snap tap off"]
+        );
+    }
+
+    /// A capture and a control may share a name. Hiding the capture's Replay
+    /// line is not hiding the control, so the control stays in its profiles.
+    #[test]
+    fn hiding_a_capture_of_the_same_name_leaves_the_control_in_its_profiles() {
+        let mut config = with_control(split_control());
+        config.hidden_dashboard_controls.captures = vec!["Snap Tap".to_owned()];
+
+        assert_eq!(
+            config.profile_toggle_captures(PowerProfile::Ac),
+            ["snap tap on"]
+        );
+    }
+
+    /// Only the hidden control drops out; the others keep re-applying.
+    #[test]
+    fn hiding_one_control_leaves_the_rest_in_their_profiles() {
+        let mut other = CustomToggle::new("Game Mode", "game mode on", "game mode off");
+        other.set_enabled(PowerProfile::Ac, true);
+
+        let mut config = with_control(split_control());
+        config.custom_toggles.push(other);
+        config.hidden_dashboard_controls.controls = vec!["Snap Tap".to_owned()];
+
+        assert_eq!(
+            config.profile_toggle_captures(PowerProfile::Ac),
+            ["game mode on"]
+        );
+    }
+
+    #[test]
+    fn an_unfinished_control_is_never_replayed() {
+        let config = with_control(CustomToggle::new("Half built", "snap tap on", ""));
+
+        assert!(config.profile_toggle_captures(PowerProfile::Ac).is_empty());
+    }
+
     #[test]
     fn set_device_model_updates_pid_and_name() {
         let mut config = AppConfig::default();

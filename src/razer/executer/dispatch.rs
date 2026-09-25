@@ -129,10 +129,14 @@ impl<'a> Executer<'a> {
                 self.app_config.custom_toggles = toggles;
                 self.persist_config();
             }
-            DeviceCmd::SetCustomToggle(name, enabled) => {
-                self.apply_custom_toggle(&name, Some(enabled));
+            DeviceCmd::SetCustomToggle(profile, name, enabled) => {
+                self.apply_custom_toggle(profile, &name, Some(enabled));
             }
-            DeviceCmd::ToggleCustomControl(name) => self.apply_custom_toggle(&name, None),
+            // A key flips the profile that is running, which is the only one it
+            // could mean.
+            DeviceCmd::ToggleCustomControl(name) => {
+                self.apply_custom_toggle(AppConfig::active_profile(), &name, None);
+            }
             DeviceCmd::SetHiddenDashboardControls(hidden) => {
                 self.app_config.hidden_dashboard_controls = hidden;
                 self.persist_config();
@@ -251,12 +255,17 @@ impl<'a> Executer<'a> {
         true
     }
 
-    /// Puts one custom control on a side and replays the capture for it.
+    /// Puts one custom control on a side for one profile, and replays the
+    /// capture for it if that profile is the one running.
     ///
-    /// `enabled` is the side to land on, or `None` to flip whichever side it is
-    /// on now — all a key binding knows to ask for, since the remembered state
-    /// lives here with the config.
-    fn apply_custom_toggle(&mut self, name: &str, enabled: Option<bool>) {
+    /// `enabled` is the side to land on, or `None` to flip whichever side that
+    /// profile is on now — all a key binding knows to ask for, since the
+    /// remembered state lives here with the config.
+    ///
+    /// Setting the side of a profile that is not running only records it, the
+    /// way every other per-profile setting behaves: the window can edit the
+    /// other profile without the device following along.
+    fn apply_custom_toggle(&mut self, profile: PowerProfile, name: &str, enabled: Option<bool>) {
         let Some(toggle) = self
             .app_config
             .custom_toggles
@@ -270,10 +279,14 @@ impl<'a> Executer<'a> {
         // The remembered side is written even when the capture has gone
         // missing, so the switch the user just flipped stays flipped and the
         // page can say what is wrong with it.
-        let enabled = enabled.unwrap_or(!toggle.enabled);
-        toggle.enabled = enabled;
+        let enabled = enabled.unwrap_or(!toggle.enabled(profile));
+        toggle.set_enabled(profile, enabled);
         let capture = toggle.capture_for(enabled).to_string();
         self.persist_config();
+
+        if !self.profile_is_active(profile) {
+            return;
+        }
 
         if !capture.is_empty() && self.replay_saved_capture(&capture) {
             app(OsdEvent::CustomControl(name.to_owned(), enabled).into());
@@ -283,6 +296,28 @@ impl<'a> Executer<'a> {
                 capture, "A custom control names a capture that no longer exists"
             );
             app(OsdEvent::CustomAction(format!("{name} failed")).into());
+        }
+    }
+
+    /// Replays the controls that belong to the profile now running, so plugging
+    /// in or unplugging puts them where that profile was left rather than
+    /// leaving the other profile's sides in place. Which controls those are is
+    /// [`AppConfig::profile_toggle_captures`]; a hidden one is not among them.
+    ///
+    /// Silent: this asserts state the user already set, and one overlay per
+    /// control on every power change would be a burst of noise.
+    fn reapply_custom_toggles(&mut self) {
+        let captures = self
+            .app_config
+            .profile_toggle_captures(AppConfig::active_profile());
+
+        for capture in captures {
+            if !self.replay_saved_capture(&capture) {
+                warn!(
+                    capture,
+                    "A custom control names a capture that no longer exists"
+                );
+            }
         }
     }
 

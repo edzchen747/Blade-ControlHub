@@ -39,7 +39,7 @@ pub enum DeviceCmd {
     RemoveCommandLabCommand(String),
     ReplaySavedCapture(String),
     SetCustomToggles(Vec<CustomToggle>),
-    SetCustomToggle(String, bool),
+    SetCustomToggle(PowerProfile, String, bool),
     ToggleCustomControl(String),
     SetHiddenDashboardControls(HiddenDashboardControls),
     SetKeyBindings(KeyBindings),
@@ -249,9 +249,10 @@ impl DeviceHandle {
         self.send(DeviceCmd::SetCustomToggles(toggles));
     }
 
-    /// Puts one custom toggle on a named side, replaying the capture for it.
-    pub fn set_custom_toggle(&self, name: String, enabled: bool) {
-        self.send(DeviceCmd::SetCustomToggle(name, enabled));
+    /// Puts one custom toggle on a named side for one profile, replaying the
+    /// capture for it when that profile is the one running.
+    pub fn set_custom_toggle(&self, profile: PowerProfile, name: String, enabled: bool) {
+        self.send(DeviceCmd::SetCustomToggle(profile, name, enabled));
     }
 
     /// Replaces what the Dashboard's Custom Controls section leaves out.

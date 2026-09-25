@@ -62,19 +62,30 @@
   const hidden = $derived(ui?.hidden_dashboard_controls ?? NOTHING_HIDDEN);
 
   const items = $derived(
-    dashboardItems(ui?.command_lab_commands ?? {}, ui?.custom_toggles ?? [], hidden),
+    dashboardItems(
+      ui?.command_lab_commands ?? {},
+      ui?.custom_toggles ?? [],
+      hidden,
+      store.editing,
+    ),
   );
   const visibleItems = $derived(items.filter((item) => !item.hidden));
   const shownItems = $derived(editingControls ? items : visibleItems);
 
+  // A control's side belongs to the profile being edited, like every other
+  // control on this page: flipping one while the other profile is live records
+  // it for later rather than acting on the machine now.
   function flipCustomControl(name: string, enabled: boolean) {
+    const target = store.editing;
     store.run(
       `custom-control:${name}`,
       (next) => {
-        const target = next.custom_toggles.find((toggle) => toggle.name === name);
-        if (target) target.enabled = enabled;
+        const toggle = next.custom_toggles.find((candidate) => candidate.name === name);
+        if (!toggle) return;
+        if (target === "Ac") toggle.ac_enabled = enabled;
+        else toggle.battery_enabled = enabled;
       },
-      () => ipc.setCustomToggle(name, enabled),
+      () => ipc.setCustomToggle(target, name, enabled),
     );
   }
 

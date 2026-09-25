@@ -22,6 +22,26 @@ import { FAN_SPEED_FIELDS } from "./types";
 
 type Override = (state: UiState) => void;
 
+/**
+ * Which profile the window edits once a snapshot arrives.
+ *
+ * It follows the live profile until the user picks one. A change of power
+ * source — the charger plugged in or pulled out — brings it back to the live
+ * profile even if they had, and forgets their pick: the machine has just
+ * changed under them, and leaving them on the profile that stopped running
+ * would put the page's controls on the wrong one without a word.
+ */
+export function followLiveProfile(
+  previousLive: PowerProfile | null,
+  nextLive: PowerProfile,
+  editing: PowerProfile,
+  pinned: boolean,
+): { editing: PowerProfile; pinned: boolean } {
+  const powerChanged = previousLive !== null && previousLive !== nextLive;
+  if (powerChanged || !pinned) return { editing: nextLive, pinned: false };
+  return { editing, pinned };
+}
+
 class Store {
   state = $state<UiState | null>(null);
   /** Which profile the user is editing; not necessarily the live one. */
@@ -153,8 +173,14 @@ class Store {
   }
 
   #reconcile(next: UiState) {
-    // Follow the live profile until the user picks one themselves.
-    if (!this.#profilePinned) this.editing = next.current_profile;
+    const followed = followLiveProfile(
+      this.state?.current_profile ?? null,
+      next.current_profile,
+      this.editing,
+      this.#profilePinned,
+    );
+    this.editing = followed.editing;
+    this.#profilePinned = followed.pinned;
 
     for (const override of this.#overrides.values()) override.apply(next);
 

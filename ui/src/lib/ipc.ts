@@ -96,8 +96,8 @@ export const removeCommandLabCommand = (name: string) =>
 export const saveCustomToggles = (toggles: CustomToggle[]) =>
   invoke<void>("save_custom_toggles", { toggles });
 
-export const setCustomToggle = (name: string, enabled: boolean) =>
-  invoke<void>("set_custom_toggle", { name, enabled });
+export const setCustomToggle = (profile: PowerProfile, name: string, enabled: boolean) =>
+  invoke<void>("set_custom_toggle", { profile, name, enabled });
 
 export const setHiddenDashboardControls = (hidden: HiddenDashboardControls) =>
   invoke<void>("set_hidden_dashboard_controls", { hidden });

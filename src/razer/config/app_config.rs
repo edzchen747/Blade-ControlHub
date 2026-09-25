@@ -80,6 +80,11 @@ impl AppConfig {
         }
     }
     pub fn refresh_cycle_items(&mut self) {
+        // Controls saved before their sides were remembered per profile carry
+        // one side for both; this is the load-time pass that adopts it.
+        for toggle in &mut self.custom_toggles {
+            toggle.adopt_legacy_side();
+        }
         self.power_state.rgb_effect.items = RGB_EFFECTS.to_vec();
         refresh_perf_mode_items(&mut self.power_state, PowerProfile::Ac);
         self.battery_state.rgb_effect.items = RGB_EFFECTS.to_vec();
@@ -87,6 +92,24 @@ impl AppConfig {
         self.custom_mode_config.cpu_level = self.custom_mode_config.cpu_level.min(3);
         self.custom_mode_config.gpu_level = self.custom_mode_config.gpu_level.min(3);
     }
+    /// The captures to replay when `profile` becomes the one running: the side
+    /// each usable control was left on.
+    ///
+    /// A control hidden from the Dashboard is left out. Hiding it takes it out
+    /// of both profiles rather than only out of the list — a control the user
+    /// has put away must not keep flipping itself every time the charger moves.
+    /// It still works where it is still offered: the Command Lab page's own
+    /// switch, and any key bound to it.
+    pub fn profile_toggle_captures(&self, profile: PowerProfile) -> Vec<String> {
+        self.custom_toggles
+            .iter()
+            .filter(|toggle| {
+                toggle.is_complete() && !self.hidden_dashboard_controls.hides_control(&toggle.name)
+            })
+            .map(|toggle| toggle.capture_for(toggle.enabled(profile)).to_owned())
+            .collect()
+    }
+
     pub fn set_device_model(&mut self, pid: String, name: String) {
         self.model_pid = pid;
         self.model_name = name;

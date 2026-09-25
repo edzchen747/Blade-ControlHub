@@ -44,6 +44,11 @@ impl<'a> Executer<'a> {
             } else {
                 self.kb().restore_fn_keys();
             }
+
+            // Last, so a control that replays a capture touching any of the
+            // above wins over the profile's own value — which is what the user
+            // asked for by leaving the control switched on.
+            self.reapply_custom_toggles();
         };
 
         if notify_startup {

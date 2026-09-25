@@ -93,8 +93,17 @@ export interface CustomToggle {
   name: string;
   on_capture: string;
   off_capture: string;
-  enabled: boolean;
+  /**
+   * Which side the control is on, remembered per power profile the way a fan
+   * speed or a performance mode is. The pair of captures stays one definition.
+   */
+  ac_enabled: boolean;
+  battery_enabled: boolean;
 }
+
+/** The side a control is on for one profile. */
+export const toggleEnabled = (toggle: CustomToggle, profile: PowerProfile): boolean =>
+  profile === "Ac" ? toggle.ac_enabled : toggle.battery_enabled;
 
 /**
  * What the Dashboard's Custom Controls section leaves out, by name. Everything

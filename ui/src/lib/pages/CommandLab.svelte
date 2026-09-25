@@ -4,10 +4,17 @@
 
   import Section from "../components/Section.svelte";
   import Toggle from "../components/Toggle.svelte";
-  import { repointedControls } from "../dashboard";
+  import {
+    captureToSync,
+    followRename,
+    renamedInHidden,
+    repointedControls,
+    swappedCaptures,
+  } from "../dashboard";
   import * as ipc from "../ipc";
   import { jumpTo } from "../scroll";
   import { store } from "../store.svelte";
+  import { toggleEnabled } from "../types";
   import type {
     CapturedCommand,
     CommandLabRecordingState,
@@ -33,6 +40,11 @@
   /** A custom toggle, with an id so the list survives renames. */
   interface ToggleRow extends CustomToggle {
     id: number;
+    /**
+     * The last good name this control was saved under — never an empty or
+     * clashing one — so a rename can find what the old name was hiding.
+     */
+    savedName: string;
   }
 
   let rows = $state<Row[]>([]);
@@ -118,6 +130,7 @@
     toggles = (store.state?.custom_toggles ?? []).map((toggle) => ({
       ...toggle,
       id: nextToggleId++,
+      savedName: toggle.name,
     }));
   });
 
@@ -212,9 +225,10 @@
 
     if (row.savedAs && row.savedAs !== name) {
       await ipc.removeCommandLabCommand(row.savedAs);
-      // A toggle points at a capture by name, so a rename has to follow it
-      // rather than leave the toggle aimed at a capture that no longer exists.
+      // A toggle points at a capture by name, and so does the Dashboard's
+      // hidden list, so a rename has to follow it into both.
       await repointToggles(row.savedAs, name);
+      await followHidden("capture", row.savedAs, name);
     }
     await ipc.saveCommandLabCommands(name, $state.snapshot(row.commands));
     row.savedAs = name;
@@ -223,6 +237,7 @@
   async function remove(row: Row) {
     if (row.savedAs) {
       await ipc.removeCommandLabCommand(row.savedAs);
+      await followHidden("capture", row.savedAs, "");
       await repointToggles(row.savedAs, "");
     }
     rows = rows.filter((candidate) => candidate.id !== row.id);
@@ -233,7 +248,7 @@
     const repointed = repointedControls($state.snapshot(toggles), from, to);
     if (!repointed) return;
 
-    toggles = repointed.map((control, index) => ({ ...control, id: toggles[index]!.id }));
+    toggles = repointed;
     await saveToggles();
   }
 
@@ -242,7 +257,15 @@
   function addToggle() {
     toggles = [
       ...toggles,
-      { id: nextToggleId++, name: "", on_capture: "", off_capture: "", enabled: false },
+      {
+        id: nextToggleId++,
+        name: "",
+        on_capture: "",
+        off_capture: "",
+        ac_enabled: false,
+        battery_enabled: false,
+        savedName: "",
+      },
     ];
   }
 
@@ -287,24 +310,80 @@
    */
   async function saveToggles() {
     await ipc.saveCustomToggles(
-      toggles.map(({ id: _id, ...toggle }) => ({
+      toggles.map(({ id: _id, savedName: _savedName, ...toggle }) => ({
         ...$state.snapshot(toggle),
         name: toggle.name.trim(),
       })),
     );
   }
 
+  /**
+   * Changes a control's captures, then replays whatever puts the device where
+   * the switch says it is. The switch never moves on an assignment — without
+   * this, choosing captures for a control already switched on would leave it
+   * reading on while the device sat in the off state.
+   */
+  async function assignCaptures(toggle: ToggleRow, change: (control: ToggleRow) => void) {
+    const before = $state.snapshot(toggle);
+    change(toggle);
+    await saveToggles();
+
+    // Skipped mid-recording, like the switch: ControlHub holds its own traffic
+    // back while a capture runs, so the replay would be dropped anyway.
+    const capture = captureToSync(before, $state.snapshot(toggle), store.live);
+    const commands = capture ? rows.find((row) => row.savedAs === capture)?.commands : undefined;
+    if (commands && recordingId === null) {
+      await ipc.playCommandLabCommands($state.snapshot(commands));
+    }
+  }
+
+  // This page has no profile switcher, so its switch is the running profile's:
+  // flipping one here always acts on the machine in front of the user. The
+  // Dashboard is where the other profile's side is set.
   async function flipToggle(toggle: ToggleRow, enabled: boolean) {
-    toggle.enabled = enabled;
+    const profile = store.live;
+    if (profile === "Ac") toggle.ac_enabled = enabled;
+    else toggle.battery_enabled = enabled;
+
     // The runtime finds the toggle by name, so the definition goes first and
     // the flip — which is what replays the capture — follows it.
     await saveToggles();
-    await ipc.setCustomToggle(toggle.name.trim(), enabled);
+    await ipc.setCustomToggle(profile, toggle.name.trim(), enabled);
   }
 
   async function removeToggle(toggle: ToggleRow) {
     toggles = toggles.filter((candidate) => candidate.id !== toggle.id);
     await saveToggles();
+    if (toggle.savedName !== "") await followHidden("control", toggle.savedName, "");
+  }
+
+  /**
+   * Saves a control's new name and carries its hidden state across.
+   *
+   * An empty or clashing name is saved as it stands — the page flags it — but
+   * not followed: the last good name is kept, so when the user fixes the name
+   * the rename still starts from what was actually hidden.
+   */
+  async function renameToggle(toggle: ToggleRow) {
+    await saveToggles();
+
+    const clashes = duplicateToggleNames.has(toggle.name.trim().toLowerCase());
+    const followed = followRename(toggle.savedName, toggle.name, clashes);
+    toggle.savedName = followed.savedName;
+    if (followed.rename) await followHidden("control", followed.rename.from, followed.rename.to);
+  }
+
+  /** Carries a line's hidden state on the Dashboard through a rename or delete. */
+  async function followHidden(kind: "capture" | "control", from: string, to: string) {
+    const hidden = store.state?.hidden_dashboard_controls;
+    const next = hidden ? renamedInHidden(hidden, kind, from, to) : null;
+    if (!next) return;
+
+    await store.run(
+      "dashboard-controls",
+      (snapshot) => (snapshot.hidden_dashboard_controls = next),
+      () => ipc.setHiddenDashboardControls(next),
+    );
   }
 
   const hex = (value: number, width: number) =>
@@ -486,7 +565,7 @@
           class:invalid={duplicateToggleNames.has(toggle.name.trim().toLowerCase())}
           placeholder="Name this control"
           bind:value={toggle.name}
-          onchange={() => saveToggles()}
+          onchange={() => renameToggle(toggle)}
           aria-label="Control name"
         />
         <button
@@ -507,8 +586,8 @@
             class:invalid={toggle.on_capture === ""}
             value={toggle.on_capture}
             onchange={(event) => {
-              toggle.on_capture = event.currentTarget.value;
-              void saveToggles();
+              const capture = event.currentTarget.value;
+              void assignCaptures(toggle, (control) => (control.on_capture = capture));
             }}
           >
             <option value="">Choose a capture…</option>
@@ -523,6 +602,20 @@
           </select>
         </label>
 
+        <!-- For a pair recorded the wrong way round. The switch stays put and
+             the device follows it, as with any other assignment. -->
+        <button
+          type="button"
+          class="icon swap"
+          aria-label="Swap the on and off captures"
+          title="Swap on and off"
+          disabled={toggle.on_capture === toggle.off_capture || recordingId !== null}
+          onclick={() =>
+            assignCaptures(toggle, (control) => Object.assign(control, swappedCaptures(control)))}
+        >
+          ⇄
+        </button>
+
         <label>
           <span class="side-label">Switched off</span>
           <select
@@ -530,8 +623,8 @@
             class:invalid={toggle.off_capture === ""}
             value={toggle.off_capture}
             onchange={(event) => {
-              toggle.off_capture = event.currentTarget.value;
-              void saveToggles();
+              const capture = event.currentTarget.value;
+              void assignCaptures(toggle, (control) => (control.off_capture = capture));
             }}
           >
             <option value="">Choose a capture…</option>
@@ -550,7 +643,7 @@
         hint={toggleComplete(toggle) && !error
           ? `Replays “${toggle.on_capture}” on, “${toggle.off_capture}” off.`
           : "Name the control and pick a capture for each side."}
-        checked={toggle.enabled}
+        checked={toggleEnabled(toggle, store.live)}
         disabled={!toggleComplete(toggle) || error !== null || recordingId !== null}
         error={error ?? undefined}
         onchange={(checked) => flipToggle(toggle, checked)}
@@ -651,9 +744,12 @@
   }
 
   /* The two captures are one decision made twice, so they sit side by side. */
+  /* The swap sits between the selects, on their line rather than their
+     captions', which is where the pair it acts on actually is. */
   .sides {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: end;
     gap: var(--gap-sm);
   }
 

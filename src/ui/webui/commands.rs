@@ -294,10 +294,14 @@ async fn save_custom_toggles(toggles: Vec<CustomToggle>) -> CommandResult<()> {
 }
 
 #[tauri::command]
-async fn set_custom_toggle(name: String, enabled: bool) -> CommandResult<()> {
+async fn set_custom_toggle(
+    profile: PowerProfile,
+    name: String,
+    enabled: bool,
+) -> CommandResult<()> {
     changed(
         on_device(move |device| {
-            device.set_custom_toggle(name, enabled);
+            device.set_custom_toggle(profile, name, enabled);
             Ok(())
         })
         .await,

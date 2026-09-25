@@ -18,7 +18,8 @@ mod tests {
     /// same control flipped by a key has nothing else to show for itself.
     #[test]
     fn a_custom_control_keeps_its_overlay_only_when_a_key_flipped_it() {
-        let from_window = DeviceCmd::SetCustomToggle("Snap Tap".to_owned(), true);
+        let from_window =
+            DeviceCmd::SetCustomToggle(PowerProfile::Ac, "Snap Tap".to_owned(), true);
         let from_key = DeviceCmd::ToggleCustomControl("Snap Tap".to_owned());
 
         assert!(

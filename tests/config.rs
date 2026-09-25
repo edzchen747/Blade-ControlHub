@@ -159,24 +159,49 @@ fn app_config_serializes_its_bulky_collections_at_the_end() {
     );
 }
 
-/// A custom toggle names the captures it replays, so both names and the side it
-/// was last left on have to survive the file.
+/// A custom toggle names the captures it replays, so both names and the side
+/// each profile was left on have to survive the file.
 #[test]
 fn custom_toggles_survive_a_round_trip_through_the_config_file() {
     use blade_controlhub::razer::config::CustomToggle;
 
+    let mut toggle = CustomToggle::new("Snap Tap", "snap tap on", "snap tap off");
+    toggle.set_enabled(PowerProfile::Ac, true);
+
     let mut config = AppConfig::default();
-    config.custom_toggles.push(CustomToggle {
-        name: "Snap Tap".to_owned(),
-        on_capture: "snap tap on".to_owned(),
-        off_capture: "snap tap off".to_owned(),
-        enabled: true,
-    });
+    config.custom_toggles.push(toggle);
 
     let json = serde_json::to_string(&config).expect("config must serialize");
     let restored: AppConfig = serde_json::from_str(&json).expect("config must deserialize");
 
     assert_eq!(restored.custom_toggles, config.custom_toggles);
+    assert!(restored.custom_toggles[0].enabled(PowerProfile::Ac));
+    assert!(!restored.custom_toggles[0].enabled(PowerProfile::Battery));
+}
+
+/// A control saved before the sides were split carries its one side onto both,
+/// so upgrading does not quietly switch the user's controls off. The load-time
+/// pass is what adopts it, the same pass that normalises the cycle lists.
+#[test]
+fn a_control_saved_before_the_split_keeps_its_side_on_both_profiles() {
+    let json = r#"{
+        "custom_toggles": [{
+            "name": "Snap Tap",
+            "on_capture": "snap tap on",
+            "off_capture": "snap tap off",
+            "enabled": true
+        }]
+    }"#;
+
+    let mut config: AppConfig = serde_json::from_str(json).expect("an older config must parse");
+    config.refresh_cycle_items();
+
+    assert!(config.custom_toggles[0].enabled(PowerProfile::Ac));
+    assert!(config.custom_toggles[0].enabled(PowerProfile::Battery));
+
+    // And the old field is not written back, so it cannot be adopted twice.
+    let rewritten = serde_json::to_string(&config).expect("config must serialize");
+    assert!(!rewritten.contains(r#""enabled""#), "{rewritten}");
 }
 
 /// Hiding is stored as the exception, so what round-trips is the list of lines
