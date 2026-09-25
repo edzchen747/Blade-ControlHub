@@ -32,7 +32,8 @@
     // Esc closes the window, matching how a tray panel is expected to behave.
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      if (keyMap.listeningRazer !== null || keyMap.listeningHypershift !== null) return;
+      // Esc belongs to whatever is waiting for a key press on the Keys page.
+      if (keyMap.capturing) return;
       void import("./lib/ipc").then((ipc) => ipc.hideWindow());
     };
     window.addEventListener("keydown", onKeyDown);
@@ -60,6 +61,13 @@
     const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
     return luminance > 145 ? "#000000" : "#ffffff";
   }
+
+  // The mapping tables arrive with every other setting, so they are seeded
+  // from the same snapshot rather than fetched separately.
+  $effect(() => {
+    const bindings = store.state?.key_bindings;
+    if (bindings) keyMap.seed(bindings);
+  });
 
   // Command Lab is gated; if the flag is turned off while it is open, fall back.
   $effect(() => {

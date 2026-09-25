@@ -1,6 +1,9 @@
+pub mod app_index;
 pub mod cli_utils;
 pub mod display_gpu;
 pub mod elevation;
+pub mod file_picker;
+pub mod launch;
 pub mod power;
 pub mod standby;
 pub mod startup;

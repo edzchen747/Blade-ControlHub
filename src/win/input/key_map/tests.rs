@@ -19,18 +19,25 @@ mod tests {
         );
     }
 
+    /// A custom binding can hold every modifier at once, so the combo must not
+    /// drop keys past a fixed width the way it used to.
     #[test]
-    fn key_combo_ignores_keys_after_four_slots() {
+    fn key_combo_keeps_every_key_it_is_given() {
         let combo = KeyCombo::new(&[
             Key::ControlLeft,
-            Key::ShiftLeft,
             Key::Alt,
-            Key::KeyP,
+            Key::ShiftLeft,
+            Key::MetaLeft,
             Key::KeyA,
         ]);
 
-        assert_eq!(combo.into_iter().count(), 4);
-        assert!(!combo.events().contains(&EventType::KeyPress(Key::KeyA)));
+        assert_eq!(combo.into_iter().count(), 5);
+        assert!(combo.events().contains(&EventType::KeyPress(Key::KeyA)));
+        assert_eq!(
+            combo.events().last(),
+            Some(&EventType::KeyRelease(Key::ControlLeft)),
+            "the first key pressed is the last released"
+        );
     }
 
     #[test]

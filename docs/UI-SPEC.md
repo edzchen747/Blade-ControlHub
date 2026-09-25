@@ -213,12 +213,15 @@ Two sections on one page, replacing the old nested tab-within-a-tab.
 
 ```
 ┌─ Razer special keys ───────────────────────────────────┐
-│  Remap M1, M2, mic mute, trackpad, performance…        │
+│  Remap M1-M4, Copilot, mic, trackpad, performance…     │
 │  ┌──────────────┬────────────┬──────────────┬───┐      │
 │  │ Label        │ Key        │ Action       │   │      │
 │  ├──────────────┼────────────┼──────────────┼───┤      │
-│  │ [Macro 1   ] │ [ 0x54   ] │ [          ] │ ✕ │      │
-│  │ [          ] │ [ Listen…] │ [          ] │ ✕ │      │
+│  │ [Task mgr  ] │ [ M1     ] │ [Run a macro▾]│ ✕│      │
+│  │ [Ctrl][Alt][Shift][Win]                      │      │
+│  │ [ 1. Ctrl+Shift+Esc          ]  + Add step   │      │
+│  ├──────────────────────────────────────────────┤      │
+│  │ [          ] │ [ Listen…] │ [Do nothing ▾]│ ✕│      │
 │  └──────────────┴────────────┴──────────────┴───┘      │
 │  + Add mapping                                         │
 └────────────────────────────────────────────────────────┘
@@ -231,6 +234,8 @@ Two sections on one page, replacing the old nested tab-within-a-tab.
 
 - **Capture is an inline state, not a modal.** Pressing the Key cell puts that cell
   in a listening state with a pulsing ring; Esc cancels. Preserved from the old UI.
+  The one modal on the page is the application picker, because choosing from a few
+  hundred installed programs is not a cell-sized job.
 - **Duplicate keys are rejected inline** on the offending row (red ring + message
   under it), not as a page-level banner that expires after 2 s. An error about a
   specific row belongs on that row and should persist until resolved.
@@ -238,10 +243,43 @@ Two sections on one page, replacing the old nested tab-within-a-tab.
   waits for the HID reader to report a code. That contract is preserved exactly;
   only the presentation changes.
 - Hypershift capture is **webview-side**: a `keydown` listener restricted to A–Z and
-  0–9, matching the old `normal_key_code` whitelist byte-for-byte.
-- The Action column stays a placeholder for Hypershift ("coming soon" in the old UI).
-  It is rendered as visibly not-yet-available rather than as an enabled-looking but
-  inert text field.
+  0–9, matching the old `normal_key_code` whitelist byte-for-byte. The *chord* a
+  key/macro action sends is captured separately and accepts any key.
+- **The Action column is real.** Each row picks one of: do nothing, send a key, run a
+  macro, device control, open ControlHub, launch an application, run a command,
+  replay a Command Lab capture. The device vocabulary comes from the state snapshot
+  (`meta.device_action_labels`), never hard-coded in the page.
+- **Sending a key and running a macro are separate actions,** because they are chosen
+  in opposite ways. A key is *picked* from a grouped dropdown of the whole virtual-key
+  range, which is the only way to reach a key the laptop does not physically have —
+  F13–F24, the numpad, media and browser keys. A macro is *captured*, one step at a
+  time, as the user performs it. Both carry Ctrl/Alt/Shift/Win.
+- **Replaying a capture is only offered while advanced experimental features are
+  on,** since it is a Command Lab feature and the page must not advertise one the
+  user has not turned on. A row already set to it keeps the option: the binding still
+  works, because the saved captures live in the config rather than behind the flag,
+  and a dropdown whose current value is missing renders blank.
+- **The application picker covers both kinds of application.** Desktop programs come
+  from the Start menu's shortcut trees; packaged applications — Notepad, Terminal,
+  Calculator, Settings, anything from the Store — have no shortcut at all and come
+  from the shell's `AppsFolder`, launched by model ID rather than by path.
+- **An action's own control spans the whole list,** on a second line under the row,
+  not squeezed into the Action column: a macro's steps and an application plus its
+  arguments do not fit in one column. Rows are separated by a rule, since a row is
+  no longer one line tall.
+- **A row is not finished until its action can run.** `+ Add mapping` stays disabled
+  and the row carries a persistent error while a launch action has no application,
+  a command is blank, or a macro step has no key. This mirrors
+  `KeyAction::is_complete` in the runtime, which drops incomplete rows rather than
+  dispatching them.
+- **A key that already did something says so.** Rows whose key appears in
+  `meta.built_in_bindings` show a warning badge whose tooltip names the built-in
+  action being replaced. Custom bindings win; the badge is the only warning.
+- **Only one cell listens at a time,** across both tables and every macro step, and
+  while anything is listening Esc belongs to it rather than to the window.
+- **Hypershift is reachable.** Both sections share one scroll page, so while the
+  Hypershift section is out of view a sticky "Jump to Hypershift" control sits at
+  the bottom of the page.
 
 ### 4.4 System
 
@@ -394,3 +432,15 @@ These must not change, because they encode device or firmware facts:
    subtracted from the result.
 8. Turning on "Start as administrator" relaunches elevated; turning it off does not.
 9. The OSD is the sole owner of overlay feedback; the window never draws overlays.
+10. A custom key binding is consulted before the built-in key map, so any key can be
+    reclaimed. A bound Hypershift key is swallowed, and keystrokes the runtime
+    synthesizes are ignored by the hook so a binding cannot retrigger itself.
+11. Overlay feedback follows the action, not the row's label: device actions raise
+    the overlay their own handler already owns, launching an application or running
+    a command raises one naming the target, and key remaps and macros are silent.
+12. An application launched from a binding must not inherit administrator rights when
+    ControlHub is running elevated; it is started through Explorer instead.
+13. A packaged application is started as `shell:AppsFolder\<model id>`, never by path:
+    it has no executable the shell will accept.
+14. Icons the shell renders for a packaged application are already premultiplied;
+    an icon's own colour bitmap is not. Premultiplying the wrong one darkens it.

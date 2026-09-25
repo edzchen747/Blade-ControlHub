@@ -3,6 +3,8 @@
 
   interface Props {
     title: string;
+    /** Anchor for jumping to this section from elsewhere on the page. */
+    id?: string;
     /** One line under the title explaining what the section changes. */
     hint?: string;
     /** Rendered at the far end of the header row, e.g. a status dot. */
@@ -10,10 +12,10 @@
     children: Snippet;
   }
 
-  let { title, hint, trailing, children }: Props = $props();
+  let { id, title, hint, trailing, children }: Props = $props();
 </script>
 
-<section>
+<section {id}>
   <header>
     <h2>{title}</h2>
     {#if trailing}
@@ -30,6 +32,8 @@
 
 <style>
   section {
+    /* So a jump lands with the heading clear of the top of the scroll area. */
+    scroll-margin-top: var(--gap);
     background: var(--bg-raised);
     border: 1px solid var(--line);
     border-radius: var(--radius);

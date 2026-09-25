@@ -1,3 +1,6 @@
+pub mod binding;
+pub mod builtin_meta;
+pub mod custom_bindings;
 pub mod hidapi;
 pub mod key_hook;
 pub mod key_map;

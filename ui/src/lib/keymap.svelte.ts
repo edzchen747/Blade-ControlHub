@@ -1,55 +1,31 @@
 // Key-mapping tables.
 //
-// These rows are not part of the persisted device config: the runtime has no
-// action vocabulary to bind them to yet, so the Action column stays a
-// placeholder, exactly as it did before. They are kept in `localStorage` so a
-// table the user has filled in survives closing the window — previously it was
-// lost whenever the settings process exited.
+// These rows are the runtime's `key_bindings`: they arrive in the same state
+// snapshot as every other setting and are written back through
+// `set_key_bindings`, so a mapping survives a restart rather than living only
+// in this webview. Rows the user has not finished are kept and sent too — the
+// runtime drops them when it installs the table — so a half-written row is
+// still there after closing the window.
 
+import { NO_ACTION, isActionComplete, normalKeyCode } from "./actions";
 import * as ipc from "./ipc";
+import type { KeyAction, KeyBinding, KeyBindings } from "./types";
 
-const STORAGE_KEY = "blade.keymap.v1";
+/** Where the tables lived before the runtime could act on them. */
+const LEGACY_STORAGE_KEY = "blade.keymap.v1";
 
-export interface RazerRow {
+const SAVE_DEBOUNCE_MS = 250;
+
+export interface Row {
   id: number;
   name: string;
   keyCode: number | null;
-  action: string;
-}
-
-export interface HypershiftRow {
-  id: number;
-  keyCode: number | null;
-  action: string;
-}
-
-/** Windows virtual-key codes the Hypershift table accepts. */
-export function normalKeyCode(key: string): number | null {
-  if (/^[0-9]$/.test(key)) return key.charCodeAt(0);
-  if (/^[a-zA-Z]$/.test(key)) return key.toUpperCase().charCodeAt(0);
-  return null;
-}
-
-export function normalKeyLabel(keyCode: number | null): string {
-  if (keyCode === null) return "None";
-  const isDigit = keyCode >= 0x30 && keyCode <= 0x39;
-  const isLetter = keyCode >= 0x41 && keyCode <= 0x5a;
-  return isDigit || isLetter ? String.fromCharCode(keyCode) : "Unknown";
-}
-
-export function razerKeyLabel(keyCode: number | null): string {
-  if (keyCode === null) return "None";
-  return `0x${keyCode.toString(16).toUpperCase().padStart(2, "0")}`;
-}
-
-interface Persisted {
-  razer: RazerRow[];
-  hypershift: HypershiftRow[];
+  action: KeyAction;
 }
 
 class KeyMap {
-  razer = $state<RazerRow[]>([{ id: 1, name: "", keyCode: null, action: "" }]);
-  hypershift = $state<HypershiftRow[]>([{ id: 1, keyCode: null, action: "" }]);
+  razer = $state<Row[]>([blankRow(1)]);
+  hypershift = $state<Row[]>([blankRow(2)]);
 
   /** Row id currently waiting for a Razer special key, if any. */
   listeningRazer = $state<number | null>(null);
@@ -57,24 +33,120 @@ class KeyMap {
   listeningHypershift = $state<number | null>(null);
   /** Row id whose capture was rejected as a duplicate. */
   duplicateRow = $state<number | null>(null);
+  /**
+   * The chord cell that currently owns the keyboard, as an opaque token. Held
+   * here rather than inside each cell so that only one can listen at a time,
+   * and so the rest of the window knows not to treat Esc as "close me".
+   */
+  chordCapture = $state<string | null>(null);
+  /** Set when the last save was refused, so the page can say so. */
+  saveError = $state<string | null>(null);
 
-  #nextId = 2;
+  /** Whether any cell on the page is waiting for a key press. */
+  get capturing(): boolean {
+    return (
+      this.listeningRazer !== null ||
+      this.listeningHypershift !== null ||
+      this.chordCapture !== null
+    );
+  }
+
+  #nextId = 3;
   #unlisten: (() => void) | null = null;
+  #seeded = false;
+  #saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   async start() {
-    this.#load();
     this.#unlisten = await ipc.onRazerKey((keyCode) => this.#applyRazerKey(keyCode));
   }
 
   stop() {
+    this.#flush();
     this.#unlisten?.();
     this.#unlisten = null;
+  }
+
+  /**
+   * Adopts the runtime's tables the first time a state snapshot arrives. After
+   * that the rows are the user's working copy: reconciling them against every
+   * push would fight whatever they are typing.
+   */
+  seed(bindings: KeyBindings) {
+    if (this.#seeded) return;
+    this.#seeded = true;
+
+    const legacy = this.#legacyRows();
+    const razer = bindings.razer.length > 0 ? bindings.razer : legacy?.razer;
+    const hypershift = bindings.hypershift.length > 0 ? bindings.hypershift : legacy?.hypershift;
+
+    if (razer && razer.length > 0) this.razer = razer.map((row) => this.#toRow(row));
+    if (hypershift && hypershift.length > 0) {
+      this.hypershift = hypershift.map((row) => this.#toRow(row));
+    }
+    // A migrated table only exists in this webview until it is pushed.
+    if (legacy && (bindings.razer.length === 0 || bindings.hypershift.length === 0)) {
+      this.save();
+    }
+  }
+
+  #toRow(binding: KeyBinding): Row {
+    return {
+      id: this.#nextId++,
+      name: binding.label,
+      keyCode: binding.key_code,
+      action: binding.action ?? NO_ACTION,
+    };
+  }
+
+  /**
+   * Rows written by the version that kept them in `localStorage`, when the
+   * Action column was still a placeholder. They carry a key and a label, so
+   * they are worth keeping; their free-text action never meant anything.
+   */
+  #legacyRows(): { razer: KeyBinding[]; hypershift: KeyBinding[] } | null {
+    let raw: string | null = null;
+    try {
+      raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    } catch {
+      return null;
+    }
+    if (!raw) return null;
+
+    try {
+      const parsed = JSON.parse(raw) as {
+        razer?: Array<{ name?: string; keyCode?: number | null }>;
+        hypershift?: Array<{ keyCode?: number | null }>;
+      };
+      const convert = (rows: Array<{ name?: string; keyCode?: number | null }> | undefined) =>
+        (rows ?? [])
+          .filter((row) => typeof row.keyCode === "number")
+          .map((row) => ({
+            key_code: row.keyCode as number,
+            label: row.name ?? "",
+            action: NO_ACTION,
+          }));
+
+      const migrated = {
+        razer: convert(parsed.razer),
+        hypershift: convert(parsed.hypershift),
+      };
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
+      return migrated;
+    } catch {
+      try {
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
+      } catch {
+        // Nothing left to do: the rows are unreadable either way.
+      }
+      return null;
+    }
   }
 
   // ── Razer special keys ─────────────────────────────────────────────────────
 
   async listenRazer(id: number) {
     this.duplicateRow = null;
+    this.chordCapture = null;
     this.listeningRazer = id;
     try {
       await ipc.beginRazerKeyCapture();
@@ -108,6 +180,7 @@ class KeyMap {
 
   listenHypershift(id: number) {
     this.duplicateRow = null;
+    this.chordCapture = null;
     this.listeningHypershift = id;
   }
 
@@ -137,28 +210,34 @@ class KeyMap {
 
   // ── Rows ───────────────────────────────────────────────────────────────────
 
+  /** A row is finished once it has a key and an action that can actually run. */
+  rowComplete(row: Row, requireName: boolean): boolean {
+    return (
+      row.keyCode !== null &&
+      (!requireName || row.name.trim() !== "") &&
+      isActionComplete(row.action)
+    );
+  }
+
   get canAddRazer(): boolean {
     return (
-      this.listeningRazer === null &&
-      this.razer.every((row) => row.name.trim() !== "" && row.keyCode !== null)
+      this.listeningRazer === null && this.razer.every((row) => this.rowComplete(row, true))
     );
   }
 
   get canAddHypershift(): boolean {
     return (
       this.listeningHypershift === null &&
-      this.hypershift.every((row) => row.keyCode !== null)
+      this.hypershift.every((row) => this.rowComplete(row, false))
     );
   }
 
   addRazer() {
-    this.razer = [...this.razer, { id: this.#nextId++, name: "", keyCode: null, action: "" }];
-    this.save();
+    this.razer = [...this.razer, blankRow(this.#nextId++)];
   }
 
   addHypershift() {
-    this.hypershift = [...this.hypershift, { id: this.#nextId++, keyCode: null, action: "" }];
-    this.save();
+    this.hypershift = [...this.hypershift, blankRow(this.#nextId++)];
   }
 
   removeRazer(id: number) {
@@ -173,39 +252,60 @@ class KeyMap {
     this.save();
   }
 
+  setAction(row: Row, action: KeyAction) {
+    row.action = action;
+    this.save();
+  }
+
+  /**
+   * Pushes both tables. Debounced because typing a command or a label would
+   * otherwise write the config file on every keystroke.
+   */
   save() {
-    const payload: Persisted = {
-      razer: $state.snapshot(this.razer),
-      hypershift: $state.snapshot(this.hypershift),
+    if (this.#saveTimer !== null) clearTimeout(this.#saveTimer);
+    this.#saveTimer = setTimeout(() => {
+      this.#saveTimer = null;
+      void this.#push();
+    }, SAVE_DEBOUNCE_MS);
+  }
+
+  #flush() {
+    if (this.#saveTimer === null) return;
+    clearTimeout(this.#saveTimer);
+    this.#saveTimer = null;
+    void this.#push();
+  }
+
+  async #push() {
+    const bindings: KeyBindings = {
+      razer: this.razer.filter(hasKey).map(toBinding),
+      hypershift: this.hypershift.filter(hasKey).map(toBinding),
     };
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-    } catch {
-      // A full or blocked store only costs persistence, not this session.
-    }
-  }
-
-  #load() {
-    let raw: string | null = null;
-    try {
-      raw = localStorage.getItem(STORAGE_KEY);
-    } catch {
-      return;
-    }
-    if (!raw) return;
 
     try {
-      const parsed = JSON.parse(raw) as Persisted;
-      if (Array.isArray(parsed.razer) && parsed.razer.length > 0) this.razer = parsed.razer;
-      if (Array.isArray(parsed.hypershift) && parsed.hypershift.length > 0) {
-        this.hypershift = parsed.hypershift;
-      }
-      this.#nextId =
-        Math.max(0, ...this.razer.map((row) => row.id), ...this.hypershift.map((row) => row.id)) + 1;
-    } catch {
-      // Unreadable storage falls back to the empty tables already in place.
+      await ipc.setKeyBindings(bindings);
+      this.saveError = null;
+    } catch (error) {
+      this.saveError = ipc.errorMessage(error);
     }
   }
+}
+
+function blankRow(id: number): Row {
+  return { id, name: "", keyCode: null, action: NO_ACTION };
+}
+
+/** A row with no key yet is not a binding; it is a row the user is still on. */
+function hasKey(row: Row): boolean {
+  return row.keyCode !== null;
+}
+
+function toBinding(row: Row): KeyBinding {
+  return {
+    key_code: row.keyCode as number,
+    label: row.name.trim(),
+    action: $state.snapshot(row.action),
+  };
 }
 
 export const keyMap = new KeyMap();

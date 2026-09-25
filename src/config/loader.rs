@@ -56,6 +56,9 @@ fn finalize_config(mut app_config: AppConfig, device_info: &Descriptor) -> AppCo
     );
 
     PRIMARY_MULTIMEDIA_KEYS.store(app_config.primary_multimedia_keys, Ordering::SeqCst);
+    // The input hooks read their custom bindings from a runtime table, not the
+    // config, so the saved rows have to be installed before they start.
+    crate::win::input::custom_bindings::replace(&app_config.key_bindings);
 
     app_config
 }

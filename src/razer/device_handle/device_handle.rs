@@ -37,6 +37,8 @@ pub enum DeviceCmd {
     PlayCommandLabCommands(Vec<CapturedCommand>),
     SaveCommandLabCommands(String, Vec<CapturedCommand>),
     RemoveCommandLabCommand(String),
+    ReplaySavedCapture(String),
+    SetKeyBindings(KeyBindings),
     PersistConfig,
     GetConfig(mpsc::Sender<AppConfig>),
     GetSettingsState(mpsc::Sender<SettingsState>),
@@ -221,6 +223,16 @@ impl DeviceHandle {
 
     pub fn save_command_lab_commands(&self, name: String, commands: Vec<CapturedCommand>) {
         self.send(DeviceCmd::SaveCommandLabCommands(name, commands));
+    }
+
+    /// Replays a capture the user saved on the Command Lab page. The lookup
+    /// happens on the device thread, which is the only owner of the config.
+    pub fn replay_saved_capture(&self, name: String) {
+        self.send(DeviceCmd::ReplaySavedCapture(name));
+    }
+
+    pub fn set_key_bindings(&self, bindings: KeyBindings) {
+        self.send(DeviceCmd::SetKeyBindings(bindings));
     }
 
     pub fn remove_command_lab_command(&self, name: String) {

@@ -6,6 +6,7 @@ use crate::razer::{
     config::{AppConfig, CustomModeConfig, DeviceState, FanSpeedLimits, FanSpeeds, PowerProfile},
     enums::{BATTERY_LIMITS, BatteryLimit, PerfMode, RGBEffect},
 };
+use crate::win::input::binding::KeyBindings;
 use crate::win::system::usbpcap::capture::CapturedCommand;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,6 +38,7 @@ pub struct SettingsState {
     pub start_with_admin: bool,
     pub start_with_windows: bool,
     pub command_lab_commands: HashMap<String, Vec<CapturedCommand>>,
+    pub key_bindings: KeyBindings,
 }
 
 impl SettingsState {
@@ -88,6 +90,7 @@ impl SettingsState {
             start_with_admin: config.start_with_admin,
             start_with_windows: config.start_with_windows,
             command_lab_commands: config.command_lab_commands,
+            key_bindings: config.key_bindings,
         }
     }
 
@@ -183,6 +186,44 @@ mod tests {
         let state = SettingsState::from_config(config, Vec::new());
 
         assert!(state.start_with_windows);
+    }
+
+    /// The window seeds its mapping tables from this snapshot, so a binding that
+    /// does not survive the conversion would come back as an empty Keys page.
+    #[test]
+    fn settings_state_carries_the_key_bindings() {
+        use crate::win::input::binding::{Chord, KeyAction, KeyBinding};
+
+        let mut config = AppConfig::default();
+        config.key_bindings.razer.push(KeyBinding {
+            key_code: 0x24,
+            label: "Task manager".to_owned(),
+            action: KeyAction::Macro {
+                steps: vec![Chord {
+                    modifiers: 0b101,
+                    key: 0x1b,
+                }],
+            },
+        });
+        config.key_bindings.hypershift.push(KeyBinding {
+            key_code: 0x4b,
+            label: String::new(),
+            action: KeyAction::ToggleUi,
+        });
+
+        let state = SettingsState::from_config(config.clone(), Vec::new());
+
+        assert_eq!(state.key_bindings, config.key_bindings);
+        assert_eq!(state.key_bindings.razer[0].label, "Task manager");
+        assert_eq!(state.key_bindings.hypershift[0].action, KeyAction::ToggleUi);
+    }
+
+    #[test]
+    fn settings_state_defaults_to_no_key_bindings() {
+        let state = SettingsState::default();
+
+        assert!(state.key_bindings.razer.is_empty());
+        assert!(state.key_bindings.hypershift.is_empty());
     }
 
     #[test]

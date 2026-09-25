@@ -253,6 +253,30 @@ button.danger:hover:not(:disabled) {
   border-color: var(--danger);
 }
 
+/* Select ----------------------------------------------------------------- */
+
+.select {
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 5px 9px;
+  width: 100%;
+  min-width: 0;
+  cursor: pointer;
+  transition: border-color var(--duration) var(--ease);
+}
+
+.select:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.select.invalid {
+  border-color: var(--danger);
+}
+
 /* Code pill -------------------------------------------------------------- */
 
 .code {

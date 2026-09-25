@@ -14,15 +14,13 @@ use std::thread;
 use std::time::Duration;
 use tracing::warn;
 
-pub struct KeyCombo([Option<Key>; 4]);
+/// A keystroke to synthesize: the keys are pressed in order and released in
+/// reverse, so modifiers wrap the key they apply to.
+pub struct KeyCombo(Vec<Key>);
 
 impl KeyCombo {
     pub fn new(input: &[Key]) -> Self {
-        let mut buffer = [None; 4];
-        for (i, key) in input.iter().take(4).enumerate() {
-            buffer[i] = Some(*key);
-        }
-        Self(buffer)
+        Self(input.to_vec())
     }
 
     pub fn trigger(&self) {
@@ -55,10 +53,9 @@ impl KeyCombo {
 
 impl<'a> IntoIterator for &'a KeyCombo {
     type Item = &'a Key;
-    type IntoIter = std::iter::Flatten<std::slice::Iter<'a, Option<Key>>>;
+    type IntoIter = std::slice::Iter<'a, Key>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.0.iter().flatten()
+        self.0.iter()
     }
 }
-

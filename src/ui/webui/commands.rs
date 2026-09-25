@@ -17,6 +17,9 @@ use crate::error::AppResult;
 use crate::razer::config::PowerProfile;
 use crate::razer::device_handle::{DeviceHandle, device};
 use crate::razer::enums::{BatteryLimit, PerfMode, RGBEffect};
+use crate::win::input::binding::KeyBindings;
+use crate::win::system::app_index::{self, IndexedApp};
+use crate::win::system::file_picker;
 use crate::win::system::usbpcap::capture::CapturedCommand;
 use crate::win::system::usbpcap::{USBPCAP_DOWNLOAD_URL, UsbpcapStatus, usbpcap_driver_label};
 
@@ -45,6 +48,10 @@ pub fn handler() -> impl Fn(Invoke<tauri::Wry>) -> bool + Send + Sync + 'static 
         set_theme_color,
         begin_razer_key_capture,
         cancel_razer_key_capture,
+        set_key_bindings,
+        list_apps,
+        refresh_apps,
+        pick_executable,
         begin_command_lab_record,
         cancel_command_lab_record,
         get_command_lab_state,
@@ -164,6 +171,44 @@ fn begin_razer_key_capture() {
 #[tauri::command]
 fn cancel_razer_key_capture() {
     key_capture::stop_razer_key_capture();
+}
+
+/// Replaces both mapping tables at once. The window owns the rows — including
+/// the half-finished ones it needs to render — so it sends the whole set rather
+/// than a diff; the runtime drops the incomplete rows when it installs them.
+#[tauri::command]
+async fn set_key_bindings(bindings: KeyBindings) -> CommandResult<()> {
+    changed(
+        on_device(move |device| {
+            device.set_key_bindings(bindings);
+            Ok(())
+        })
+        .await,
+    )
+}
+
+/// The Start menu index, built on first use. The first call can take a second
+/// or two on a machine with a large Start menu, so it never runs on the event
+/// loop.
+#[tauri::command]
+async fn list_apps() -> CommandResult<Vec<IndexedApp>> {
+    blocking(app_index::list).await
+}
+
+#[tauri::command]
+async fn refresh_apps() -> CommandResult<Vec<IndexedApp>> {
+    blocking(app_index::refresh).await
+}
+
+/// Opens the system file picker, owned by the settings window so it cannot be
+/// lost behind it. `None` means the user cancelled.
+#[tauri::command]
+async fn pick_executable() -> CommandResult<Option<String>> {
+    let owner = super::window::raw_handle();
+    blocking(move || {
+        file_picker::pick_executable(owner).map(|path| path.to_string_lossy().into_owned())
+    })
+    .await
 }
 
 // ── Command Lab ──────────────────────────────────────────────────────────────

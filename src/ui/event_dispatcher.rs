@@ -14,8 +14,8 @@ pub enum SideEffect {
 pub struct EventDispatcher;
 
 impl EventDispatcher {
-    pub fn dispatch(event: AppEvent) -> Option<SideEffect> {
-        Self::extract_side_effect(&event)
+    pub fn dispatch(event: &AppEvent) -> Option<SideEffect> {
+        Self::extract_side_effect(event)
     }
 
     fn extract_side_effect(event: &AppEvent) -> Option<SideEffect> {
@@ -44,11 +44,11 @@ mod tests {
     #[test]
     fn dispatch_maps_settings_events_to_side_effects() {
         assert_eq!(
-            EventDispatcher::dispatch(AppEvent::ToggleSettings),
+            EventDispatcher::dispatch(&AppEvent::ToggleSettings),
             Some(SideEffect::ToggleSettings)
         );
         assert_eq!(
-            EventDispatcher::dispatch(AppEvent::OpenSettings),
+            EventDispatcher::dispatch(&AppEvent::OpenSettings),
             Some(SideEffect::OpenSettings)
         );
     }
@@ -56,7 +56,7 @@ mod tests {
     #[test]
     fn dispatch_maps_shutdown_to_side_effect() {
         assert_eq!(
-            EventDispatcher::dispatch(AppEvent::Shutdown),
+            EventDispatcher::dispatch(&AppEvent::Shutdown),
             Some(SideEffect::Shutdown)
         );
     }
@@ -64,7 +64,7 @@ mod tests {
     #[test]
     fn dispatch_maps_restart_to_side_effect() {
         assert_eq!(
-            EventDispatcher::dispatch(AppEvent::Restart(1)),
+            EventDispatcher::dispatch(&AppEvent::Restart(1)),
             Some(SideEffect::Restart(1))
         );
     }
@@ -72,11 +72,11 @@ mod tests {
     #[test]
     fn dispatch_maps_control_events_to_side_effects() {
         assert_eq!(
-            EventDispatcher::dispatch(AppEvent::OsdEvent(OsdEvent::EnableOSD(false))),
+            EventDispatcher::dispatch(&AppEvent::OsdEvent(OsdEvent::EnableOSD(false))),
             Some(SideEffect::EnableOsd(false))
         );
         assert_eq!(
-            EventDispatcher::dispatch(AppEvent::OsdEvent(OsdEvent::PerfMode(
+            EventDispatcher::dispatch(&AppEvent::OsdEvent(OsdEvent::PerfMode(
                 PerfMode::Performance,
             ))),
             Some(SideEffect::PerfMode(PerfMode::Performance))
@@ -86,7 +86,7 @@ mod tests {
     #[test]
     fn dispatch_ignores_osd_only_events() {
         assert_eq!(
-            EventDispatcher::dispatch(AppEvent::OsdEvent(OsdEvent::ScreenBrightness(50))),
+            EventDispatcher::dispatch(&AppEvent::OsdEvent(OsdEvent::ScreenBrightness(50))),
             None
         );
     }

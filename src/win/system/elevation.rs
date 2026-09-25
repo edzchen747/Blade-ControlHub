@@ -48,14 +48,35 @@ pub fn wait_for_process(process: HANDLE) -> io::Result<()> {
     Ok(())
 }
 
+/// Opens a file, shortcut or executable through the shell, the way a
+/// double-click in Explorer would. Unlike [`spawn_elevated`], the child is not
+/// asked to elevate: it inherits this process's token, which is why a launch
+/// from an elevated ControlHub is routed through Explorer instead (see
+/// `win::system::launch`).
+pub fn shell_open(application: &str, parameters: &str) -> io::Result<()> {
+    const SW_SHOWNORMAL: i32 = 1;
+    shell_execute("open", application, parameters, SW_SHOWNORMAL, false).map(|_| ())
+}
+
 fn spawn_elevated_impl(
     application: &str,
     parameters: &str,
     keep_process_handle: bool,
 ) -> io::Result<HANDLE> {
+    // SW_HIDE: the parent must not flash any window
+    shell_execute("runas", application, parameters, 0, keep_process_handle)
+}
+
+fn shell_execute(
+    verb: &str,
+    application: &str,
+    parameters: &str,
+    show: i32,
+    keep_process_handle: bool,
+) -> io::Result<HANDLE> {
     const SEE_MASK_NOCLOSEPROCESS: u32 = 0x0000_0040;
 
-    let verb = wide("runas");
+    let verb = wide(verb);
     let file = wide(application);
     let parameters = wide(parameters);
 
@@ -71,7 +92,7 @@ fn spawn_elevated_impl(
     info.lpFile = file.as_ptr();
     info.lpParameters = parameters.as_ptr();
     info.lpDirectory = ptr::null();
-    info.nShow = 0; // SW_HIDE: the parent must not flash any window
+    info.nShow = show;
 
     let launched = unsafe { ShellExecuteExW(&mut info) };
     if launched == 0 {
@@ -97,7 +118,7 @@ fn current_exe_and_args() -> io::Result<(String, String)> {
     Ok((file, args))
 }
 
-fn quote_arg(arg: &str) -> String {
+pub fn quote_arg(arg: &str) -> String {
     if arg.contains(' ') || arg.contains('\t') {
         format!("\"{}\"", arg.replace('"', "\\\""))
     } else {

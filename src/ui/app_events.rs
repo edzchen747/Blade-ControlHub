@@ -6,7 +6,7 @@ use crate::{
 
 pub use crate::ui::icons::OsdIcon;
 
-#[derive(PartialEq, Clone, Copy, serde::Serialize)]
+#[derive(PartialEq, Clone, serde::Serialize)]
 pub enum OsdEvent {
     Startup,
     EnableOSD(bool),
@@ -22,6 +22,9 @@ pub enum OsdEvent {
     BatteryLimit(u8, u8, u8),
     TogglePrimaryMultimediaKeys(bool),
     CloseGPUApps(bool),
+    /// A custom key binding that has no overlay of its own: the label names
+    /// what the action does, never the user's label for the row.
+    CustomAction(String),
 }
 
 impl OsdEvent {
@@ -127,11 +130,17 @@ impl OsdEvent {
                     active_steps: 0,
                 })
             }
+            OsdEvent::CustomAction(label) => Some(OsdParams {
+                label: label.clone(),
+                icon: Some(OsdIcon::RazerControlHub),
+                total_steps: 0,
+                active_steps: 0,
+            }),
         }
     }
 }
 
-#[derive(PartialEq, Clone, Copy, serde::Serialize)]
+#[derive(PartialEq, Clone, serde::Serialize)]
 pub enum AppEvent {
     OsdEvent(OsdEvent),
     OpenSettings,

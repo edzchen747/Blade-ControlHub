@@ -116,7 +116,7 @@ fn app_config_round_trips_command_lab_commands() {
 }
 
 #[test]
-fn app_config_serializes_command_lab_commands_at_the_end() {
+fn app_config_serializes_its_bulky_collections_at_the_end() {
     use blade_controlhub::win::system::usbpcap::capture::CapturedCommand;
 
     let mut config = AppConfig::default();
@@ -129,11 +129,79 @@ fn app_config_serializes_command_lab_commands_at_the_end() {
     );
 
     let json = serde_json::to_string(&config).expect("config must serialize");
+
+    // The device settings are what someone opens the file to read; the
+    // user-defined lists are long and go after them.
+    let captures = json
+        .find(r#""command_lab_commands""#)
+        .expect("captures must be present");
+    let bindings = json
+        .find(r#""key_bindings""#)
+        .expect("key bindings must be present");
+    let theme = json.find(r#""theme_color""#).expect("theme must be present");
+
+    assert!(theme < captures, "device settings come before the lists");
+    assert!(captures < bindings);
     let trimmed = json.strip_suffix('}').unwrap_or(&json);
     assert!(
-        trimmed.ends_with(r#""command_lab_commands":{"Test":[{"command":1938,"args":[0]}]}"#),
-        "command_lab_commands must be the last key in the config JSON"
+        trimmed.ends_with(r#""key_bindings":{"razer":[],"hypershift":[]}"#),
+        "key_bindings must be the last key in the config JSON"
     );
+}
+
+/// A config written before key bindings existed must still load, and come back
+/// with both tables empty rather than failing the whole file.
+#[test]
+fn a_config_without_key_bindings_loads_with_empty_tables() {
+    let json = r#"{"model_name":"Razer Blade 16","primary_multimedia_keys":true}"#;
+
+    let config: AppConfig = serde_json::from_str(json).expect("an older config must still parse");
+
+    assert_eq!(config.model_name, "Razer Blade 16");
+    assert!(config.primary_multimedia_keys);
+    assert!(config.key_bindings.razer.is_empty());
+    assert!(config.key_bindings.hypershift.is_empty());
+}
+
+/// A binding has to come back off disk exactly as it went on, including the
+/// action's own fields: this is the whole point of the mappings being config
+/// rather than browser storage.
+#[test]
+fn key_bindings_survive_a_round_trip_through_the_config_file() {
+    use blade_controlhub::win::input::binding::{Chord, DeviceAction, KeyAction, KeyBinding};
+
+    let mut config = AppConfig::default();
+    config.key_bindings.razer.push(KeyBinding {
+        key_code: 0x24,
+        label: "Launcher".to_owned(),
+        action: KeyAction::LaunchApp {
+            path: r"shell:AppsFolder\Microsoft.WindowsNotepad_8wekyb3d8bbwe!App".to_owned(),
+            args: "--new".to_owned(),
+            name: "Notepad".to_owned(),
+        },
+    });
+    config.key_bindings.hypershift.push(KeyBinding {
+        key_code: 0x4b,
+        label: String::new(),
+        action: KeyAction::Device {
+            action: DeviceAction::CycleRgbEffect,
+        },
+    });
+    config.key_bindings.hypershift.push(KeyBinding {
+        key_code: 0x4c,
+        label: String::new(),
+        action: KeyAction::Key {
+            chord: Chord {
+                modifiers: 0b1111,
+                key: 0x7c,
+            },
+        },
+    });
+
+    let json = serde_json::to_string(&config).expect("config must serialize");
+    let parsed: AppConfig = serde_json::from_str(&json).expect("config must parse");
+
+    assert_eq!(parsed.key_bindings, config.key_bindings);
 }
 
 #[test]

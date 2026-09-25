@@ -10,6 +10,8 @@ import type {
   BatteryLimit,
   CapturedCommand,
   CommandLabRecordingState,
+  IndexedApp,
+  KeyBindings,
   PerfMode,
   PowerProfile,
   RGBEffect,
@@ -61,6 +63,13 @@ export const setThemeColor = (color: ThemeColor) =>
 
 export const beginRazerKeyCapture = () => invoke<void>("begin_razer_key_capture");
 export const cancelRazerKeyCapture = () => invoke<void>("cancel_razer_key_capture");
+
+export const setKeyBindings = (bindings: KeyBindings) =>
+  invoke<void>("set_key_bindings", { bindings });
+
+export const listApps = () => invoke<IndexedApp[]>("list_apps");
+export const refreshApps = () => invoke<IndexedApp[]>("refresh_apps");
+export const pickExecutable = () => invoke<string | null>("pick_executable");
 
 export const beginCommandLabRecord = () =>
   invoke<CommandLabRecordingState>("begin_command_lab_record");

@@ -11,8 +11,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
-use crate::core::shared_state::{ALT_PRESSED, SHIFT_PRESSED};
-use crate::win::input::{key_map::KEY_MAP, vkey};
+use crate::core::shared_state::{ALT_PRESSED, FN_PRESSED, SHIFT_PRESSED};
+use crate::win::input::{custom_bindings, key_map::KEY_MAP, vkey};
 
 const VK_SHIFT: u8 = 0x10;
 const VK_LSHIFT: u8 = 0xA0;
@@ -166,10 +166,28 @@ fn handle_key_event(key_code: u8, pressed: bool) -> bool {
         _ => {}
     }
 
-    pressed
-        && KEY_MAP
-            .get(&vkey::Key::from(key_code).into())
-            .is_some_and(|event_action| event_action.execute())
+    if !pressed {
+        return false;
+    }
+
+    // Hypershift: a key held with Fn. The lookup is by raw virtual-key code,
+    // so any key can be bound without `vkey::Key` having to name it. A bound
+    // key is swallowed, otherwise Fn+K would both run the action and type "k".
+    //
+    // Keystrokes this process is synthesizing come back through the same hook,
+    // so they are skipped — a binding that sends its own key would otherwise
+    // retrigger itself for as long as Fn stayed down.
+    if FN_PRESSED.load(Ordering::SeqCst)
+        && !custom_bindings::is_synthesizing()
+        && let Some(action) = custom_bindings::hypershift(key_code)
+    {
+        custom_bindings::run(action);
+        return true;
+    }
+
+    KEY_MAP
+        .get(&vkey::Key::from(key_code).into())
+        .is_some_and(|event_action| event_action.execute())
 }
 
 fn update_shift_state(mask: u8, pressed: bool) {

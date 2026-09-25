@@ -86,7 +86,7 @@ pub fn app(event: AppEvent) {
         return;
     };
 
-    if let Some(side) = EventDispatcher::dispatch(event) {
+    if let Some(side) = EventDispatcher::dispatch(&event) {
         core(&ctx).pending_side_effects.push(side);
     }
 
@@ -123,7 +123,7 @@ pub fn app(event: AppEvent) {
         }
     }
 
-    let osd_params = match event {
+    let osd_params = match &event {
         AppEvent::OsdEvent(osd_event) => osd_event.as_params(),
         _ => None,
     };

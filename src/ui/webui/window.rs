@@ -55,6 +55,15 @@ pub fn show_window() {
     super::push::push_now();
 }
 
+/// The settings window's native handle as a raw value, for Win32 calls that
+/// need an owner. Passed as an `isize` rather than an `HWND` so this does not
+/// depend on Tauri and the runtime agreeing on a `windows` crate version.
+pub fn raw_handle() -> isize {
+    window()
+        .and_then(|window| window.hwnd().ok())
+        .map_or(0, |handle| handle.0 as isize)
+}
+
 pub fn hide_window() {
     if let Some(window) = window() {
         hide(&window);

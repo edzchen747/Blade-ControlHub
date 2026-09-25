@@ -67,6 +67,32 @@ impl<'a> Executer<'a> {
                 self.app_config.command_lab_commands.remove(&name);
                 self.persist_config();
             }
+            DeviceCmd::ReplaySavedCapture(name) => {
+                // The device thread owns the config, so a binding names the
+                // capture and the lookup happens here rather than in the
+                // caller, which would need its own copy.
+                match self.app_config.command_lab_commands.get(&name) {
+                    Some(commands) => {
+                        for captured in commands.clone() {
+                            if let Err(error) =
+                                command(self.device, captured.command, &captured.args, None)
+                            {
+                                warn!(
+                                    %error,
+                                    command = captured.command,
+                                    "Bound capture replay command failed"
+                                );
+                            }
+                        }
+                    }
+                    None => warn!(name, "A key binding names a capture that no longer exists"),
+                }
+            }
+            DeviceCmd::SetKeyBindings(bindings) => {
+                crate::win::input::custom_bindings::replace(&bindings);
+                self.app_config.key_bindings = bindings;
+                self.persist_config();
+            }
             DeviceCmd::CyclePerfMode => self.perf().cycle_perf_mode(),
             DeviceCmd::SetPerfMode(profile, mode, tx) => {
                 let _ = tx.send(self.set_perf_mode_for_profile(profile, mode));

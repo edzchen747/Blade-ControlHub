@@ -34,23 +34,25 @@ pub fn stop_razer_key_capture() {
     KEYMAP_LISTENING.store(false, Ordering::SeqCst);
 }
 
-/// Called by the HID reader for every Razer special key. Consumes the key only
-/// while a capture is armed; otherwise it does nothing and the reader runs the
-/// mapped action as usual.
-pub fn record_razer_key_code(key_code: u8) {
+/// Called by the HID reader for every Razer special key. Returns whether the
+/// key was consumed by a capture: disarming happens here, so the reader cannot
+/// tell by re-reading the flag, and a key being bound must not also run the
+/// action it is being bound away from.
+pub fn record_razer_key_code(key_code: u8) -> bool {
     if !KEYMAP_LISTENING.load(Ordering::SeqCst) {
-        return;
+        return false;
     }
     stop_razer_key_capture();
 
     let Some(handle) = super::app_handle() else {
         warn!(key_code, "Captured a Razer key before the window was ready");
-        return;
+        return true;
     };
 
     if let Err(error) = handle.emit(RAZER_KEY_EVENT, CapturedRazerKey { key_code }) {
         warn!(%error, key_code, "Failed to deliver a captured Razer key to the window");
     }
+    true
 }
 
 #[cfg(test)]
@@ -70,8 +72,17 @@ mod tests {
     fn recording_a_key_without_an_armed_capture_leaves_the_flag_clear() {
         stop_razer_key_capture();
 
-        record_razer_key_code(0x42);
+        assert!(!record_razer_key_code(0x42), "nothing was armed to consume it");
+        assert!(!KEYMAP_LISTENING.load(Ordering::SeqCst));
+    }
 
+    /// The reader decides whether to run the key's action from this return
+    /// value: the flag it would otherwise check has already been cleared here.
+    #[test]
+    fn an_armed_capture_consumes_the_key() {
+        begin_razer_key_capture();
+
+        assert!(record_razer_key_code(0x42));
         assert!(!KEYMAP_LISTENING.load(Ordering::SeqCst));
     }
 }

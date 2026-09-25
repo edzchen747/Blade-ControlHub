@@ -2,6 +2,7 @@ use crate::config::ThemeColor;
 use crate::core::shared_state::IS_PLUGGED_IN;
 use crate::razer::config::{DeviceState, PowerProfile, allowed_perf_modes};
 use crate::razer::enums::{PerfMode, RGB_EFFECTS};
+use crate::win::input::binding::KeyBindings;
 use crate::win::system::usbpcap::capture::CapturedCommand;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -23,6 +24,7 @@ pub struct AppConfig {
     pub start_with_admin: bool,
     pub start_with_windows: bool,
     pub command_lab_commands: HashMap<String, Vec<CapturedCommand>>,
+    pub key_bindings: KeyBindings,
 }
 
 impl Default for AppConfig {
@@ -40,6 +42,7 @@ impl Default for AppConfig {
             start_with_admin: false,
             start_with_windows: false,
             command_lab_commands: HashMap::new(),
+            key_bindings: KeyBindings::default(),
         }
     }
 }

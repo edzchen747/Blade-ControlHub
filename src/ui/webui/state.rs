@@ -14,6 +14,8 @@ use crate::razer::config::{PowerProfile, allowed_perf_modes};
 use crate::razer::enums::{BATTERY_LIMITS, BatteryLimit, PERF_MODES, PerfMode, RGBEffect};
 use crate::runtime::settings_state::SettingsState;
 use crate::ui::theme::perf_mode_hex_color;
+use crate::win::input::binding::DEVICE_ACTIONS;
+use crate::win::input::builtin_meta;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct UiState {
@@ -35,6 +37,17 @@ pub struct UiMeta {
     pub allowed_perf_modes: ProfileModes,
     pub custom_mode_levels: Vec<String>,
     pub keyboard_brightness_step: u8,
+    /// The device actions a key can be bound to, so the Keys page never has to
+    /// hard-code the vocabulary the runtime accepts.
+    pub device_action_labels: BTreeMap<String, String>,
+    /// What each key does before the user rebinds it, for the override hint.
+    pub built_in_bindings: BuiltInBindings,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct BuiltInBindings {
+    pub razer: BTreeMap<u16, String>,
+    pub hypershift: BTreeMap<u16, String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -91,6 +104,14 @@ impl UiMeta {
                 .map(|level| (*level).to_owned())
                 .collect(),
             keyboard_brightness_step: KEYBOARD_BRIGHTNESS_STEP,
+            device_action_labels: DEVICE_ACTIONS
+                .iter()
+                .map(|action| (variant_key(action), action.label().to_owned()))
+                .collect(),
+            built_in_bindings: BuiltInBindings {
+                razer: builtin_meta::razer_labels(),
+                hypershift: builtin_meta::hypershift_labels(),
+            },
         }
     }
 }
