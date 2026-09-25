@@ -13,6 +13,32 @@ mod tests {
         assert!(should_query_battery_limit(2 * SETTINGS_STATE_BATTERY_QUERY_PERIOD));
     }
 
+    /// Which surface asked is what decides the overlay, not which has focus:
+    /// the window's own switch already shows the control's new state, while the
+    /// same control flipped by a key has nothing else to show for itself.
+    #[test]
+    fn a_custom_control_keeps_its_overlay_only_when_a_key_flipped_it() {
+        let from_window = DeviceCmd::SetCustomToggle("Snap Tap".to_owned(), true);
+        let from_key = DeviceCmd::ToggleCustomControl("Snap Tap".to_owned());
+
+        assert!(
+            window_originated(&from_window),
+            "the window's switch shows the new state itself, so the overlay is suppressed"
+        );
+        assert!(
+            !window_originated(&from_key),
+            "a key has no other feedback, so its overlay must survive"
+        );
+    }
+
+    /// Replaying a capture has never raised an overlay, from either surface.
+    #[test]
+    fn replaying_a_capture_is_not_treated_as_a_window_setting() {
+        assert!(!window_originated(&DeviceCmd::ReplaySavedCapture(
+            "snap tap on".to_owned()
+        )));
+    }
+
     #[test]
     fn battery_query_skips_zero_queries() {
         assert!(!should_query_battery_limit(0));

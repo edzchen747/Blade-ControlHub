@@ -1,6 +1,8 @@
 mod app_config;
 mod custom_mode_config;
+mod custom_toggle;
 mod cycle_state;
+mod dashboard_controls;
 mod device_state;
 mod fan_speed_limits;
 mod fan_speeds;
@@ -8,7 +10,9 @@ mod power_profile;
 
 pub use app_config::AppConfig;
 pub use custom_mode_config::CustomModeConfig;
+pub use custom_toggle::CustomToggle;
 pub use cycle_state::CycleState;
+pub use dashboard_controls::HiddenDashboardControls;
 pub use device_state::DeviceState;
 pub use fan_speed_limits::FanSpeedLimits;
 pub use fan_speeds::FanSpeeds;

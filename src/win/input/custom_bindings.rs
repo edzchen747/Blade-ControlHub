@@ -129,6 +129,9 @@ fn execute(action: KeyAction) {
             }
         },
         KeyAction::ReplayCapture { name } => device().replay_saved_capture(name),
+        // The overlay comes from the device thread, which is the only place
+        // that knows which side the control ended up on.
+        KeyAction::ToggleCustomControl { name } => device().toggle_custom_control(name),
     }
 }
 

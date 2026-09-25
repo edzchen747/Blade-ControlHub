@@ -10,6 +10,8 @@ import type {
   BatteryLimit,
   CapturedCommand,
   CommandLabRecordingState,
+  CustomToggle,
+  HiddenDashboardControls,
   IndexedApp,
   KeyBindings,
   PerfMode,
@@ -89,6 +91,15 @@ export const saveCommandLabCommands = (name: string, commands: CapturedCommand[]
 
 export const removeCommandLabCommand = (name: string) =>
   invoke<void>("remove_command_lab_command", { name });
+
+export const saveCustomToggles = (toggles: CustomToggle[]) =>
+  invoke<void>("save_custom_toggles", { toggles });
+
+export const setCustomToggle = (name: string, enabled: boolean) =>
+  invoke<void>("set_custom_toggle", { name, enabled });
+
+export const setHiddenDashboardControls = (hidden: HiddenDashboardControls) =>
+  invoke<void>("set_hidden_dashboard_controls", { hidden });
 
 export const getUsbpcapStatus = () => invoke<UsbpcapInfo>("get_usbpcap_status");
 

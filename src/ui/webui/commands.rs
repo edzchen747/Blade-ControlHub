@@ -14,7 +14,7 @@ use tracing::warn;
 
 use crate::config::ThemeColor;
 use crate::error::AppResult;
-use crate::razer::config::PowerProfile;
+use crate::razer::config::{CustomToggle, HiddenDashboardControls, PowerProfile};
 use crate::razer::device_handle::{DeviceHandle, device};
 use crate::razer::enums::{BatteryLimit, PerfMode, RGBEffect};
 use crate::win::input::binding::KeyBindings;
@@ -59,6 +59,9 @@ pub fn handler() -> impl Fn(Invoke<tauri::Wry>) -> bool + Send + Sync + 'static 
         play_command_lab_commands,
         save_command_lab_commands,
         remove_command_lab_command,
+        save_custom_toggles,
+        set_custom_toggle,
+        set_hidden_dashboard_controls,
         get_usbpcap_status,
         close_gpu_apps,
         hide_window,
@@ -272,6 +275,39 @@ async fn remove_command_lab_command(name: String) -> CommandResult<()> {
     changed(
         on_device(move |device| {
             device.remove_command_lab_command(name);
+            Ok(())
+        })
+        .await,
+    )
+}
+
+#[tauri::command]
+async fn save_custom_toggles(toggles: Vec<CustomToggle>) -> CommandResult<()> {
+    changed(
+        on_device(move |device| {
+            device.set_custom_toggles(toggles);
+            Ok(())
+        })
+        .await,
+    )
+}
+
+#[tauri::command]
+async fn set_custom_toggle(name: String, enabled: bool) -> CommandResult<()> {
+    changed(
+        on_device(move |device| {
+            device.set_custom_toggle(name, enabled);
+            Ok(())
+        })
+        .await,
+    )
+}
+
+#[tauri::command]
+async fn set_hidden_dashboard_controls(hidden: HiddenDashboardControls) -> CommandResult<()> {
+    changed(
+        on_device(move |device| {
+            device.set_hidden_dashboard_controls(hidden);
             Ok(())
         })
         .await,

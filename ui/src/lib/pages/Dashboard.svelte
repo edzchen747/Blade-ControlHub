@@ -4,27 +4,36 @@
   import Segmented from "../components/Segmented.svelte";
   import Slider from "../components/Slider.svelte";
   import LevelDots from "../components/LevelDots.svelte";
+  import Toggle from "../components/Toggle.svelte";
   import { SLIDER_COMMIT_MS, debounce } from "../debounce";
   import * as ipc from "../ipc";
   import { store } from "../store.svelte";
   import { FAN_AUTO, FAN_SPEED_FIELDS, type PerfMode, type RGBEffect } from "../types";
+  import {
+    NOTHING_HIDDEN,
+    dashboardItems,
+    itemKey,
+    withItemShown,
+    type DashboardItem,
+  } from "../dashboard";
 
-  const state = $derived(store.state);
+  // Named `ui` rather than `state`, which would shadow the `$state` rune.
+  const ui = $derived(store.state);
   const profile = $derived(store.profile);
 
   const perfChips = $derived(
     store.perfModes.map(({ mode, supported }) => ({
       value: mode,
-      label: state?.meta.perf_mode_labels[mode] ?? mode,
+      label: ui?.meta.perf_mode_labels[mode] ?? mode,
       unsupported: !supported,
       title: supported
         ? undefined
-        : `${state?.meta.perf_mode_labels[mode] ?? mode} is not supported on this device`,
+        : `${ui?.meta.perf_mode_labels[mode] ?? mode} is not supported on this device`,
     })),
   );
 
   const perfColor = $derived(
-    profile ? (state?.meta.perf_mode_colors[profile.perf_mode] ?? "var(--fg-faint)") : "var(--fg-faint)",
+    profile ? (ui?.meta.perf_mode_colors[profile.perf_mode] ?? "var(--fg-faint)") : "var(--fg-faint)",
   );
 
   // Custom CPU/GPU tuning is a firmware feature of the AC profile only.
@@ -32,11 +41,11 @@
     store.editing === "Ac" && profile?.perf_mode === "Custom",
   );
 
-  const limits = $derived(state?.fan_speed_limits ?? { min: 10, max: 46 });
+  const limits = $derived(ui?.fan_speed_limits ?? { min: 10, max: 46 });
   const fanSpeed = $derived(store.fanSpeed);
   const fanIsManual = $derived(fanSpeed !== FAN_AUTO);
 
-  const brightnessStep = $derived(state?.meta.keyboard_brightness_step ?? 51);
+  const brightnessStep = $derived(ui?.meta.keyboard_brightness_step ?? 51);
   // The firmware takes 0..=255 in steps of 51: six states, off through full.
   const brightnessSteps = $derived(Math.round(255 / brightnessStep));
   const brightnessLevel = $derived(
@@ -45,6 +54,44 @@
   const brightnessReadout = $derived(
     brightnessLevel === 0 ? "Off" : `${(brightnessLevel / brightnessSteps) * 100}%`,
   );
+
+  /** While on, the section lists everything and each line can be hidden. */
+  let editingControls = $state(false);
+
+  const hidden = $derived(ui?.hidden_dashboard_controls ?? NOTHING_HIDDEN);
+
+  const items = $derived(
+    dashboardItems(ui?.command_lab_commands ?? {}, ui?.custom_toggles ?? [], hidden),
+  );
+  const visibleItems = $derived(items.filter((item) => !item.hidden));
+  const shownItems = $derived(editingControls ? items : visibleItems);
+
+  function flipCustomControl(name: string, enabled: boolean) {
+    store.run(
+      `custom-control:${name}`,
+      (next) => {
+        const target = next.custom_toggles.find((toggle) => toggle.name === name);
+        if (target) target.enabled = enabled;
+      },
+      () => ipc.setCustomToggle(name, enabled),
+    );
+  }
+
+  function replayCapture(name: string) {
+    const commands = ui?.command_lab_commands[name];
+    if (commands) void ipc.playCommandLabCommands($state.snapshot(commands));
+  }
+
+  function setItemShown(item: DashboardItem, shown: boolean) {
+    const next = withItemShown(hidden, item, shown);
+    if (!next) return;
+
+    store.run(
+      "dashboard-controls",
+      (snapshot) => (snapshot.hidden_dashboard_controls = next),
+      () => ipc.setHiddenDashboardControls(next),
+    );
+  }
 
   function setPerfMode(mode: PerfMode) {
     const target = store.editing;
@@ -85,8 +132,8 @@
   }
 
   function setCustomLevel(which: "cpu" | "gpu", level: number) {
-    const cpu = which === "cpu" ? level : (state?.custom_mode_config.cpu_level ?? 0);
-    const gpu = which === "gpu" ? level : (state?.custom_mode_config.gpu_level ?? 0);
+    const cpu = which === "cpu" ? level : (ui?.custom_mode_config.cpu_level ?? 0);
+    const gpu = which === "gpu" ? level : (ui?.custom_mode_config.gpu_level ?? 0);
     store.run(
       "custom-mode",
       (next) => {
@@ -123,11 +170,11 @@
   }
 </script>
 
-{#if profile && state}
+{#if profile && ui}
   <Section title="Performance">
     {#snippet trailing()}
       <span class="mode-dot" style="background: {perfColor}"></span>
-      <span class="muted">{state.meta.perf_mode_labels[profile.perf_mode]}</span>
+      <span class="muted">{ui.meta.perf_mode_labels[profile.perf_mode]}</span>
     {/snippet}
 
     <ChipGrid
@@ -146,8 +193,8 @@
           label="CPU"
           min={0}
           max={3}
-          value={state.custom_mode_config.cpu_level}
-          readout={state.meta.custom_mode_levels[state.custom_mode_config.cpu_level]}
+          value={ui.custom_mode_config.cpu_level}
+          readout={ui.meta.custom_mode_levels[ui.custom_mode_config.cpu_level]}
           ariaLabel="Custom mode CPU level"
           oninput={(level) => commitCustomLevel("cpu", level)}
           oncommit={(level) => {
@@ -159,8 +206,8 @@
           label="GPU"
           min={0}
           max={3}
-          value={state.custom_mode_config.gpu_level}
-          readout={state.meta.custom_mode_levels[state.custom_mode_config.gpu_level]}
+          value={ui.custom_mode_config.gpu_level}
+          readout={ui.meta.custom_mode_levels[ui.custom_mode_config.gpu_level]}
           ariaLabel="Custom mode GPU level"
           oninput={(level) => commitCustomLevel("gpu", level)}
           oncommit={(level) => {
@@ -244,7 +291,7 @@
         onchange={(event) => setEffect(event.currentTarget.value as RGBEffect)}
       >
         {#each profile.rgb_effects as effect (effect)}
-          <option value={effect}>{state.meta.rgb_effect_labels[effect] ?? effect}</option>
+          <option value={effect}>{ui.meta.rgb_effect_labels[effect] ?? effect}</option>
         {/each}
       </select>
     </div>
@@ -254,9 +301,95 @@
       </span>
     {/if}
   </Section>
+
+  <!-- Only once the user has recorded or built something: an empty section
+       would advertise a Command Lab feature to someone who has never opened
+       the page. -->
+  {#if items.length > 0}
+    <Section title="Custom Controls" hint="Your Command Lab captures and controls.">
+      {#snippet trailing()}
+        <button type="button" class="ghost" onclick={() => (editingControls = !editingControls)}>
+          {editingControls ? "Done" : "Edit"}
+        </button>
+      {/snippet}
+
+      {#if editingControls}
+        <p class="hint">Clear a checkbox to keep it off the Dashboard.</p>
+      {:else if visibleItems.length === 0}
+        <p class="hint">Everything is hidden. Use Edit to choose what to show.</p>
+      {/if}
+
+      {#each shownItems as item (itemKey(item))}
+        <div class="control-line" class:dimmed={item.hidden}>
+          {#if editingControls}
+            <label class="show">
+              <input
+                type="checkbox"
+                checked={!item.hidden}
+                onchange={(event) => setItemShown(item, event.currentTarget.checked)}
+              />
+              <span>{item.name}</span>
+            </label>
+            <span class="muted">{item.kind === "control" ? "Control" : "Capture"}</span>
+          {:else if item.kind === "control"}
+            <Toggle
+              label={item.name}
+              checked={item.enabled}
+              error={store.errors[`custom-control:${item.name}`]}
+              onchange={(checked) => flipCustomControl(item.name, checked)}
+            />
+          {:else}
+            <!-- A capture has no state to show, so it is a button rather than
+                 a switch: pressing it replays the commands once. -->
+            <div class="row-between">
+              <span>{item.name}</span>
+              <button type="button" onclick={() => replayCapture(item.name)}>Replay</button>
+            </div>
+          {/if}
+        </div>
+      {/each}
+
+      {#if store.errors["dashboard-controls"]}
+        <span class="field-error">{store.errors["dashboard-controls"]}</span>
+      {/if}
+    </Section>
+  {/if}
 {/if}
 
 <style>
+  /* Each line owns its own control, so the section stacks rather than grids:
+     a switch, a button and a checkbox do not share a column. */
+  .control-line > :global(*) {
+    width: 100%;
+  }
+
+  /* A hidden line is still listed while editing, so it has to read as off
+     without being mistaken for a disabled one. */
+  .control-line.dimmed {
+    opacity: 0.55;
+  }
+
+  .show {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-sm);
+    cursor: pointer;
+    min-width: 0;
+  }
+
+  .show span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .control-line:has(.show) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--gap);
+  }
+
   .mode-dot {
     width: 9px;
     height: 9px;

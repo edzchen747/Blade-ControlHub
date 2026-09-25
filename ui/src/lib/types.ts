@@ -81,6 +81,28 @@ export interface CapturedCommand {
   args: number[];
 }
 
+/**
+ * A two-state control built out of two Command Lab captures: `on_capture` is
+ * replayed to switch it on, `off_capture` to switch it off. Both name a saved
+ * capture, and are empty until the user has chosen one.
+ */
+export interface CustomToggle {
+  name: string;
+  on_capture: string;
+  off_capture: string;
+  enabled: boolean;
+}
+
+/**
+ * What the Dashboard's Custom Controls section leaves out, by name. Everything
+ * is shown by default, so this lists the exceptions — a capture recorded later
+ * appears on its own rather than waiting to be added.
+ */
+export interface HiddenDashboardControls {
+  captures: string[];
+  controls: string[];
+}
+
 export interface UiMeta {
   perf_mode_labels: Record<string, string>;
   perf_mode_colors: Record<string, string>;
@@ -115,6 +137,8 @@ export interface UiState {
   start_with_admin: boolean;
   start_with_windows: boolean;
   command_lab_commands: Record<string, CapturedCommand[]>;
+  custom_toggles: CustomToggle[];
+  hidden_dashboard_controls: HiddenDashboardControls;
   key_bindings: KeyBindings;
   meta: UiMeta;
 }
@@ -157,7 +181,9 @@ export type KeyAction =
   | { kind: "toggle_ui" }
   | { kind: "launch_app"; path: string; args: string; name: string }
   | { kind: "run_command"; command: string }
-  | { kind: "replay_capture"; name: string };
+  | { kind: "replay_capture"; name: string }
+  /** Flips a custom control; the runtime decides which of its captures runs. */
+  | { kind: "toggle_custom_control"; name: string };
 
 export type ActionKind = KeyAction["kind"];
 

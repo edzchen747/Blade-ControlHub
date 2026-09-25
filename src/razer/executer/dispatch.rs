@@ -19,9 +19,11 @@ fn should_query_battery_limit(queries: u32) -> bool {
 /// the command is therefore a reliable statement of where it came from, and the
 /// queue is the last place where that is still known.
 ///
-/// Only the settings are listed. The window's other commands — key bindings,
-/// the startup toggles, Command Lab, a state snapshot — raise no overlay for
-/// there to be a question about.
+/// Only the settings are listed, plus a custom control the window put on a
+/// named side: its switch already shows the new state, while the same control
+/// flipped by a key has nothing else to show for itself. The window's other
+/// commands — key bindings, the startup toggles, Command Lab, a state
+/// snapshot — raise no overlay for there to be a question about.
 fn window_originated(cmd: &DeviceCmd) -> bool {
     matches!(
         cmd,
@@ -34,6 +36,7 @@ fn window_originated(cmd: &DeviceCmd) -> bool {
             | DeviceCmd::SetUnderGlow(..)
             | DeviceCmd::SetBatteryLimit(..)
             | DeviceCmd::SetThemeColor(..)
+            | DeviceCmd::SetCustomToggle(..)
     )
 }
 
@@ -114,22 +117,21 @@ impl<'a> Executer<'a> {
                 // The device thread owns the config, so a binding names the
                 // capture and the lookup happens here rather than in the
                 // caller, which would need its own copy.
-                match self.app_config.command_lab_commands.get(&name) {
-                    Some(commands) => {
-                        for captured in commands.clone() {
-                            if let Err(error) =
-                                command(self.device, captured.command, &captured.args, None)
-                            {
-                                warn!(
-                                    %error,
-                                    command = captured.command,
-                                    "Bound capture replay command failed"
-                                );
-                            }
-                        }
-                    }
-                    None => warn!(name, "A key binding names a capture that no longer exists"),
+                if !self.replay_saved_capture(&name) {
+                    warn!(name, "A key binding names a capture that no longer exists");
                 }
+            }
+            DeviceCmd::SetCustomToggles(toggles) => {
+                self.app_config.custom_toggles = toggles;
+                self.persist_config();
+            }
+            DeviceCmd::SetCustomToggle(name, enabled) => {
+                self.apply_custom_toggle(&name, Some(enabled));
+            }
+            DeviceCmd::ToggleCustomControl(name) => self.apply_custom_toggle(&name, None),
+            DeviceCmd::SetHiddenDashboardControls(hidden) => {
+                self.app_config.hidden_dashboard_controls = hidden;
+                self.persist_config();
             }
             DeviceCmd::SetKeyBindings(bindings) => {
                 crate::win::input::custom_bindings::replace(&bindings);
@@ -240,6 +242,62 @@ impl<'a> Executer<'a> {
             }
             DeviceCmd::PersistConfig => {
                 crate::config::persist_config(self.app_config, &self.persist_buffer);
+            }
+        }
+        true
+    }
+
+    /// Puts one custom control on a side and replays the capture for it.
+    ///
+    /// `enabled` is the side to land on, or `None` to flip whichever side it is
+    /// on now — all a key binding knows to ask for, since the remembered state
+    /// lives here with the config.
+    fn apply_custom_toggle(&mut self, name: &str, enabled: Option<bool>) {
+        let Some(toggle) = self
+            .app_config
+            .custom_toggles
+            .iter_mut()
+            .find(|toggle| toggle.name == name)
+        else {
+            warn!(name, "No custom control by that name");
+            return;
+        };
+
+        // The remembered side is written even when the capture has gone
+        // missing, so the switch the user just flipped stays flipped and the
+        // page can say what is wrong with it.
+        let enabled = enabled.unwrap_or(!toggle.enabled);
+        toggle.enabled = enabled;
+        let capture = toggle.capture_for(enabled).to_string();
+        self.persist_config();
+
+        if !capture.is_empty() && self.replay_saved_capture(&capture) {
+            app(OsdEvent::CustomControl(name.to_owned(), enabled).into());
+        } else {
+            warn!(
+                control = name,
+                capture, "A custom control names a capture that no longer exists"
+            );
+            app(OsdEvent::CustomAction(format!("{name} failed")).into());
+        }
+    }
+
+    /// Replays a capture the user saved on the Command Lab page, reporting
+    /// whether it still exists. A command that fails is logged and the rest of
+    /// the capture still runs, so one rejected report does not strand the device
+    /// half-way through a toggle.
+    fn replay_saved_capture(&mut self, name: &str) -> bool {
+        let Some(commands) = self.app_config.command_lab_commands.get(name).cloned() else {
+            return false;
+        };
+        for captured in commands {
+            if let Err(error) = command(self.device, captured.command, &captured.args, None) {
+                warn!(
+                    %error,
+                    command = captured.command,
+                    capture = name,
+                    "Saved capture replay command failed"
+                );
             }
         }
         true

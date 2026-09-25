@@ -2,7 +2,7 @@ use crate::config::ThemeColor;
 use crate::config::{self, CONFIG_PATH};
 use crate::core::shared_state::DEVICE_PIDS;
 use crate::error::{AppError, AppResult};
-use crate::razer::config::{AppConfig, PowerProfile};
+use crate::razer::config::{AppConfig, CustomToggle, HiddenDashboardControls, PowerProfile};
 use crate::razer::enums::{BatteryLimit, LidLogoMode, PerfMode, RGBEffect};
 use crate::razer::executer::Executer;
 use crate::razer::protocol::command;

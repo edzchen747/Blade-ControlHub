@@ -140,13 +140,87 @@ fn app_config_serializes_its_bulky_collections_at_the_end() {
         .expect("key bindings must be present");
     let theme = json.find(r#""theme_color""#).expect("theme must be present");
 
+    let toggles = json
+        .find(r#""custom_toggles""#)
+        .expect("custom toggles must be present");
+
     assert!(theme < captures, "device settings come before the lists");
-    assert!(captures < bindings);
+    let hidden = json
+        .find(r#""hidden_dashboard_controls""#)
+        .expect("the hidden list must be present");
+
+    assert!(captures < toggles);
+    assert!(toggles < hidden);
+    assert!(hidden < bindings);
     let trimmed = json.strip_suffix('}').unwrap_or(&json);
     assert!(
         trimmed.ends_with(r#""key_bindings":{"razer":[],"hypershift":[]}"#),
         "key_bindings must be the last key in the config JSON"
     );
+}
+
+/// A custom toggle names the captures it replays, so both names and the side it
+/// was last left on have to survive the file.
+#[test]
+fn custom_toggles_survive_a_round_trip_through_the_config_file() {
+    use blade_controlhub::razer::config::CustomToggle;
+
+    let mut config = AppConfig::default();
+    config.custom_toggles.push(CustomToggle {
+        name: "Snap Tap".to_owned(),
+        on_capture: "snap tap on".to_owned(),
+        off_capture: "snap tap off".to_owned(),
+        enabled: true,
+    });
+
+    let json = serde_json::to_string(&config).expect("config must serialize");
+    let restored: AppConfig = serde_json::from_str(&json).expect("config must deserialize");
+
+    assert_eq!(restored.custom_toggles, config.custom_toggles);
+}
+
+/// Hiding is stored as the exception, so what round-trips is the list of lines
+/// the user switched off — and a capture and a control may share a name.
+#[test]
+fn hidden_dashboard_controls_survive_a_round_trip_through_the_config_file() {
+    use blade_controlhub::razer::config::HiddenDashboardControls;
+
+    let mut config = AppConfig::default();
+    config.hidden_dashboard_controls = HiddenDashboardControls {
+        captures: vec!["snap tap on".to_owned()],
+        controls: vec!["Snap Tap".to_owned()],
+    };
+
+    let json = serde_json::to_string(&config).expect("config must serialize");
+    let restored: AppConfig = serde_json::from_str(&json).expect("config must deserialize");
+
+    assert_eq!(
+        restored.hidden_dashboard_controls,
+        config.hidden_dashboard_controls
+    );
+}
+
+/// A config written before the Dashboard could hide anything must still load,
+/// showing everything rather than failing the whole file.
+#[test]
+fn a_config_without_hidden_dashboard_controls_shows_everything() {
+    let json = r#"{"model_name":"Razer Blade 16"}"#;
+
+    let config: AppConfig = serde_json::from_str(json).expect("an older config must still parse");
+
+    assert!(config.hidden_dashboard_controls.captures.is_empty());
+    assert!(config.hidden_dashboard_controls.controls.is_empty());
+}
+
+/// A config written before custom toggles existed must still load, with an
+/// empty list rather than failing the whole file.
+#[test]
+fn a_config_without_custom_toggles_loads_with_an_empty_list() {
+    let json = r#"{"model_name":"Razer Blade 16"}"#;
+
+    let config: AppConfig = serde_json::from_str(json).expect("an older config must still parse");
+
+    assert!(config.custom_toggles.is_empty());
 }
 
 /// A config written before key bindings existed must still load, and come back

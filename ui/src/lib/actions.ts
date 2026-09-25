@@ -23,6 +23,14 @@ export interface ActionKindOption {
   label: string;
 }
 
+/**
+ * The options in the Action dropdown.
+ *
+ * One option can cover more than one runtime kind: "Command Lab" stands for
+ * both replaying a capture and flipping a custom control, which the row then
+ * chooses between in its own control. So these are option values, not the whole
+ * `KeyAction` vocabulary.
+ */
 export const ACTION_KINDS: readonly ActionKindOption[] = [
   { value: "none", label: "Do nothing" },
   { value: "key", label: "Send a key" },
@@ -31,19 +39,33 @@ export const ACTION_KINDS: readonly ActionKindOption[] = [
   { value: "toggle_ui", label: "Open ControlHub" },
   { value: "launch_app", label: "Launch an application" },
   { value: "run_command", label: "Run a command" },
-  { value: "replay_capture", label: "Replay a capture" },
+  { value: "replay_capture", label: "Command Lab" },
 ];
+
+/** The kinds the Command Lab option stands for. */
+export function isCommandLabAction(kind: ActionKind): boolean {
+  return kind === "replay_capture" || kind === "toggle_custom_control";
+}
+
+/**
+ * The option a row's action is shown under. A custom control has no option of
+ * its own — it is one of the things Command Lab offers — so it reads back as
+ * that option rather than leaving the dropdown blank.
+ */
+export function actionKindOption(kind: ActionKind): ActionKind {
+  return isCommandLabAction(kind) ? "replay_capture" : kind;
+}
 
 /**
  * The kinds a row may choose from.
  *
- * Replaying a capture belongs to Command Lab, which is behind the advanced
- * experimental features flag, so it is not offered while that is off — the page
- * must not advertise a feature the user has not turned on.
+ * Command Lab is behind the advanced experimental features flag, so it is not
+ * offered while that is off — the page must not advertise a feature the user
+ * has not turned on.
  *
  * A row already set to it keeps the option, for two reasons: the binding still
- * works, because the saved captures live in the config rather than behind the
- * flag, and a dropdown whose current value is missing renders as blank.
+ * works, because the saved captures and controls live in the config rather than
+ * behind the flag, and a dropdown whose current value is missing renders blank.
  */
 export function availableActionKinds(
   experimentalEnabled: boolean,
@@ -51,7 +73,7 @@ export function availableActionKinds(
 ): ActionKindOption[] {
   return ACTION_KINDS.filter(
     (kind) =>
-      kind.value !== "replay_capture" || experimentalEnabled || current === "replay_capture",
+      kind.value !== "replay_capture" || experimentalEnabled || isCommandLabAction(current),
   );
 }
 
@@ -82,6 +104,8 @@ export function defaultActionFor(
       return { kind: "run_command", command: "" };
     case "replay_capture":
       return { kind: "replay_capture", name: firstCapture ?? "" };
+    case "toggle_custom_control":
+      return { kind: "toggle_custom_control", name: "" };
   }
 }
 
@@ -105,6 +129,7 @@ export function isActionComplete(action: KeyAction): boolean {
     case "run_command":
       return action.command.trim() !== "";
     case "replay_capture":
+    case "toggle_custom_control":
       return action.name.trim() !== "";
   }
 }
@@ -137,6 +162,8 @@ export function actionSummary(action: KeyAction, deviceLabels: Record<string, st
       return action.command.trim() || "No command yet";
     case "replay_capture":
       return action.name.trim() || "No capture yet";
+    case "toggle_custom_control":
+      return action.name.trim() || "No custom control yet";
   }
 }
 

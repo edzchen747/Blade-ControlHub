@@ -16,6 +16,24 @@ fn generate_font_db() -> resvg::usvg::fontdb::Database {
     font_db
 }
 
+/// Labels carry user-chosen text — an application's name, a command, a custom
+/// control — so they are escaped before being written into the SVG source. An
+/// unescaped `&` or `<` makes the whole card fail to parse and show nothing.
+fn escape_xml(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for character in text.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&apos;"),
+            _ => escaped.push(character),
+        }
+    }
+    escaped
+}
+
 fn generate_text_layer_svg(label: &str, no_icon: bool) -> String {
     let font_family_target = "Roboto";
     let y_pos = if no_icon { 85 } else { 115 };
@@ -28,7 +46,7 @@ fn generate_text_layer_svg(label: &str, no_icon: bool) -> String {
         (DESIGN_SIZE / 2.0),
         y_pos,
         font_family_target,
-        label
+        escape_xml(label)
     )
 }
 

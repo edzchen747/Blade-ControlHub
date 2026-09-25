@@ -3,7 +3,10 @@ use std::collections::HashMap;
 
 use crate::config::ThemeColor;
 use crate::razer::{
-    config::{AppConfig, CustomModeConfig, DeviceState, FanSpeedLimits, FanSpeeds, PowerProfile},
+    config::{
+        AppConfig, CustomModeConfig, CustomToggle, DeviceState, FanSpeedLimits, FanSpeeds,
+        HiddenDashboardControls, PowerProfile,
+    },
     enums::{BATTERY_LIMITS, BatteryLimit, PerfMode, RGBEffect},
 };
 use crate::win::input::binding::KeyBindings;
@@ -38,6 +41,8 @@ pub struct SettingsState {
     pub start_with_admin: bool,
     pub start_with_windows: bool,
     pub command_lab_commands: HashMap<String, Vec<CapturedCommand>>,
+    pub custom_toggles: Vec<CustomToggle>,
+    pub hidden_dashboard_controls: HiddenDashboardControls,
     pub key_bindings: KeyBindings,
 }
 
@@ -90,6 +95,8 @@ impl SettingsState {
             start_with_admin: config.start_with_admin,
             start_with_windows: config.start_with_windows,
             command_lab_commands: config.command_lab_commands,
+            custom_toggles: config.custom_toggles,
+            hidden_dashboard_controls: config.hidden_dashboard_controls,
             key_bindings: config.key_bindings,
         }
     }

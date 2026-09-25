@@ -120,6 +120,10 @@ pub enum KeyAction {
     RunCommand { command: String },
     /// Replay a capture saved on the Command Lab page.
     ReplayCapture { name: String },
+    /// Flip a custom control built on the Command Lab page. The control names
+    /// the two captures; which one runs depends on the side it is on now, so
+    /// only the control's name is stored here.
+    ToggleCustomControl { name: String },
 }
 
 impl KeyAction {
@@ -133,7 +137,9 @@ impl KeyAction {
             Self::Macro { steps } => !steps.is_empty() && steps.iter().all(Chord::is_complete),
             Self::LaunchApp { path, .. } => !path.trim().is_empty(),
             Self::RunCommand { command } => !command.trim().is_empty(),
-            Self::ReplayCapture { name } => !name.trim().is_empty(),
+            Self::ReplayCapture { name } | Self::ToggleCustomControl { name } => {
+                !name.trim().is_empty()
+            }
         }
     }
 }
@@ -240,11 +246,31 @@ mod tests {
                 },
                 r#"{"kind":"replay_capture","name":"Snap"}"#,
             ),
+            (
+                KeyAction::ToggleCustomControl {
+                    name: "Snap Tap".to_owned(),
+                },
+                r#"{"kind":"toggle_custom_control","name":"Snap Tap"}"#,
+            ),
         ];
 
         for (action, expected) in cases {
             assert_eq!(serde_json::to_string(&action).unwrap(), expected);
         }
+    }
+
+    #[test]
+    fn a_command_lab_action_is_finished_once_it_names_something() {
+        assert!(!KeyAction::ToggleCustomControl {
+            name: "  ".to_owned()
+        }
+        .is_complete());
+        assert!(
+            KeyAction::ToggleCustomControl {
+                name: "Snap Tap".to_owned()
+            }
+            .is_complete()
+        );
     }
 
     #[test]

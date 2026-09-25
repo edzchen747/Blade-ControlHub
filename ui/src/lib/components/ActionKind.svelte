@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { availableActionKinds, defaultActionFor } from "../actions";
+  import { actionKindOption, availableActionKinds, defaultActionFor } from "../actions";
   import { store } from "../store.svelte";
   import type { ActionKind, DeviceAction, KeyAction } from "../types";
 
@@ -16,8 +16,8 @@
   );
   const firstCapture = $derived(Object.keys(store.state?.command_lab_commands ?? {}).sort()[0]);
 
-  // Replaying a capture is a Command Lab feature, so it is only on offer while
-  // advanced experimental features are.
+  // Command Lab is behind the advanced experimental features flag, so it is
+  // only on offer while that is on.
   const kinds = $derived(
     availableActionKinds(store.state?.advanced_experimental_features ?? false, action.kind),
   );
@@ -25,7 +25,7 @@
 
 <select
   class="select"
-  value={action.kind}
+  value={actionKindOption(action.kind)}
   aria-label="Action"
   onchange={(event) =>
     onchange(

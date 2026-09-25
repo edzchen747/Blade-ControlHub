@@ -1,6 +1,8 @@
 use crate::config::ThemeColor;
 use crate::core::shared_state::IS_PLUGGED_IN;
-use crate::razer::config::{DeviceState, PowerProfile, allowed_perf_modes};
+use crate::razer::config::{
+    CustomToggle, DeviceState, HiddenDashboardControls, PowerProfile, allowed_perf_modes,
+};
 use crate::razer::enums::{PerfMode, RGB_EFFECTS};
 use crate::win::input::binding::KeyBindings;
 use crate::win::system::usbpcap::capture::CapturedCommand;
@@ -24,6 +26,8 @@ pub struct AppConfig {
     pub start_with_admin: bool,
     pub start_with_windows: bool,
     pub command_lab_commands: HashMap<String, Vec<CapturedCommand>>,
+    pub custom_toggles: Vec<CustomToggle>,
+    pub hidden_dashboard_controls: HiddenDashboardControls,
     pub key_bindings: KeyBindings,
 }
 
@@ -42,6 +46,8 @@ impl Default for AppConfig {
             start_with_admin: false,
             start_with_windows: false,
             command_lab_commands: HashMap::new(),
+            custom_toggles: Vec::new(),
+            hidden_dashboard_controls: HiddenDashboardControls::default(),
             key_bindings: KeyBindings::default(),
         }
     }

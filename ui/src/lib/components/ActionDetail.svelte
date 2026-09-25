@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { isActionComplete } from "../actions";
+  import { isActionComplete, isCommandLabAction } from "../actions";
   import { store } from "../store.svelte";
   import type { DeviceAction, KeyAction } from "../types";
   import AppPicker from "./AppPicker.svelte";
@@ -23,9 +23,32 @@
 
   /** Named Command Lab captures, which only exist once the user records one. */
   const captures = $derived(Object.keys(store.state?.command_lab_commands ?? {}).sort());
+  /** Custom controls, which the user builds out of two captures. */
+  const controls = $derived(
+    (store.state?.custom_toggles ?? [])
+      .map((toggle) => toggle.name)
+      .filter((name) => name.trim() !== "")
+      .sort(),
+  );
   const experimentalEnabled = $derived(store.state?.advanced_experimental_features ?? false);
 
   const complete = $derived(isActionComplete(action));
+
+  // One dropdown offers both, so an option value has to say which list it came
+  // from: a capture and a control may share a name, and they are not the same
+  // action.
+  const commandLabValue = $derived.by(() => {
+    if (action.kind === "toggle_custom_control") return `control:${action.name}`;
+    if (action.kind === "replay_capture") return `capture:${action.name}`;
+    return "";
+  });
+
+  function chooseCommandLabTarget(value: string): KeyAction {
+    const name = value.slice(value.indexOf(":") + 1);
+    return value.startsWith("control:")
+      ? { kind: "toggle_custom_control", name }
+      : { kind: "replay_capture", name };
+  }
 </script>
 
 {#if action.kind === "key"}
@@ -76,8 +99,8 @@
     aria-label="Command"
     oninput={(event) => onchange({ kind: "run_command", command: event.currentTarget.value })}
   />
-{:else if action.kind === "replay_capture"}
-  {#if captures.length === 0}
+{:else if isCommandLabAction(action.kind)}
+  {#if captures.length === 0 && controls.length === 0}
     <!-- A row can still be set to this after the flag was turned off, and then
          pointing at the Command Lab page would be pointing at a hidden one. -->
     <span class="hint">
@@ -88,13 +111,25 @@
   {:else}
     <select
       class="select"
-      value={action.name}
-      aria-label="Capture to replay"
-      onchange={(event) => onchange({ kind: "replay_capture", name: event.currentTarget.value })}
+      class:invalid={!complete}
+      value={commandLabValue}
+      aria-label="Command Lab capture or control"
+      onchange={(event) => onchange(chooseCommandLabTarget(event.currentTarget.value))}
     >
-      {#each captures as name (name)}
-        <option value={name}>{name}</option>
-      {/each}
+      {#if controls.length > 0}
+        <!-- Controls first: a control is the thing a key is usually bound to,
+             and a capture is the raw material it is built from. -->
+        <optgroup label="Custom controls">
+          {#each controls as name (name)}
+            <option value="control:{name}">{name}</option>
+          {/each}
+        </optgroup>
+      {/if}
+      <optgroup label="Captures">
+        {#each captures as name (name)}
+          <option value="capture:{name}">{name}</option>
+        {/each}
+      </optgroup>
     </select>
   {/if}
 {/if}

@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   ACTION_KINDS,
+  actionKindOption,
   actionSummary,
   availableActionKinds,
+  isCommandLabAction,
   chordLabel,
   defaultActionFor,
   hasActionDetail,
@@ -323,6 +325,44 @@ describe("razerKeyLabel", () => {
   });
 });
 
+describe("the Command Lab option", () => {
+  it("covers replaying a capture and flipping a custom control", () => {
+    expect(isCommandLabAction("replay_capture")).toBe(true);
+    expect(isCommandLabAction("toggle_custom_control")).toBe(true);
+    expect(isCommandLabAction("run_command")).toBe(false);
+  });
+
+  // A custom control has no option of its own, so without this the dropdown on
+  // a row bound to one would render blank.
+  it("is the option a custom control reads back as", () => {
+    expect(actionKindOption("toggle_custom_control")).toBe("replay_capture");
+    expect(actionKindOption("replay_capture")).toBe("replay_capture");
+    expect(actionKindOption("device")).toBe("device");
+  });
+
+  it("stays available to a row already flipping a control with the flag off", () => {
+    const kinds = availableActionKinds(false, "toggle_custom_control").map((kind) => kind.value);
+
+    expect(kinds).toContain("replay_capture");
+  });
+
+  it("names itself after the page it belongs to", () => {
+    const option = ACTION_KINDS.find((kind) => kind.value === "replay_capture");
+
+    expect(option?.label).toBe("Command Lab");
+  });
+
+  it("judges and summarises a custom control by its name", () => {
+    expect(isActionComplete({ kind: "toggle_custom_control", name: "Snap Tap" })).toBe(true);
+    expect(isActionComplete({ kind: "toggle_custom_control", name: "  " })).toBe(false);
+    expect(actionSummary({ kind: "toggle_custom_control", name: "Snap Tap" }, {})).toBe("Snap Tap");
+    expect(actionSummary({ kind: "toggle_custom_control", name: "" }, {})).toBe(
+      "No custom control yet",
+    );
+    expect(hasActionDetail({ kind: "toggle_custom_control", name: "" })).toBe(true);
+  });
+});
+
 describe("the action vocabulary", () => {
   // The runtime accepts these strings as serde tags, so a typo here would be a
   // command the runtime rejects rather than a compile error.
@@ -339,6 +379,16 @@ describe("the action vocabulary", () => {
     ];
 
     expect([...ALL_KINDS].sort()).toEqual([...expected].sort());
+  });
+
+  // The dropdown is a list of options, not of runtime kinds: Command Lab covers
+  // two, and the row's own control chooses between them.
+  it("leaves the custom control kind out of the dropdown", () => {
+    expect(ALL_KINDS).not.toContain("toggle_custom_control");
+    expect(defaultActionFor("toggle_custom_control", "cycle_perf_mode", "Snap")).toEqual({
+      kind: "toggle_custom_control",
+      name: "",
+    });
   });
 
   it("has a label for every kind and no duplicates", () => {

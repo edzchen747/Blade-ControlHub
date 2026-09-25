@@ -3,16 +3,20 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
 
   import Section from "../components/Section.svelte";
+  import Toggle from "../components/Toggle.svelte";
+  import { repointedControls } from "../dashboard";
   import * as ipc from "../ipc";
   import { store } from "../store.svelte";
   import type {
     CapturedCommand,
     CommandLabRecordingState,
     CommandLabStatus,
+    CustomToggle,
     UsbpcapInfo,
   } from "../types";
 
   const TOTAL_STEPS = 5;
+  const CUSTOM_CONTROLS_ID = "custom-controls";
 
   interface Row {
     id: number;
@@ -25,12 +29,22 @@
     capturedCount: number;
   }
 
+  /** A custom toggle, with an id so the list survives renames. */
+  interface ToggleRow extends CustomToggle {
+    id: number;
+  }
+
   let rows = $state<Row[]>([]);
+  let toggles = $state<ToggleRow[]>([]);
   let recordingId = $state<number | null>(null);
   let usbpcap = $state<UsbpcapInfo | null>(null);
   let showHelp = $state(false);
   let nextId = 1;
+  let nextToggleId = 1;
   let seeded = false;
+
+  /** Cleared once the Custom Controls section has scrolled out of view. */
+  let customControlsVisible = $state(true);
 
   const HELP = [
     {
@@ -54,6 +68,22 @@
     new Set(
       rows
         .map((row) => row.name.trim().toLowerCase())
+        .filter((name, index, all) => name !== "" && all.indexOf(name) !== index),
+    ),
+  );
+
+  /** The captures a toggle can be built out of, in the order they are offered. */
+  const captureNames = $derived(
+    rows
+      .map((row) => row.savedAs)
+      .filter((name): name is string => name !== null)
+      .sort((left, right) => left.localeCompare(right)),
+  );
+
+  const duplicateToggleNames = $derived(
+    new Set(
+      toggles
+        .map((toggle) => toggle.name.trim().toLowerCase())
         .filter((name, index, all) => name !== "" && all.indexOf(name) !== index),
     ),
   );
@@ -83,7 +113,38 @@
       capturedCount: commands.length,
     }));
     if (rows.length === 0) addRow();
+
+    toggles = (store.state?.custom_toggles ?? []).map((toggle) => ({
+      ...toggle,
+      id: nextToggleId++,
+    }));
   });
+
+  // The captures table can be long enough to push Custom Controls off the
+  // bottom, so it announces itself the same way Hypershift does on the Keys
+  // page. The section renders its own anchor id, so it is found rather than
+  // bound: a wrapper would either change the page spacing or, laid out as
+  // `display: contents`, have no box for the observer to watch.
+  $effect(() => {
+    const section = document.getElementById(CUSTOM_CONTROLS_ID);
+    if (!section) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => (customControlsVisible = entry.isIntersecting),
+      { root: section.closest(".content"), threshold: 0.12 },
+    );
+    observer.observe(section);
+    return () => observer.disconnect();
+  });
+
+  function jumpToCustomControls() {
+    document.getElementById(CUSTOM_CONTROLS_ID)?.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+      block: "start",
+    });
+  }
 
   async function refreshUsbpcap() {
     try {
@@ -153,14 +214,101 @@
     const name = row.name.trim();
     if (name === "" || row.commands.length === 0 || duplicateNames.has(name.toLowerCase())) return;
 
-    if (row.savedAs && row.savedAs !== name) await ipc.removeCommandLabCommand(row.savedAs);
+    if (row.savedAs && row.savedAs !== name) {
+      await ipc.removeCommandLabCommand(row.savedAs);
+      // A toggle points at a capture by name, so a rename has to follow it
+      // rather than leave the toggle aimed at a capture that no longer exists.
+      await repointToggles(row.savedAs, name);
+    }
     await ipc.saveCommandLabCommands(name, $state.snapshot(row.commands));
     row.savedAs = name;
   }
 
   async function remove(row: Row) {
-    if (row.savedAs) await ipc.removeCommandLabCommand(row.savedAs);
+    if (row.savedAs) {
+      await ipc.removeCommandLabCommand(row.savedAs);
+      await repointToggles(row.savedAs, "");
+    }
     rows = rows.filter((candidate) => candidate.id !== row.id);
+  }
+
+  /** Follows a capture through a rename, or clears it on a delete. */
+  async function repointToggles(from: string, to: string) {
+    const repointed = repointedControls($state.snapshot(toggles), from, to);
+    if (!repointed) return;
+
+    toggles = repointed.map((control, index) => ({ ...control, id: toggles[index]!.id }));
+    await saveToggles();
+  }
+
+  // ── Custom controls ────────────────────────────────────────────────────────
+
+  function addToggle() {
+    toggles = [
+      ...toggles,
+      { id: nextToggleId++, name: "", on_capture: "", off_capture: "", enabled: false },
+    ];
+  }
+
+  const toggleComplete = (toggle: ToggleRow) =>
+    toggle.name.trim() !== "" &&
+    toggle.on_capture !== "" &&
+    toggle.off_capture !== "" &&
+    toggle.on_capture !== toggle.off_capture;
+
+  const canAddToggle = $derived(
+    captureNames.length >= 2 &&
+      toggles.every(
+        (toggle) =>
+          toggleComplete(toggle) && !duplicateToggleNames.has(toggle.name.trim().toLowerCase()),
+      ),
+  );
+
+  /** A capture a toggle names that has since been renamed or deleted. */
+  function missingCapture(toggle: ToggleRow): string | null {
+    for (const name of [toggle.on_capture, toggle.off_capture]) {
+      if (name !== "" && !captureNames.includes(name)) return name;
+    }
+    return null;
+  }
+
+  function toggleError(toggle: ToggleRow): string | null {
+    if (duplicateToggleNames.has(toggle.name.trim().toLowerCase())) {
+      return "That name is already used.";
+    }
+    const missing = missingCapture(toggle);
+    if (missing) return `The capture "${missing}" no longer exists.`;
+    if (toggle.on_capture !== "" && toggle.on_capture === toggle.off_capture) {
+      return "Pick a different capture for each side.";
+    }
+    return null;
+  }
+
+  /**
+   * Writes the whole list: the runtime stores toggles in one place, and looks a
+   * toggle up by the name it was saved under, so the name is trimmed here and
+   * nowhere else.
+   */
+  async function saveToggles() {
+    await ipc.saveCustomToggles(
+      toggles.map(({ id: _id, ...toggle }) => ({
+        ...$state.snapshot(toggle),
+        name: toggle.name.trim(),
+      })),
+    );
+  }
+
+  async function flipToggle(toggle: ToggleRow, enabled: boolean) {
+    toggle.enabled = enabled;
+    // The runtime finds the toggle by name, so the definition goes first and
+    // the flip — which is what replays the capture — follows it.
+    await saveToggles();
+    await ipc.setCustomToggle(toggle.name.trim(), enabled);
+  }
+
+  async function removeToggle(toggle: ToggleRow) {
+    toggles = toggles.filter((candidate) => candidate.id !== toggle.id);
+    await saveToggles();
   }
 
   const hex = (value: number, width: number) =>
@@ -315,6 +463,119 @@
   {/if}
 </Section>
 
+<Section
+  id={CUSTOM_CONTROLS_ID}
+  title="Custom Controls"
+  hint="Turn a pair of captures into a switch: one is replayed when you turn it on, the other when you turn it off."
+>
+  <p class="hint">
+    Finished controls appear on the Dashboard under Custom Controls, alongside your captures,
+    and can be bound to a key on the Keys page. Use Edit there to hide any you would rather
+    not see.
+  </p>
+
+  {#if captureNames.length < 2}
+    <p class="hint">
+      Record and name two captures above — the setting switched on, and switched off — and
+      they can be paired into a switch here.
+    </p>
+  {/if}
+
+  {#each toggles as toggle (toggle.id)}
+    {@const error = toggleError(toggle)}
+    <div class="control">
+      <div class="control-head">
+        <input
+          class="input"
+          class:invalid={duplicateToggleNames.has(toggle.name.trim().toLowerCase())}
+          placeholder="Name this control"
+          bind:value={toggle.name}
+          onchange={() => saveToggles()}
+          aria-label="Control name"
+        />
+        <button
+          type="button"
+          class="icon danger"
+          aria-label="Delete control"
+          onclick={() => removeToggle(toggle)}
+        >
+          ✕
+        </button>
+      </div>
+
+      <div class="sides">
+        <label>
+          <span class="side-label">Switched on</span>
+          <select
+            class="select"
+            class:invalid={toggle.on_capture === ""}
+            value={toggle.on_capture}
+            onchange={(event) => {
+              toggle.on_capture = event.currentTarget.value;
+              void saveToggles();
+            }}
+          >
+            <option value="">Choose a capture…</option>
+            {#each captureNames as name (name)}
+              <option value={name}>{name}</option>
+            {/each}
+            <!-- A capture renamed outside this page would otherwise vanish from
+                 the list, silently changing what the control is set to. -->
+            {#if toggle.on_capture !== "" && !captureNames.includes(toggle.on_capture)}
+              <option value={toggle.on_capture}>{toggle.on_capture} (missing)</option>
+            {/if}
+          </select>
+        </label>
+
+        <label>
+          <span class="side-label">Switched off</span>
+          <select
+            class="select"
+            class:invalid={toggle.off_capture === ""}
+            value={toggle.off_capture}
+            onchange={(event) => {
+              toggle.off_capture = event.currentTarget.value;
+              void saveToggles();
+            }}
+          >
+            <option value="">Choose a capture…</option>
+            {#each captureNames as name (name)}
+              <option value={name}>{name}</option>
+            {/each}
+            {#if toggle.off_capture !== "" && !captureNames.includes(toggle.off_capture)}
+              <option value={toggle.off_capture}>{toggle.off_capture} (missing)</option>
+            {/if}
+          </select>
+        </label>
+      </div>
+
+      <Toggle
+        label={toggle.name.trim() || "Untitled control"}
+        hint={toggleComplete(toggle) && !error
+          ? `Replays “${toggle.on_capture}” on, “${toggle.off_capture}” off.`
+          : "Name the control and pick a capture for each side."}
+        checked={toggle.enabled}
+        disabled={!toggleComplete(toggle) || error !== null || recordingId !== null}
+        error={error ?? undefined}
+        onchange={(checked) => flipToggle(toggle, checked)}
+      />
+    </div>
+  {/each}
+
+  <div class="row">
+    <button type="button" disabled={!canAddToggle} onclick={addToggle}>+ New toggle</button>
+    {#if !canAddToggle && captureNames.length >= 2}
+      <span class="hint">Finish the current control first.</span>
+    {/if}
+  </div>
+</Section>
+
+{#if !customControlsVisible}
+  <button type="button" class="jump" onclick={jumpToCustomControls}>
+    Jump to Custom Controls ↓
+  </button>
+{/if}
+
 <style>
   .warn {
     color: var(--warn);
@@ -371,6 +632,57 @@
 
   .progress span.on {
     background: var(--accent);
+  }
+
+  /* A control is four stacked parts, so where one ends and the next begins has
+     to be drawn rather than inferred. */
+  .control {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-sm);
+  }
+
+  .control + .control {
+    border-top: 1px solid var(--line);
+    padding-top: var(--gap);
+  }
+
+  .control-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 28px;
+    gap: var(--gap-sm);
+    align-items: center;
+  }
+
+  /* The two captures are one decision made twice, so they sit side by side. */
+  .sides {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--gap-sm);
+  }
+
+  .sides label {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .side-label {
+    font-size: 11.5px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+
+  .jump {
+    position: sticky;
+    bottom: 0;
+    align-self: center;
+    background: var(--bg-raised);
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: var(--shadow);
   }
 
   .help {

@@ -38,6 +38,10 @@ pub enum DeviceCmd {
     SaveCommandLabCommands(String, Vec<CapturedCommand>),
     RemoveCommandLabCommand(String),
     ReplaySavedCapture(String),
+    SetCustomToggles(Vec<CustomToggle>),
+    SetCustomToggle(String, bool),
+    ToggleCustomControl(String),
+    SetHiddenDashboardControls(HiddenDashboardControls),
     SetKeyBindings(KeyBindings),
     PersistConfig,
     GetConfig(mpsc::Sender<AppConfig>),
@@ -237,6 +241,29 @@ impl DeviceHandle {
 
     pub fn remove_command_lab_command(&self, name: String) {
         self.send(DeviceCmd::RemoveCommandLabCommand(name));
+    }
+
+    /// Replaces the user's custom toggles, without replaying anything: editing
+    /// a toggle's definition is not the same as flipping it.
+    pub fn set_custom_toggles(&self, toggles: Vec<CustomToggle>) {
+        self.send(DeviceCmd::SetCustomToggles(toggles));
+    }
+
+    /// Puts one custom toggle on a named side, replaying the capture for it.
+    pub fn set_custom_toggle(&self, name: String, enabled: bool) {
+        self.send(DeviceCmd::SetCustomToggle(name, enabled));
+    }
+
+    /// Replaces what the Dashboard's Custom Controls section leaves out.
+    pub fn set_hidden_dashboard_controls(&self, hidden: HiddenDashboardControls) {
+        self.send(DeviceCmd::SetHiddenDashboardControls(hidden));
+    }
+
+    /// Flips one custom control to whichever side it is not on. A key binding
+    /// names the control and the device thread, which owns the config, decides
+    /// the side — the caller has no copy of the remembered state.
+    pub fn toggle_custom_control(&self, name: String) {
+        self.send(DeviceCmd::ToggleCustomControl(name));
     }
 
 
