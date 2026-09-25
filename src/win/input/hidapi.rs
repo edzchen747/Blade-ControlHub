@@ -12,6 +12,18 @@ use hidapi::{HidApi, HidDevice};
 use tracing::{info, warn};
 
 const HID_READ_TIMEOUT_MS: i32 = 250;
+
+/// Bytes offered to the driver for one input report. The special-key reports
+/// this listener cares about are two bytes; the rest is slack.
+///
+/// Sizing this up does not rescue an interface that fails with
+/// `ERROR_INVALID_USER_BUFFER` (1784): hidapi reads using the interface's own
+/// `InputReportByteLength`, so 1784 means that length is zero — the interface
+/// takes commands and returns nothing, and is not readable at any buffer size.
+/// The Blade's vendor command interface (`MI_03`, the one `librazer` writes to)
+/// is exactly that, so its listener closing at startup is expected and is not
+/// why a Razer key or Fn would stop working.
+const HID_READ_BUFFER_LEN: usize = 16;
 static HID_LISTENERS_RUNNING: AtomicBool = AtomicBool::new(false);
 static HID_LISTENER_THREADS: Mutex<Vec<JoinHandle<()>>> = Mutex::new(Vec::new());
 
@@ -45,7 +57,7 @@ impl HidApiListener {
             let iface_num = device_info.interface_number();
 
             if let Ok(device_api) = api.open_path(&path) {
-                let mut test_buf = [0u8; 16];
+                let mut test_buf = [0u8; HID_READ_BUFFER_LEN];
                 let read_result = device_api.read_timeout(&mut test_buf, 5);
                 if interface_is_readable_or_not_denied(read_result) {
                     info!(interface = iface_num, path = %path.to_string_lossy(), "HID interface opened");
@@ -130,7 +142,7 @@ fn interface_is_readable_or_not_denied(read_result: hidapi::HidResult<usize>) ->
 }
 
 fn run_special_key_listener(device_api: HidDevice, iface_num: i32, path: String) {
-    let mut buf = [0u8; 16];
+    let mut buf = [0u8; HID_READ_BUFFER_LEN];
     while HID_LISTENERS_RUNNING.load(Ordering::SeqCst) {
         match device_api.read_timeout(&mut buf, HID_READ_TIMEOUT_MS) {
             Ok(0) => continue,
@@ -176,10 +188,30 @@ fn parse_special_key_report(report: &[u8]) -> SpecialKeyReport {
     }
 }
 
+/// Records Fn and tells the settings window, but only on a real transition:
+/// `0x00` arrives for every special-key release, not just Fn's, so a plain
+/// `store` here would push a redundant event for every Razer key released.
+///
+/// Returns whether this was a transition, which is what the tests assert on —
+/// the push itself needs a live window to observe.
+fn set_fn_pressed(pressed: bool) -> bool {
+    let changed = FN_PRESSED.swap(pressed, Ordering::SeqCst) != pressed;
+    if changed {
+        crate::ui::webui::push_fn_state(pressed);
+    }
+    changed
+}
+
 fn handle_razer_special_key(key_code: u8) {
     match key_code {
-        0x0a => FN_PRESSED.store(true, Ordering::SeqCst),
-        0x00 => FN_PRESSED.store(false, Ordering::SeqCst),
+        // The settings window cannot see Fn — it is never a virtual key — so the
+        // state it needs in order to forward a Hypershift press is pushed to it.
+        0x0a => {
+            set_fn_pressed(true);
+        }
+        0x00 => {
+            set_fn_pressed(false);
+        }
         _ => {
             let key = razer_key::Key::from(key_code);
             // A key being captured for a mapping is consumed there. The
@@ -228,6 +260,30 @@ mod tests {
         assert_eq!(
             parse_special_key_report(&[0x02, 0x0a]),
             SpecialKeyReport::UnexpectedReportId(0x02)
+        );
+    }
+
+    /// The window cannot see Fn — it is never a virtual key — so it depends on
+    /// this push to know whether its own key press is a Hypershift press.
+    #[test]
+    fn fn_state_pushes_only_on_a_real_transition() {
+        FN_PRESSED.store(false, Ordering::SeqCst);
+
+        assert!(set_fn_pressed(true), "Fn going down is a transition");
+        assert!(FN_PRESSED.load(Ordering::SeqCst));
+
+        assert!(
+            !set_fn_pressed(true),
+            "a second 0x0a must not re-push; the reports repeat while Fn is held"
+        );
+        assert!(FN_PRESSED.load(Ordering::SeqCst));
+
+        assert!(set_fn_pressed(false), "Fn going up is a transition");
+        assert!(!FN_PRESSED.load(Ordering::SeqCst));
+
+        assert!(
+            !set_fn_pressed(false),
+            "0x00 arrives for every special-key release, not just Fn's"
         );
     }
 

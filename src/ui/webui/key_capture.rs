@@ -17,6 +17,23 @@ use crate::core::shared_state::KEYMAP_LISTENING;
 /// Event name the window listens on for a captured Razer key.
 pub const RAZER_KEY_EVENT: &str = "razer-key";
 
+/// Event name the window listens on for Fn being held or released.
+pub const FN_STATE_EVENT: &str = "fn-state";
+
+/// Tells the window whether Fn is held.
+///
+/// Fn never reaches Windows as a virtual key, so the window cannot observe it;
+/// it needs this to decide whether a key press of its own is a Hypershift
+/// press that the runtime will consume.
+pub fn push_fn_state(pressed: bool) {
+    let Some(handle) = super::app_handle() else {
+        return;
+    };
+    if let Err(error) = handle.emit(FN_STATE_EVENT, pressed) {
+        debug!(%error, pressed, "Failed to push Fn state to the settings window");
+    }
+}
+
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct CapturedRazerKey {
     pub key_code: u8,

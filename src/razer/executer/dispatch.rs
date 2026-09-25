@@ -11,8 +11,51 @@ fn should_query_battery_limit(queries: u32) -> bool {
     queries > 0 && (queries == 1 || queries.is_multiple_of(SETTINGS_STATE_BATTERY_QUERY_PERIOD))
 }
 
+/// Whether a device setting was written by the settings window rather than by a
+/// key, a monitor or a lighting effect.
+///
+/// The window is the only caller that names a value outright: a key cycles,
+/// toggles or adjusts, and the monitors re-apply a whole profile. The shape of
+/// the command is therefore a reliable statement of where it came from, and the
+/// queue is the last place where that is still known.
+///
+/// Only the settings are listed. The window's other commands — key bindings,
+/// the startup toggles, Command Lab, a state snapshot — raise no overlay for
+/// there to be a question about.
+fn window_originated(cmd: &DeviceCmd) -> bool {
+    matches!(
+        cmd,
+        DeviceCmd::SetPerfMode(..)
+            | DeviceCmd::SetCustomModeConfig(..)
+            | DeviceCmd::SetFanSpeed(..)
+            | DeviceCmd::SetRefreshRate(..)
+            | DeviceCmd::SetKeyboardBrightness(..)
+            | DeviceCmd::SetRGBMode(..)
+            | DeviceCmd::SetUnderGlow(..)
+            | DeviceCmd::SetBatteryLimit(..)
+            | DeviceCmd::SetThemeColor(..)
+    )
+}
+
 impl<'a> Executer<'a> {
+    /// Runs one queued command, suppressing the OSD for the ones the settings
+    /// window sent.
+    ///
+    /// The overlay exists for feedback the user has no other way to see. A
+    /// control in the window already shows its own new value, so an overlay on
+    /// top of it is noise — but a Razer special key or an Fn combination has
+    /// nothing else to show for itself, and has to keep its overlay even while
+    /// the window is open and focused. Which surface asked is therefore the
+    /// honest test, not which surface has focus.
     fn dispatch(&mut self, cmd: DeviceCmd) -> bool {
+        if window_originated(&cmd) {
+            disable_osd! { self.dispatch_command(cmd) }
+        } else {
+            self.dispatch_command(cmd)
+        }
+    }
+
+    fn dispatch_command(&mut self, cmd: DeviceCmd) -> bool {
         match cmd {
             DeviceCmd::InitializeDevice(notif) => self.initialize(notif),
             DeviceCmd::SleepDevice(tx) => {

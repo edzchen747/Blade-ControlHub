@@ -48,6 +48,7 @@ pub fn handler() -> impl Fn(Invoke<tauri::Wry>) -> bool + Send + Sync + 'static 
         set_theme_color,
         begin_razer_key_capture,
         cancel_razer_key_capture,
+        forward_key,
         set_key_bindings,
         list_apps,
         refresh_apps,
@@ -171,6 +172,18 @@ fn begin_razer_key_capture() {
 #[tauri::command]
 fn cancel_razer_key_capture() {
     key_capture::stop_razer_key_capture();
+}
+
+/// Runs a key the settings window saw, because the runtime's keyboard hook did
+/// not: Windows does not invoke a low-level hook for input aimed at our own
+/// window. Returns whether the runtime consumed it, so the window can report
+/// whether the keystroke should have been swallowed.
+///
+/// Cheap and synchronous: the dispatch only reads atomics and hands any real
+/// work to a worker, so it never blocks Tauri's event loop.
+#[tauri::command]
+fn forward_key(key_code: u8, pressed: bool) -> bool {
+    crate::win::input::key_hook::dispatch_forwarded_key(key_code, pressed)
 }
 
 /// Replaces both mapping tables at once. The window owns the rows — including

@@ -5,6 +5,11 @@
 //! It resolves the event into at most one side effect, then shows the OSD if
 //! the event has an overlay and the OSD is not suppressed.
 //!
+//! Suppression is a property of the command's origin, not of what has focus:
+//! the settings window's own controls suppress the overlay they would raise
+//! (see `Executer::dispatch`), while the Razer keys, Fn combinations and the
+//! Windows monitors keep theirs even while that window is open and focused.
+//!
 //! Since the Tauri rebuild this all lives in one process: the settings window
 //! is a webview owned by the same runtime rather than a child process, so
 //! opening it is a window show rather than a spawn.
@@ -19,7 +24,7 @@ macro_rules! disable_osd {
 
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::razer::device_handle::{DeviceHandle, device, stop_device_channel_monitor};
 use crate::ui::app_events::{AppEvent, OsdEvent};
@@ -44,7 +49,6 @@ pub struct AppCore {
     pub running: bool,
     pub osd_enabled: bool,
     osd_disable_guards: usize,
-    settings_osd_disable_guard: Option<OsdDisableGuard>,
     pub pending_side_effects: Vec<SideEffect>,
 }
 
@@ -56,7 +60,6 @@ impl AppCore {
             running: true,
             osd_enabled: true,
             osd_disable_guards: 0,
-            settings_osd_disable_guard: None,
             pending_side_effects: Vec::new(),
         }
     }
@@ -127,10 +130,23 @@ pub fn app(event: AppEvent) {
         AppEvent::OsdEvent(osd_event) => osd_event.as_params(),
         _ => None,
     };
-    if let Some(osd_params) = osd_params
-        && core(&ctx).should_show_osd()
-    {
-        OsdController::show(osd_params);
+    if let Some(osd_params) = osd_params {
+        // Say why an overlay was dropped. Suppression is invisible by nature —
+        // a missing overlay looks exactly like a key that did nothing — so the
+        // guard count is worth stating rather than inferring.
+        let (show, guards, enabled) = {
+            let core = core(&ctx);
+            (
+                core.should_show_osd(),
+                core.osd_disable_guards,
+                core.osd_enabled,
+            )
+        };
+        if show {
+            OsdController::show(osd_params);
+        } else {
+            debug!(guards, enabled, "Suppressed an OSD overlay");
+        }
     }
 
     // An event that reached here may have moved device state — a hotkey, a
@@ -142,32 +158,6 @@ pub fn app(event: AppEvent) {
 
 pub fn set_osd_enabled(enabled: bool) {
     app(OsdEvent::EnableOSD(enabled).into());
-}
-
-/// Suppresses the OSD while the settings window is open *and* focused, so
-/// adjusting brightness in the window does not stack an overlay on top of it.
-pub fn set_settings_window_state(open: bool, focused: bool) {
-    let Some(ctx) = APP_CONTEXT.get() else {
-        warn!(
-            open,
-            focused, "Ignoring settings-window visibility before app initialization"
-        );
-        return;
-    };
-
-    if settings_window_should_suppress_osd(open, focused) {
-        if core(ctx).settings_osd_disable_guard.is_none() {
-            let guard = OsdDisableGuard::new();
-            core(ctx).settings_osd_disable_guard = Some(guard);
-        }
-    } else {
-        let guard = core(ctx).settings_osd_disable_guard.take();
-        drop(guard);
-    }
-}
-
-const fn settings_window_should_suppress_osd(open: bool, focused: bool) -> bool {
-    open && focused
 }
 
 fn core(ctx: &AppContext) -> MutexGuard<'_, AppCore> {
@@ -252,13 +242,5 @@ mod tests {
 
         core.osd_disable_guards = 0;
         assert!(core.should_show_osd());
-    }
-
-    #[test]
-    fn settings_window_suppresses_osd_only_when_open_and_focused() {
-        assert!(!settings_window_should_suppress_osd(false, false));
-        assert!(!settings_window_should_suppress_osd(false, true));
-        assert!(!settings_window_should_suppress_osd(true, false));
-        assert!(settings_window_should_suppress_osd(true, true));
     }
 }

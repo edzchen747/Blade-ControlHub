@@ -373,10 +373,66 @@ colour keeps the existing 180 ms window; other sliders use 120 ms.
 
 ### 5.3 OSD suppression
 
-While the window is **open and focused**, the OSD is suppressed, so adjusting
-brightness in the window does not fire an overlay on top of it. This is existing
-behaviour (`settings_window_should_suppress_osd`) and is preserved exactly. Focus and
-blur are reported from the webview window to the runtime.
+Suppression follows **which surface issued the command**, not which surface has
+focus. A control in the window already shows its own new value, so the overlay it
+would raise is noise and is suppressed. A Razer special key, an Fn combination or
+a power transition has nothing else to show for itself, so it keeps its overlay —
+including while the window is open and focused.
+
+`Executer::dispatch` is where this is decided, because the device queue is the
+last point at which a command's origin is still known. The window is the only
+caller that names a profile and a value (`SetPerfMode`, `SetKeyboardBrightness`,
+`SetRGBMode`, …); a key cycles, toggles or adjusts. The overlay is
+`WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT`, so it draws over the
+window without taking focus or swallowing a click.
+
+This replaces the earlier focus-based rule
+(`settings_window_should_suppress_osd`), which silenced *every* overlay while the
+window was focused and so made the hardware keys look dead whenever the user was
+in the window — they had always kept working, with nothing to say so. Focus is
+still reported from the webview, but only to refresh the snapshot the window may
+have missed while it was in the background.
+
+### 5.3.1 Keyboard input while the window is focused
+
+Windows does **not** invoke a `WH_KEYBOARD_LL` hook for keyboard input aimed at
+this window. Measured, not assumed: with the window unfocused every key press
+reaches the hook, and from the moment it takes focus the hook callback is not
+entered at all, while the HID reader keeps delivering Razer keys and Fn
+throughout. So while the window has focus, every hook-sourced feature — the
+multimedia top row, the brightness keys, the Shift modifier, Hypershift — is dead
+unless the window reports the keys itself.
+
+It does. `ui/src/lib/hotkeys.svelte.ts` forwards its own key events to the
+`forward_key` command, which runs `key_hook::dispatch_forwarded_key` — the *same*
+dispatch the hook runs, so no mapping logic is duplicated. What the window
+forwards:
+
+- **F1–F12**, unless the key is going into something the user is editing.
+- **anything pressed with Fn**, including from a text field, since Fn+D is a
+  Hypershift press wherever the caret is.
+- **Shift and Alt, always, and never consumed.** These are global state the
+  runtime reads for keys that never reach this window at all: `SHIFT_PRESSED` is
+  what makes the cycling controls run backwards for a *Razer* key, and
+  `ALT_PRESSED` is what keeps Alt+F4 out of the top row's hands. Losing focus
+  releases whatever was reported as held, or a Shift the runtime still believed
+  was down would reverse every control from then on.
+
+Two things have to be decided in the window rather than by the runtime, because a
+Tauri command resolves a tick too late to swallow a keystroke:
+
+- **Fn state**, which arrives as a pushed `fn-state` event from the HID reader.
+  Fn is never a virtual key, so the window cannot observe it. The event fires only
+  on a real transition, because the `0x00` report marks *every* special-key
+  release, not just Fn's.
+- **Whether the runtime will consume the key**, computed from the same rules the
+  runtime applies — a bound Hypershift key, or the `IsXOR` media/function rule for
+  the top row with its `IsFalse(ALT_PRESSED)` guard. That mirror is what stops
+  Fn+D from also typing "d", and it is pinned by `hotkeys.test.ts`, since a rule
+  duplicated across two languages is a rule that drifts.
+
+A cell waiting for a key press still owns the keyboard: nothing is forwarded while
+the Keys page is capturing, or a key would be bound and run its old action at once.
 
 ### 5.4 Window behaviour
 
@@ -432,9 +488,15 @@ These must not change, because they encode device or firmware facts:
    subtracted from the result.
 8. Turning on "Start as administrator" relaunches elevated; turning it off does not.
 9. The OSD is the sole owner of overlay feedback; the window never draws overlays.
+    Opening the window suppresses no hardware path: the keyboard hook, the HID
+    reader that detects Fn, and every device action a key runs stay live, and
+    their overlays still appear over the window.
 10. A custom key binding is consulted before the built-in key map, so any key can be
     reclaimed. A bound Hypershift key is swallowed, and keystrokes the runtime
     synthesizes are ignored by the hook so a binding cannot retrigger itself.
+    The keyboard hook is not the only source of keys: Windows never calls it for
+    input aimed at the settings window, so that window forwards its own key events
+    into the same dispatch (see §5.3.1). Both paths must stay one implementation.
 11. Overlay feedback follows the action, not the row's label: device actions raise
     the overlay their own handler already owns, launching an application or running
     a command raises one naming the target, and key remaps and macros are silent.

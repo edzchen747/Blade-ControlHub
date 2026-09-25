@@ -3,6 +3,7 @@
 
   import ProfileBar from "./lib/components/ProfileBar.svelte";
   import Sidebar from "./lib/components/Sidebar.svelte";
+  import { hotkeys } from "./lib/hotkeys.svelte";
   import { keyMap } from "./lib/keymap.svelte";
   import { PAGES, type PageId } from "./lib/pages";
   import CommandLab from "./lib/pages/CommandLab.svelte";
@@ -28,6 +29,9 @@
   onMount(() => {
     void store.start();
     void keyMap.start();
+    // The runtime's keyboard hook is not called for keys aimed at this window,
+    // so the window feeds them back to the runtime itself.
+    void hotkeys.start();
 
     // Esc closes the window, matching how a tray panel is expected to behave.
     const onKeyDown = (event: KeyboardEvent) => {
@@ -42,6 +46,7 @@
       window.removeEventListener("keydown", onKeyDown);
       store.stop();
       keyMap.stop();
+      hotkeys.stop();
     };
   });
 

@@ -26,7 +26,7 @@ pub use command_lab::{
     CommandLabRecordingState, CommandLabStatus, cancel_command_lab_record,
     stop_command_lab_recording,
 };
-pub use key_capture::{record_razer_key_code, stop_razer_key_capture};
+pub use key_capture::{push_fn_state, record_razer_key_code, stop_razer_key_capture};
 pub use push::notify_settings_changed;
 pub use window::{WINDOW_LABEL, hide_window, show_window, toggle_window};
 

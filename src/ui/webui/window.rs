@@ -15,8 +15,8 @@ use crate::ui::theme::{SETTINGS_ICON_SIZE, SETTINGS_PADDING_RATIO};
 
 pub const WINDOW_LABEL: &str = "main";
 
-/// Tracks the visibility the runtime has been told about, so focus changes
-/// arriving after a hide do not re-arm OSD suppression.
+/// Whether the window is showing, so a blur arriving after a hide does not ask
+/// the device for a snapshot nothing is going to render.
 static WINDOW_OPEN: AtomicBool = AtomicBool::new(false);
 
 /// Whether the window has been positioned since the process started. The
@@ -51,7 +51,6 @@ pub fn show_window() {
     }
 
     WINDOW_OPEN.store(true, Ordering::SeqCst);
-    crate::ui::app::set_settings_window_state(true, true);
     super::push::push_now();
 }
 
@@ -82,13 +81,17 @@ pub fn toggle_window() {
     }
 }
 
-/// Reports webview focus to the runtime, which suppresses the OSD while the
-/// user is adjusting the same settings in the window.
+/// Refreshes the window when it comes back to the front, since the device may
+/// have moved under it — a Razer key, an Fn combination or a power transition
+/// all keep working while the window is in the background.
+///
+/// Focus deliberately has no say over the OSD: the overlay is suppressed per
+/// command by whoever issued it, so hardware keys still raise theirs over this
+/// window. See `Executer::dispatch`.
 pub fn report_focus(focused: bool) {
     if !WINDOW_OPEN.load(Ordering::SeqCst) {
         return;
     }
-    crate::ui::app::set_settings_window_state(true, focused);
     if focused {
         super::push::push_now();
     }
@@ -113,7 +116,6 @@ fn hide(window: &WebviewWindow) {
         return;
     }
     WINDOW_OPEN.store(false, Ordering::SeqCst);
-    crate::ui::app::set_settings_window_state(false, false);
 }
 
 fn window() -> Option<WebviewWindow> {

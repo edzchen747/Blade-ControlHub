@@ -55,7 +55,10 @@ overlay latency never depends on the webview.
   opens a HID device or persists configuration itself. See
   [`docs/UI-SPEC.md`](./docs/UI-SPEC.md) for what the window is meant to do.
 - **OSD:** `ui::osd_controller` owns a stack of click-through layered windows
-  rendered with `resvg`. It is fully independent of the UI toolkit.
+  rendered with `resvg`. It is fully independent of the UI toolkit. An overlay is
+  suppressed per command by whoever issued it — the window's own controls silence
+  theirs, the keys keep theirs — so opening the settings window takes nothing
+  away from the Razer keys, Fn detection or the actions they run.
 - **Hardware:** `razer::DeviceHandle` serializes normal and urgent commands to
   the single `razer::Executer`, which owns `librazer::Device`, config updates,
   and persistence. Every window command is moved off the event loop before it

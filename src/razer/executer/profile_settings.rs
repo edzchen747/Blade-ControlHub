@@ -209,14 +209,16 @@ impl<'a> Executer<'a> {
         }
     }
 
+    /// Re-asserts the current effect so the keyboard picks up the new colour.
+    /// The OSD that re-assertion would raise is suppressed by `dispatch`, since
+    /// only the window changes the accent and the effect did not actually
+    /// change.
     fn set_theme_color(&mut self, color: ThemeColor) -> crate::error::AppResult<()> {
-        disable_osd! {
-            self.app_config.theme_color = color;
-            let rgb_effect = self.app_config.get().rgb_effect.value();
-            self.kb().set_rgb_effect(rgb_effect);
-            crate::ui::theme::set_runtime_theme_color(color);
-            self.persist_config();
-        };
+        self.app_config.theme_color = color;
+        let rgb_effect = self.app_config.get().rgb_effect.value();
+        self.kb().set_rgb_effect(rgb_effect);
+        crate::ui::theme::set_runtime_theme_color(color);
+        self.persist_config();
         Ok(())
     }
 

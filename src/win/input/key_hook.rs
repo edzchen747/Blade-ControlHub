@@ -150,6 +150,20 @@ unsafe extern "system" fn key_hook_proc(code: i32, wparam: WPARAM, lparam: LPARA
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
+/// Runs the hook's own dispatch for a key the hook never saw.
+///
+/// Windows does not invoke a `WH_KEYBOARD_LL` hook for input going to our own
+/// settings window, so while that window has focus every hook-sourced feature —
+/// the multimedia top row, the brightness keys, the Shift modifier, Hypershift —
+/// would otherwise be dead. The window forwards its own key events here so they
+/// take exactly the same path, rather than this logic existing twice.
+///
+/// Returns whether the key was consumed, which is what tells the window to
+/// swallow it instead of letting it type a character.
+pub fn dispatch_forwarded_key(key_code: u8, pressed: bool) -> bool {
+    handle_key_event(key_code, pressed)
+}
+
 fn handle_key_event(key_code: u8, pressed: bool) -> bool {
     if !KEY_HOOK_RUNNING.load(Ordering::SeqCst) {
         return false;
@@ -170,6 +184,10 @@ fn handle_key_event(key_code: u8, pressed: bool) -> bool {
         return false;
     }
 
+    handle_key_press(key_code)
+}
+
+fn handle_key_press(key_code: u8) -> bool {
     // Hypershift: a key held with Fn. The lookup is by raw virtual-key code,
     // so any key can be bound without `vkey::Key` having to name it. A bound
     // key is swallowed, otherwise Fn+K would both run the action and type "k".
@@ -259,6 +277,70 @@ mod tests {
         assert!(SHIFT_PRESSED.load(Ordering::SeqCst));
 
         update_shift_state(RIGHT_SHIFT_MASK, false);
+        assert!(!SHIFT_PRESSED.load(Ordering::SeqCst));
+    }
+
+    /// The window forwards keys the hook is never called for, and the modifiers
+    /// matter most: `SHIFT_PRESSED` is what makes the cycling controls run
+    /// backwards, and nothing else would update it while that window has focus —
+    /// including for a Razer key, which never passes through the window at all.
+    #[test]
+    fn forwarded_modifiers_update_the_shared_state() {
+        let _guard = lock_test_state();
+        KEY_HOOK_RUNNING.store(true, Ordering::SeqCst);
+        FN_PRESSED.store(false, Ordering::SeqCst);
+        SHIFT_KEYS_DOWN.store(0, Ordering::SeqCst);
+        SHIFT_PRESSED.store(false, Ordering::SeqCst);
+        ALT_PRESSED.store(false, Ordering::SeqCst);
+
+        assert!(
+            !dispatch_forwarded_key(VK_LSHIFT, true),
+            "a modifier must never be reported as consumed, or Shift would stop capitalising"
+        );
+        assert!(SHIFT_PRESSED.load(Ordering::SeqCst));
+        assert!(!dispatch_forwarded_key(VK_LSHIFT, false));
+        assert!(!SHIFT_PRESSED.load(Ordering::SeqCst));
+
+        assert!(!dispatch_forwarded_key(VK_LMENU, true));
+        assert!(ALT_PRESSED.load(Ordering::SeqCst));
+        assert!(!dispatch_forwarded_key(VK_LMENU, false));
+        assert!(!ALT_PRESSED.load(Ordering::SeqCst));
+
+        KEY_HOOK_RUNNING.store(false, Ordering::SeqCst);
+    }
+
+    /// Both halves of Shift feed one flag, so releasing one while the other is
+    /// still down must not clear it — the window forwards them as distinct keys.
+    #[test]
+    fn a_forwarded_shift_release_keeps_the_other_half_held() {
+        let _guard = lock_test_state();
+        KEY_HOOK_RUNNING.store(true, Ordering::SeqCst);
+        FN_PRESSED.store(false, Ordering::SeqCst);
+        SHIFT_KEYS_DOWN.store(0, Ordering::SeqCst);
+        SHIFT_PRESSED.store(false, Ordering::SeqCst);
+
+        dispatch_forwarded_key(VK_LSHIFT, true);
+        dispatch_forwarded_key(VK_RSHIFT, true);
+        dispatch_forwarded_key(VK_LSHIFT, false);
+        assert!(
+            SHIFT_PRESSED.load(Ordering::SeqCst),
+            "right Shift is still down"
+        );
+
+        dispatch_forwarded_key(VK_RSHIFT, false);
+        assert!(!SHIFT_PRESSED.load(Ordering::SeqCst));
+
+        KEY_HOOK_RUNNING.store(false, Ordering::SeqCst);
+    }
+
+    /// A key forwarded after shutdown has begun must not run anything.
+    #[test]
+    fn a_forwarded_key_is_ignored_once_the_hook_has_stopped() {
+        let _guard = lock_test_state();
+        KEY_HOOK_RUNNING.store(false, Ordering::SeqCst);
+        SHIFT_PRESSED.store(false, Ordering::SeqCst);
+
+        assert!(!dispatch_forwarded_key(VK_LSHIFT, true));
         assert!(!SHIFT_PRESSED.load(Ordering::SeqCst));
     }
 

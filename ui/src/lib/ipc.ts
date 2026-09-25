@@ -61,6 +61,10 @@ export const setStartWithWindows = (enabled: boolean) =>
 export const setThemeColor = (color: ThemeColor) =>
   invoke<void>("set_theme_color", { color });
 
+/** Runs a key the runtime's keyboard hook cannot see; true if it consumed it. */
+export const forwardKey = (keyCode: number, pressed: boolean) =>
+  invoke<boolean>("forward_key", { keyCode, pressed });
+
 export const beginRazerKeyCapture = () => invoke<void>("begin_razer_key_capture");
 export const cancelRazerKeyCapture = () => invoke<void>("cancel_razer_key_capture");
 
@@ -95,6 +99,9 @@ export const quitApp = () => invoke<void>("quit_app");
 
 export const onState = (handler: (state: UiState) => void): Promise<UnlistenFn> =>
   listen<UiState>("state", (event) => handler(event.payload));
+
+export const onFnState = (handler: (pressed: boolean) => void): Promise<UnlistenFn> =>
+  listen<boolean>("fn-state", (event) => handler(event.payload));
 
 export const onRazerKey = (
   handler: (keyCode: number) => void,
