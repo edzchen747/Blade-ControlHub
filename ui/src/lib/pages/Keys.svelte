@@ -4,6 +4,7 @@
   import Section from "../components/Section.svelte";
   import { actionSummary, hasActionDetail, normalKeyLabel, razerKeyLabel } from "../actions";
   import { keyMap } from "../keymap.svelte";
+  import { jumpTo } from "../scroll";
   import { store } from "../store.svelte";
   import type { Row } from "../keymap.svelte";
 
@@ -36,12 +37,7 @@
   });
 
   function jumpToHypershift() {
-    document.getElementById(HYPERSHIFT_ID)?.scrollIntoView({
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-        ? "auto"
-        : "smooth",
-      block: "start",
-    });
+    jumpTo(HYPERSHIFT_ID);
   }
 
   // Razer special keys never reach Windows as virtual key codes, so capture

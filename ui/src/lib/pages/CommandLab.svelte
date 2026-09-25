@@ -6,6 +6,7 @@
   import Toggle from "../components/Toggle.svelte";
   import { repointedControls } from "../dashboard";
   import * as ipc from "../ipc";
+  import { jumpTo } from "../scroll";
   import { store } from "../store.svelte";
   import type {
     CapturedCommand,
@@ -138,12 +139,7 @@
   });
 
   function jumpToCustomControls() {
-    document.getElementById(CUSTOM_CONTROLS_ID)?.scrollIntoView({
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-        ? "auto"
-        : "smooth",
-      block: "start",
-    });
+    jumpTo(CUSTOM_CONTROLS_ID);
   }
 
   async function refreshUsbpcap() {
