@@ -1,15 +1,13 @@
 <script lang="ts">
+  import AccentPicker from "../components/AccentPicker.svelte";
   import Section from "../components/Section.svelte";
   import Segmented from "../components/Segmented.svelte";
   import Slider from "../components/Slider.svelte";
   import Toggle from "../components/Toggle.svelte";
-  import { COLOR_COMMIT_MS, SLIDER_COMMIT_MS, debounce } from "../debounce";
+  import { SLIDER_COMMIT_MS, debounce } from "../debounce";
   import * as ipc from "../ipc";
   import { store } from "../store.svelte";
-  import type { BatteryLimit, ThemeColor } from "../types";
-
-  /** Matches `ThemeColor::default()` in the runtime. */
-  const DEFAULT_ACCENT: ThemeColor = { r: 0xff, g: 0xd7, b: 0x00 };
+  import type { BatteryLimit } from "../types";
 
   const state = $derived(store.state);
 
@@ -27,21 +25,6 @@
   const limitPercent = $derived(
     state ? state.meta.battery_limit_percents[state.battery_limit] : null,
   );
-
-  const accentHex = $derived(state ? toHex(state.theme_color) : "#ffd700");
-
-  function toHex({ r, g, b }: ThemeColor): string {
-    const part = (value: number) => value.toString(16).padStart(2, "0");
-    return `#${part(r)}${part(g)}${part(b)}`;
-  }
-
-  function fromHex(hex: string): ThemeColor {
-    return {
-      r: parseInt(hex.slice(1, 3), 16),
-      g: parseInt(hex.slice(3, 5), 16),
-      b: parseInt(hex.slice(5, 7), 16),
-    };
-  }
 
   function setBatteryLimit(index: number) {
     const limit = state?.battery_limits[index];
@@ -77,37 +60,6 @@
       },
       () => ipc.setPrimaryMultimediaKeys(enabled),
     );
-  }
-
-  // The picker fires continuously while dragging, and each commit is a HID
-  // write, so the colour previews locally and only the write is debounced.
-  const commitAccent = debounce(
-    (color: ThemeColor) =>
-      store.run(
-        "accent",
-        (next) => {
-          next.theme_color = color;
-        },
-        () => ipc.setThemeColor(color),
-      ),
-    COLOR_COMMIT_MS,
-  );
-
-  function previewAccent(hex: string) {
-    const color = fromHex(hex);
-    store.preview("accent", (next) => {
-      next.theme_color = color;
-    });
-    commitAccent(color);
-  }
-
-  function resetAccent() {
-    commitAccent.cancel();
-    store.preview("accent", (next) => {
-      next.theme_color = DEFAULT_ACCENT;
-    });
-    commitAccent(DEFAULT_ACCENT);
-    commitAccent.flush();
   }
 </script>
 
@@ -157,24 +109,11 @@
     {/if}
   </Section>
 
-  <Section title="Appearance" hint="Used for the tray icon, the OSD and this window.">
-    <div class="row-between">
-      <span>Accent colour</span>
-      <div class="row">
-        <input
-          type="color"
-          class="swatch"
-          value={accentHex}
-          aria-label="Accent colour"
-          oninput={(event) => previewAccent(event.currentTarget.value)}
-        />
-        <code class="code">{accentHex.toUpperCase()}</code>
-        <button type="button" class="ghost" onclick={resetAccent}>Reset</button>
-      </div>
-    </div>
-    {#if store.errors["accent"]}
-      <span class="field-error">{store.errors["accent"]}</span>
-    {/if}
+  <Section
+    title="Appearance"
+    hint="Used for the tray icon, the OSD, this window and the Static and Reactive keyboard effects."
+  >
+    <AccentPicker />
   </Section>
 
   <Section title="Startup">
@@ -235,15 +174,3 @@
     </div>
   </Section>
 {/if}
-
-<style>
-  .swatch {
-    width: 38px;
-    height: 28px;
-    padding: 2px;
-    border: 1px solid var(--line-strong);
-    border-radius: var(--radius-sm);
-    background: var(--bg-sunken);
-    cursor: pointer;
-  }
-</style>

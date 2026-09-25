@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AccentPicker from "../components/AccentPicker.svelte";
   import EffectTile from "../components/EffectTile.svelte";
   import Section from "../components/Section.svelte";
   import LevelDots from "../components/LevelDots.svelte";
@@ -77,6 +78,12 @@
     {#if store.errors["rgb-effect"]}
       <span class="field-error">{store.errors["rgb-effect"]}</span>
     {/if}
+  </Section>
+
+  <!-- The accent is one app-wide setting, shared with Settings > Appearance;
+       it lives here too because some effects light the keys in it. -->
+  <Section title="Effect colour">
+    <AccentPicker />
   </Section>
 
   <Section title="Brightness">
