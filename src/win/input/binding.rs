@@ -9,6 +9,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::core::capabilities;
+
 /// Bit positions in [`Chord::modifiers`].
 pub const MOD_CTRL: u8 = 1 << 0;
 pub const MOD_ALT: u8 = 1 << 1;
@@ -72,7 +74,29 @@ pub const DEVICE_ACTIONS: &[DeviceAction] = &[
     DeviceAction::CloseGpuApps,
 ];
 
+/// The device actions this model can actually perform, in the order the
+/// settings window lists them.
+///
+/// A few of them drive hardware not every Blade has. Filtering here rather
+/// than in the window means the vocabulary it offers and the vocabulary the
+/// runtime will run are the same list.
+pub fn available_device_actions() -> Vec<DeviceAction> {
+    DEVICE_ACTIONS
+        .iter()
+        .copied()
+        .filter(|action| action.is_available())
+        .collect()
+}
+
 impl DeviceAction {
+    /// Whether the hardware this action drives is present on this model.
+    pub fn is_available(self) -> bool {
+        match self {
+            Self::ToggleUnderglow => capabilities::has_vapour_chamber(),
+            _ => true,
+        }
+    }
+
     /// The label the settings window shows for this action.
     pub fn label(self) -> &'static str {
         match self {
@@ -286,6 +310,74 @@ mod tests {
 
         assert_eq!(listed.len(), DEVICE_ACTIONS.len(), "duplicate device action");
         assert_eq!(DEVICE_ACTIONS.len(), 14);
+    }
+
+    /// The vapour chamber light is the Blade 18's alone, so binding a key to
+    /// it must not be offered anywhere else — the window builds its dropdown
+    /// from exactly this list.
+    #[test]
+    fn the_vapour_chamber_action_is_offered_only_where_the_hardware_is() {
+        use crate::core::capabilities::with_vapour_chamber;
+
+        with_vapour_chamber(true, || {
+            assert!(DeviceAction::ToggleUnderglow.is_available());
+            assert!(available_device_actions().contains(&DeviceAction::ToggleUnderglow));
+            assert_eq!(available_device_actions().len(), DEVICE_ACTIONS.len());
+        });
+
+        with_vapour_chamber(false, || {
+            assert!(!DeviceAction::ToggleUnderglow.is_available());
+
+            let offered = available_device_actions();
+            assert!(!offered.contains(&DeviceAction::ToggleUnderglow));
+            assert_eq!(
+                offered.len(),
+                DEVICE_ACTIONS.len() - 1,
+                "no other action depends on the hardware"
+            );
+            assert!(
+                offered.contains(&DeviceAction::CyclePerfMode),
+                "the rest of the vocabulary is unaffected"
+            );
+        });
+    }
+
+    /// The window renders the actions in the order this list gives them, so
+    /// filtering must remove an entry rather than reorder what is left.
+    #[test]
+    fn filtering_preserves_the_order_the_window_lists_actions_in() {
+        use crate::core::capabilities::with_vapour_chamber;
+
+        with_vapour_chamber(false, || {
+            let offered = available_device_actions();
+            let expected: Vec<_> = DEVICE_ACTIONS
+                .iter()
+                .copied()
+                .filter(|action| *action != DeviceAction::ToggleUnderglow)
+                .collect();
+
+            assert_eq!(offered, expected);
+        });
+    }
+
+    /// Every action in the catalogue has to answer the availability question,
+    /// or a new one added without a thought for the hardware would be offered
+    /// on a model that cannot run it.
+    #[test]
+    fn only_the_vapour_chamber_action_depends_on_the_hardware() {
+        use crate::core::capabilities::with_vapour_chamber;
+
+        with_vapour_chamber(false, || {
+            for action in DEVICE_ACTIONS
+                .iter()
+                .filter(|action| **action != DeviceAction::ToggleUnderglow)
+            {
+                assert!(
+                    action.is_available(),
+                    "{action:?} must not be gated on hardware it does not use"
+                );
+            }
+        });
     }
 
     #[test]

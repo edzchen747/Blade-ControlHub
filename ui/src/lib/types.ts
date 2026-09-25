@@ -113,13 +113,19 @@ export interface UiMeta {
   allowed_perf_modes: { ac: PerfMode[]; battery: PerfMode[] };
   custom_mode_levels: string[];
   keyboard_brightness_step: number;
-  /** Device actions a key can be bound to, keyed by the value a command takes. */
-  device_action_labels: Record<DeviceAction, string>;
-  /** What each key does before it is rebound, keyed by key code. */
-  built_in_bindings: {
-    razer: Record<number, string>;
-    hypershift: Record<number, string>;
-  };
+  /** Whether this model has the illuminated vent under the chassis. */
+  vapour_chamber: boolean;
+  /**
+   * Device actions a key can be bound to, keyed by the value a command takes.
+   * Actions needing hardware this model lacks are already filtered out.
+   */
+  device_action_labels: Partial<Record<DeviceAction, string>>;
+  /**
+   * What each Fn-layer key does before it is rebound, keyed by virtual-key
+   * code. Razer's special keys have no built-in action, so there is no table
+   * of them: what one does is whatever the user bound it to.
+   */
+  built_in_hypershift: Record<number, string>;
 }
 
 export interface UiState {

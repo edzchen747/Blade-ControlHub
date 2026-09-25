@@ -74,4 +74,11 @@ impl<'a> Executer<'a> {
     fn battery(&mut self) -> BatteryHandler<'_> {
         BatteryHandler::new(self.device, &mut self.battery_cycle_timeout)
     }
+
+    /// Whether the open device is a model with the illuminated vent. Asked of
+    /// the descriptor rather than of the cached flag in `core::capabilities`,
+    /// because this side holds the device the commands would be sent to.
+    fn has_vapour_chamber(&self) -> bool {
+        self.device.info.has_feature::<librazer::feature::VapourChamber>()
+    }
 }

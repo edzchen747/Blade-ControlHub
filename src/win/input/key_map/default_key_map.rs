@@ -1,14 +1,19 @@
-pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
+/// What the Fn layer does before the user rebinds anything.
+///
+/// Razer's own special keys are deliberately absent: which code each key sends
+/// differs between models, so a table of them here would be wrong on most
+/// Blades. They are bound on the Keys page instead, by pressing the key.
+pub static KEY_MAP: Lazy<HashMap<vkey::Key, KeyEventAction>> = Lazy::new(|| {
     HashMap::from([
         (
-            vkey::Key::B.into(),
+            vkey::Key::B,
             KeyEventAction::new(
                 Box::new(|| device().cycle_battery_limit()),
                 vec![Source::IsTrue(&FN_PRESSED)],
             ),
         ),
         (
-            vkey::Key::P.into(),
+            vkey::Key::P,
             KeyEventAction::new(
                 Box::new(|| {
                     device().cycle_perf_mode();
@@ -17,7 +22,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
             ),
         ),
         (
-            vkey::Key::R.into(),
+            vkey::Key::R,
             KeyEventAction::new(
                 Box::new(|| {
                     device().cycle_refresh_rate();
@@ -26,7 +31,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
             ),
         ),
         (
-            vkey::Key::T.into(),
+            vkey::Key::T,
             KeyEventAction::new(
                 Box::new(|| {
                     toggle_trackpad();
@@ -35,16 +40,19 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
             ),
         ),
         (
-            vkey::Key::V.into(),
+            vkey::Key::V,
             KeyEventAction::new(
                 Box::new(|| {
                     device().toggle_vc();
                 }),
-                vec![Source::IsTrue(&FN_PRESSED)],
+                // Only the Blade 18 has the vent to light. Failing the
+                // condition rather than dropping the entry means Fn+V still
+                // reaches Windows on every other model.
+                vec![Source::IsTrue(&FN_PRESSED), Source::IsTrue(&VAPOUR_CHAMBER)],
             ),
         ),
         (
-            vkey::Key::F1.into(),
+            vkey::Key::F1,
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::Unknown(173)]).trigger();
@@ -56,7 +64,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
             ),
         ),
         (
-            vkey::Key::F2.into(),
+            vkey::Key::F2,
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::Unknown(174)]).trigger();
@@ -68,7 +76,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
             ),
         ),
         (
-            vkey::Key::F3.into(),
+            vkey::Key::F3,
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::Unknown(175)]).trigger();
@@ -80,7 +88,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
             ),
         ),
         (
-            vkey::Key::F4.into(),
+            vkey::Key::F4,
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::MetaLeft, Key::KeyP]).trigger();
@@ -92,7 +100,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
             ),
         ),
         (
-            vkey::Key::F5.into(),
+            vkey::Key::F5,
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::Unknown(177)]).trigger();
@@ -104,7 +112,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
             ),
         ),
         (
-            vkey::Key::F6.into(),
+            vkey::Key::F6,
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::Unknown(179)]).trigger();
@@ -116,7 +124,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
             ),
         ),
         (
-            vkey::Key::F7.into(),
+            vkey::Key::F7,
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::Unknown(176)]).trigger();
@@ -128,7 +136,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
             ),
         ),
         (
-            vkey::Key::F8.into(),
+            vkey::Key::F8,
             KeyEventAction::new(
                 Box::new(|| {
                     device().adjust_screen_brightness(-10);
@@ -140,7 +148,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
             ),
         ),
         (
-            vkey::Key::F9.into(),
+            vkey::Key::F9,
             KeyEventAction::new(
                 Box::new(|| {
                     device().adjust_screen_brightness(10);
@@ -152,7 +160,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
             ),
         ),
         (
-            vkey::Key::F10.into(),
+            vkey::Key::F10,
             KeyEventAction::new(
                 Box::new(|| {
                     device().keyboard_light_down();
@@ -164,7 +172,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
             ),
         ),
         (
-            vkey::Key::F11.into(),
+            vkey::Key::F11,
             KeyEventAction::new(
                 Box::new(|| {
                     device().keyboard_light_up();
@@ -176,7 +184,7 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
             ),
         ),
         (
-            vkey::Key::F12.into(),
+            vkey::Key::F12,
             KeyEventAction::new(
                 Box::new(|| {
                     KeyCombo::new(&[Key::PrintScreen]).trigger();
@@ -185,114 +193,6 @@ pub static KEY_MAP: Lazy<HashMap<KeyType, KeyEventAction>> = Lazy::new(|| {
                     Source::IsXOR(&PRIMARY_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
-            ),
-        ),
-        (
-            razer_key::Key::Mic.into(),
-            KeyEventAction::new(
-                Box::new(|| {
-                    audio::toggle_audio_mute(AudioType::Mic);
-                }),
-                vec![],
-            ),
-        ),
-        (
-            razer_key::Key::Trackpad.into(),
-            KeyEventAction::new(
-                Box::new(|| {
-                    toggle_trackpad();
-                }),
-                vec![],
-            ),
-        ),
-        (
-            razer_key::Key::Perf.into(),
-            KeyEventAction::new(
-                Box::new(|| {
-                    device().cycle_perf_mode();
-                }),
-                vec![],
-            ),
-        ),
-        (
-            razer_key::Key::CoPilot.into(),
-            KeyEventAction::new(
-                Box::new(|| {
-                    device().cycle_rgb_mode();
-                }),
-                vec![],
-            ),
-        ),
-        (
-            razer_key::Key::Home.into(),
-            KeyEventAction::new(
-                Box::new(|| {
-                    KeyCombo::new(&[Key::Unknown(36)]).trigger();
-                }),
-                vec![],
-            ),
-        ),
-        (
-            razer_key::Key::Up.into(),
-            KeyEventAction::new(
-                Box::new(|| {
-                    KeyCombo::new(&[Key::Unknown(38)]).trigger();
-                }),
-                vec![],
-            ),
-        ),
-        (
-            razer_key::Key::PgUp.into(),
-            KeyEventAction::new(
-                Box::new(|| {
-                    KeyCombo::new(&[Key::Unknown(33)]).trigger();
-                }),
-                vec![],
-            ),
-        ),
-        (
-            razer_key::Key::Left.into(),
-            KeyEventAction::new(
-                Box::new(|| {
-                    KeyCombo::new(&[Key::Unknown(37)]).trigger();
-                }),
-                vec![],
-            ),
-        ),
-        (
-            razer_key::Key::Right.into(),
-            KeyEventAction::new(
-                Box::new(|| {
-                    KeyCombo::new(&[Key::Unknown(39)]).trigger();
-                }),
-                vec![],
-            ),
-        ),
-        (
-            razer_key::Key::End.into(),
-            KeyEventAction::new(
-                Box::new(|| {
-                    KeyCombo::new(&[Key::Unknown(35)]).trigger();
-                }),
-                vec![],
-            ),
-        ),
-        (
-            razer_key::Key::Down.into(),
-            KeyEventAction::new(
-                Box::new(|| {
-                    KeyCombo::new(&[Key::Unknown(40)]).trigger();
-                }),
-                vec![],
-            ),
-        ),
-        (
-            razer_key::Key::PgDn.into(),
-            KeyEventAction::new(
-                Box::new(|| {
-                    KeyCombo::new(&[Key::Unknown(34)]).trigger();
-                }),
-                vec![],
             ),
         ),
     ])

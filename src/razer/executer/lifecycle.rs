@@ -5,6 +5,10 @@ impl<'a> Executer<'a> {
         let model_name = device.info.name.to_string();
 
         *self.device = device;
+        // Detection can land on a different descriptor than it did at startup
+        // — a fallback one with no features at all — so what the model can do
+        // is re-recorded rather than left as it was before the sleep.
+        crate::core::capabilities::record(&self.device.info);
         self.app_config
             .set_device_model(format!("0x{pid:04x}"), model_name);
         self.initialize(false);
@@ -29,7 +33,9 @@ impl<'a> Executer<'a> {
             // running on the fallback width for the whole session.
             self.kb().init_keyboard_width();
             self.kb().set_rgb_effect(state.rgb_effect.value());
-            self.kb().enable_under_glow(state.vc_lvl);
+            if self.has_vapour_chamber() {
+                self.kb().enable_under_glow(state.vc_lvl);
+            }
             self.kb().set_keyboard_brightness(state.key_lvl);
 
             let _ = self.perf().set_perf_mode(state.perf_mode.value());

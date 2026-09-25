@@ -126,6 +126,11 @@ impl<'a> Executer<'a> {
         profile: PowerProfile,
         enabled: bool,
     ) -> crate::error::AppResult<()> {
+        // The window hides the control on a model without the hardware, so
+        // this only fires for a config carried over from one that had it.
+        if !self.has_vapour_chamber() {
+            return Err(crate::error::AppError::Unsupported("a vapour chamber light"));
+        }
         if self.profile_is_active(profile) {
             self.kb().set_under_glow_enabled(enabled);
         } else {

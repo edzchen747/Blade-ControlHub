@@ -73,7 +73,11 @@ impl<'a> Executer<'a> {
             }
             DeviceCmd::AdjustKeyboardLight(up) => self.kb().adjust_keyboard_light(up),
             DeviceCmd::CycleRGBMode => self.kb().cycle_rgb_mode(),
-            DeviceCmd::ToggleUnderGlow => self.kb().toggle_under_glow(),
+            DeviceCmd::ToggleUnderGlow => {
+                if self.has_vapour_chamber() {
+                    self.kb().toggle_under_glow();
+                }
+            }
             DeviceCmd::SetUnderGlow(profile, enabled, tx) => {
                 let _ = tx.send(self.set_under_glow_for_profile(profile, enabled));
             }

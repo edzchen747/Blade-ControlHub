@@ -1,5 +1,6 @@
 use std::sync::atomic::Ordering;
 
+use crate::core::capabilities;
 use crate::core::shared_state::PRIMARY_MULTIMEDIA_KEYS;
 use crate::razer::config::AppConfig;
 
@@ -56,6 +57,9 @@ fn finalize_config(mut app_config: AppConfig, device_info: &Descriptor) -> AppCo
     );
 
     PRIMARY_MULTIMEDIA_KEYS.store(app_config.primary_multimedia_keys, Ordering::SeqCst);
+    // What the model has is asked of the descriptor once, here, so the window
+    // and the keyboard hook can gate on it without holding the device.
+    capabilities::record(device_info);
     // The input hooks read their custom bindings from a runtime table, not the
     // config, so the saved rows have to be installed before they start.
     crate::win::input::custom_bindings::replace(&app_config.key_bindings);
@@ -72,7 +76,7 @@ mod tests {
             model_number_prefix: "RZ09",
             name: "Razer Blade Test",
             pid: 0x02c7,
-            features: &[],
+            features: &["vapour-chamber"],
         }
     }
 

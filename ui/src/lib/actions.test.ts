@@ -309,19 +309,38 @@ describe("Hypershift key capture", () => {
 });
 
 describe("razerKeyLabel", () => {
-  it("names the keys printed on the laptop", () => {
-    expect(razerKeyLabel(0x24)).toBe("M1");
-    expect(razerKeyLabel(0xd3)).toBe("Performance");
-    expect(razerKeyLabel(0x03)).toBe("Game");
-  });
-
-  it("falls back to a padded hex code for an unknown key", () => {
+  // Which key sends which code differs between Blades, so a code is never
+  // given a name here: the row's own label is what says what the key is.
+  it("shows every captured key as its padded code", () => {
+    expect(razerKeyLabel(0x24)).toBe("0x24");
+    expect(razerKeyLabel(0xd3)).toBe("0xD3");
+    expect(razerKeyLabel(0x03)).toBe("0x03");
     expect(razerKeyLabel(0x99)).toBe("0x99");
-    expect(razerKeyLabel(0x01)).toBe("0x01");
   });
 
   it("shows an uncaptured cell as empty rather than as 0x00", () => {
     expect(razerKeyLabel(null)).toBe("None");
+  });
+});
+
+describe("a device action the runtime did not offer", () => {
+  // The label map is filtered per model, so a row carried over from a Blade
+  // that had the hardware names an action this one does not list.
+  it("summarises by its own value rather than as blank", () => {
+    const labels = { cycle_perf_mode: "Cycle performance mode" };
+
+    expect(actionSummary({ kind: "device", action: "toggle_underglow" }, labels)).toBe(
+      "toggle_underglow",
+    );
+    expect(actionSummary({ kind: "device", action: "cycle_perf_mode" }, labels)).toBe(
+      "Cycle performance mode",
+    );
+  });
+
+  // Its binding still round-trips: the runtime is what refuses to run it, so
+  // the row must survive being shown rather than being silently dropped.
+  it("is still a complete action", () => {
+    expect(isActionComplete({ kind: "device", action: "toggle_underglow" })).toBe(true);
   });
 });
 

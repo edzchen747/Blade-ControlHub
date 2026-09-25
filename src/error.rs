@@ -27,6 +27,9 @@ pub enum AppError {
     #[error("Invalid internal state: {0}")]
     Internal(String),
 
+    #[error("This model does not have {0}")]
+    Unsupported(&'static str),
+
     #[error("No compatible display device found")]
     DisplayNotFound,
 

@@ -92,13 +92,17 @@
       <span class="field-error">{store.errors["keyboard-brightness"]}</span>
     {/if}
 
-    <Toggle
-      label="Vapour chamber light"
-      hint="The illuminated vent under the chassis."
-      checked={profile.underglow_enabled}
-      error={store.errors["under-glow"]}
-      onchange={setUnderGlow}
-    />
+    <!-- Only the Blade 18 has a vent to light, so the control only exists
+         where the hardware does. -->
+    {#if state.meta.vapour_chamber}
+      <Toggle
+        label="Vapour chamber light"
+        hint="The illuminated vent under the chassis."
+        checked={profile.underglow_enabled}
+        error={store.errors["under-glow"]}
+        onchange={setUnderGlow}
+      />
+    {/if}
   </Section>
 {/if}
 

@@ -182,7 +182,7 @@ Design decisions and their reasons:
 
 ┌─ Brightness ───────────────────────────────────────────┐
 │  Keyboard          [Off] ● ● ● ○ ○           60%       │
-│  Vapour chamber light                        [ ●━━ ]   │
+│  Vapour chamber light                        [ ●━━ ]   │  ← Blade 18 only
 └────────────────────────────────────────────────────────┘
 ```
 
@@ -206,6 +206,13 @@ Design decisions and their reasons:
     phases, stroke width pulsing, reading as a Siri-style wave.
 - Vapour Chamber Light keeps its toggle, moved here from the old "Other" section.
   "Other" is not a category.
+- **The vapour chamber toggle only exists where the hardware does.** Only the Blade
+  18 has the illuminated vent, so the descriptor in `librazer` carries a
+  `vapour-chamber` feature and the snapshot's `meta.vapour_chamber` says whether
+  this model claims it. Without it the toggle is not rendered, "Toggle vapour
+  chamber light" is not offered as a device action, and Fn+V falls through to
+  Windows rather than doing nothing. A model the app does not recognise falls back
+  to a descriptor with no features, so it is treated as not having one.
 
 ### 4.3 Keys
 
@@ -213,11 +220,11 @@ Two sections on one page, replacing the old nested tab-within-a-tab.
 
 ```
 ┌─ Razer special keys ───────────────────────────────────┐
-│  Remap M1-M4, Copilot, mic, trackpad, performance…     │
+│  Every key does what you map it to, nothing before…    │
 │  ┌──────────────┬────────────┬──────────────┬───┐      │
 │  │ Label        │ Key        │ Action       │   │      │
 │  ├──────────────┼────────────┼──────────────┼───┤      │
-│  │ [Task mgr  ] │ [ M1     ] │ [Run a macro▾]│ ✕│      │
+│  │ [Task mgr  ] │ [ 0x24   ] │ [Run a macro▾]│ ✕│      │
 │  │ [Ctrl][Alt][Shift][Win]                      │      │
 │  │ [ 1. Ctrl+Shift+Esc          ]  + Add step   │      │
 │  ├──────────────────────────────────────────────┤      │
@@ -272,9 +279,16 @@ Two sections on one page, replacing the old nested tab-within-a-tab.
   a command is blank, or a macro step has no key. This mirrors
   `KeyAction::is_complete` in the runtime, which drops incomplete rows rather than
   dispatching them.
-- **A key that already did something says so.** Rows whose key appears in
-  `meta.built_in_bindings` show a warning badge whose tooltip names the built-in
-  action being replaced. Custom bindings win; the badge is the only warning.
+- **No Razer special key has a built-in action.** Which code a key sends differs
+  between Blades, so there is no stock table to be right about: a special key does
+  what the user mapped it to and nothing until then. The Key cell shows the
+  captured code (`0x24`), never a guessed name — the row's own label is what says
+  which key it is.
+- **A Hypershift key that already did something says so.** Rows whose key appears
+  in `meta.built_in_hypershift` show a warning badge whose tooltip names the
+  built-in action being replaced. Custom bindings win; the badge is the only
+  warning. Fn+V is absent from that table on a model with no vapour chamber, since
+  there is nothing to override.
 - **Only one cell listens at a time,** across both tables and every macro step, and
   while anything is listening Esc belongs to it rather than to the window.
 - **Hypershift is reachable.** Both sections share one scroll page, so while the

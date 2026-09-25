@@ -1,10 +1,10 @@
 use std::sync::atomic::Ordering;
 
+use crate::core::capabilities::VAPOUR_CHAMBER;
 use crate::core::shared_state::{ALT_PRESSED, FN_PRESSED, PRIMARY_MULTIMEDIA_KEYS};
 use crate::razer::device_handle::device;
-use crate::win::audio::{self, AudioType};
 use crate::win::input::trackpad::toggle_trackpad;
-use crate::win::input::{KeyType, razer_key, vkey};
+use crate::win::input::vkey;
 
 use once_cell::sync::Lazy;
 use rdev::{EventType, Key, simulate};

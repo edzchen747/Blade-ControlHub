@@ -6,10 +6,10 @@ use crate::{
     config,
     core::shared_state::FN_PRESSED,
     error::{AppError, AppResult},
-    win::input::{custom_bindings, key_map::KEY_MAP, razer_key},
+    win::input::custom_bindings,
 };
 use hidapi::{HidApi, HidDevice};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 const HID_READ_TIMEOUT_MS: i32 = 250;
 
@@ -213,7 +213,6 @@ fn handle_razer_special_key(key_code: u8) {
             set_fn_pressed(false);
         }
         _ => {
-            let key = razer_key::Key::from(key_code);
             // A key being captured for a mapping is consumed there. The
             // listening flag is cleared by the capture itself, so the answer
             // has to come back from the call rather than from the flag.
@@ -221,15 +220,14 @@ fn handle_razer_special_key(key_code: u8) {
                 return;
             }
 
-            // A binding the user made wins over the stock behaviour of the
-            // key, which is what lets the performance or Copilot key be
-            // reclaimed — and what gives M1-M4 and Game an action at all.
+            // Every special key does what the user bound it to and nothing
+            // else. There is no built-in table to fall back on: the codes
+            // differ between models, so what a given one means is something
+            // only the user pressing it can establish.
             if let Some(action) = custom_bindings::razer(key_code) {
                 custom_bindings::run(action);
-            } else if let Some(action) = KEY_MAP.get(&key.into()) {
-                let _ = action.execute();
             } else {
-                warn!(keycode = key_code, "Unmapped Razer keycode received");
+                debug!(keycode = key_code, "Unmapped Razer keycode received");
             }
         }
     }

@@ -202,28 +202,14 @@ export function normalKeyLabel(keyCode: number | null): string {
   return isDigit || isLetter ? String.fromCharCode(keyCode) : "Unknown";
 }
 
-/** The names printed on the keys, so a row reads as hardware, not as a byte. */
-const RAZER_KEY_NAMES: Record<number, string> = {
-  0x03: "Game",
-  0x24: "M1",
-  0x25: "M2",
-  0x26: "M3",
-  0x27: "M4",
-  0xd2: "Copilot",
-  0xd3: "Performance",
-  0xd4: "Mic mute",
-  0xd5: "Home",
-  0xd6: "Up",
-  0xd7: "Page up",
-  0xd8: "Left",
-  0xd9: "Right",
-  0xda: "End",
-  0xdb: "Down",
-  0xdc: "Page down",
-  0xdd: "Trackpad",
-};
-
+/**
+ * A captured Razer special key, as its code.
+ *
+ * There is deliberately no table of names here. Which code a key sends differs
+ * between Blades, so naming them would mean labelling the wrong keys on most
+ * models — the row's own label, which the user writes, says what it is.
+ */
 export function razerKeyLabel(keyCode: number | null): string {
   if (keyCode === null) return "None";
-  return RAZER_KEY_NAMES[keyCode] ?? `0x${keyCode.toString(16).toUpperCase().padStart(2, "0")}`;
+  return `0x${keyCode.toString(16).toUpperCase().padStart(2, "0")}`;
 }

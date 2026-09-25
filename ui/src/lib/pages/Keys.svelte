@@ -11,9 +11,7 @@
   const HYPERSHIFT_ID = "hypershift";
 
   const deviceLabels = $derived(store.state?.meta.device_action_labels ?? {});
-  const builtIn = $derived(
-    store.state?.meta.built_in_bindings ?? { razer: {}, hypershift: {} },
-  );
+  const builtInHypershift = $derived(store.state?.meta.built_in_hypershift ?? {});
 
   /** Cleared once the Hypershift section has scrolled out of view. */
   let hypershiftVisible = $state(true);
@@ -55,10 +53,14 @@
     }
   }
 
-  /** What this key did before the row claimed it, if anything. */
-  function overridden(row: Row, table: "razer" | "hypershift"): string | null {
+  /**
+   * What this Fn-layer key did before the row claimed it, if anything. Razer's
+   * special keys have no built-in action to override, so only Hypershift rows
+   * can replace something.
+   */
+  function overridden(row: Row): string | null {
     if (row.keyCode === null) return null;
-    return builtIn[table][row.keyCode] ?? null;
+    return builtInHypershift[row.keyCode] ?? null;
   }
 </script>
 
@@ -66,7 +68,7 @@
 
 <Section
   title="Razer special keys"
-  hint="Remap M1–M4, the Copilot, mic, trackpad and performance keys. Press a key on the laptop while a row is listening; Esc cancels."
+  hint="Every special key on the laptop — M1–M4, Copilot, mic, trackpad, performance, and whatever else this model has — does what you map it to here, and nothing until then. Press a key on the laptop while a row is listening; Esc cancels."
 >
   <div class="table" role="table" aria-label="Razer special key mappings">
     <div class="head" role="row">
@@ -77,7 +79,6 @@
     </div>
 
     {#each keyMap.razer as row (row.id)}
-      {@const replaces = overridden(row, "razer")}
       <div class="line" role="row">
         <div class="cells">
           <input
@@ -100,12 +101,6 @@
             >
               {keyMap.listeningRazer === row.id ? "Press a key…" : razerKeyLabel(row.keyCode)}
             </button>
-            {#if replaces}
-              <span class="badge" title={`Overrides the built-in action: ${replaces}`}>
-                <span class="sr">Overrides the built-in action: {replaces}</span>
-                <span aria-hidden="true">!</span>
-              </span>
-            {/if}
           </div>
           <ActionKind action={row.action} onchange={(action) => keyMap.setAction(row, action)} />
           <button
@@ -165,7 +160,7 @@
     </div>
 
     {#each keyMap.hypershift as row (row.id)}
-      {@const replaces = overridden(row, "hypershift")}
+      {@const replaces = overridden(row)}
       <div class="line" role="row">
         <div class="cells hypershift">
           <div class="key-cell">

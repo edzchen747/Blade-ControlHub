@@ -204,7 +204,7 @@ fn handle_key_press(key_code: u8) -> bool {
     }
 
     KEY_MAP
-        .get(&vkey::Key::from(key_code).into())
+        .get(&vkey::Key::from(key_code))
         .is_some_and(|event_action| event_action.execute())
 }
 

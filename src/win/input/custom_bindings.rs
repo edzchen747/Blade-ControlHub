@@ -144,6 +144,16 @@ fn show_osd(label: String) {
 }
 
 fn run_device_action(action: DeviceAction) {
+    // A binding can outlive the machine it was made on: the config travels
+    // with the user, the hardware does not.
+    if !action.is_available() {
+        warn!(
+            ?action,
+            "Skipping a device action this model does not support"
+        );
+        return;
+    }
+
     match action {
         DeviceAction::CyclePerfMode => device().cycle_perf_mode(),
         DeviceAction::CycleRgbEffect => device().cycle_rgb_mode(),
@@ -394,16 +404,17 @@ mod tests {
         replace(&KeyBindings::default());
     }
 
-    /// A key the built-in map already handles is reclaimable: the dispatch sites
-    /// consult this table first, so a hit here is what overrides the default.
+    /// A Razer special key does nothing until this table gives it something to
+    /// do — including the performance and Copilot keys, which the built-in map
+    /// used to claim on every model regardless of what they send.
     #[test]
-    fn a_binding_can_claim_a_key_the_built_in_map_handles() {
+    fn a_razer_special_key_is_bound_only_by_the_user() {
         let _shared = exclusive();
-        use crate::win::input::{KeyType, key_map::KEY_MAP, razer_key};
 
-        assert!(
-            KEY_MAP.contains_key(&KeyType::from(razer_key::Key::Perf)),
-            "the performance key must have a built-in action for this to mean anything"
+        assert_eq!(
+            razer(0xd3),
+            None,
+            "nothing is bound before the user binds it"
         );
 
         replace(&KeyBindings {
@@ -424,6 +435,48 @@ mod tests {
         );
 
         replace(&KeyBindings::default());
+    }
+
+    /// Every code the built-in map used to claim. None may resolve to an
+    /// action on its own any more: which key sends which code differs between
+    /// Blades, so a stock binding would be wrong on most of them.
+    #[test]
+    fn no_former_built_in_razer_code_is_bound_by_default() {
+        let _shared = exclusive();
+        replace(&KeyBindings::default());
+
+        for code in [
+            0x03_u16, 0x24, 0x25, 0x26, 0x27, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9,
+            0xda, 0xdb, 0xdc, 0xdd,
+        ] {
+            assert_eq!(
+                razer(code as u8),
+                None,
+                "0x{code:02x} must be the user's to bind"
+            );
+        }
+    }
+
+    /// A Razer special key and a virtual key can send the same code: 0x56 is
+    /// both a code this table could hold and VK_V, which the Fn layer binds to
+    /// the vapour chamber. The two dispatch paths no longer share a map, so a
+    /// special key must not fall into the Fn layer's action.
+    #[test]
+    fn a_razer_code_never_reaches_the_fn_layer() {
+        let _shared = exclusive();
+        use crate::win::input::{key_map::KEY_MAP, vkey};
+
+        replace(&KeyBindings::default());
+
+        assert!(
+            KEY_MAP.contains_key(&vkey::Key::V),
+            "Fn+V must still be bound for this to mean anything"
+        );
+        assert_eq!(
+            razer(0x56),
+            None,
+            "a special key sending 0x56 is not Fn+V"
+        );
     }
 
     /// Running an action must never leave the guard set, or the keyboard hook
