@@ -464,7 +464,13 @@ the Keys page is capturing, or a key would be bound and run its old action at on
 
 ### 5.5 Theming
 
-- Dark by default, following the OS; light theme fully supported.
+- Follows the Windows app mode, light or dark, and switches live when the user
+  changes it. The runtime listens for the `WM_SETTINGCHANGE` "ImmersiveColorSet"
+  broadcast on a hidden top-level window (`win::system::app_theme`), reads
+  `AppsUseLightTheme` only when it arrives, and pushes an `app-theme` event; the
+  page keys its palette on `data-theme` rather than `prefers-color-scheme`, which
+  WebView2 did not re-evaluate for a change made while the app was running. The
+  window frame is set to the same mode so the title bar matches.
 - Exactly one user-controlled colour: the accent, shared with the tray icon and OSD.
   All other colours derive from a neutral ramp so the accent stays legible on any
   hue. Foreground on accent flips between black and white at luminance 145, matching

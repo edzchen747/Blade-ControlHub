@@ -64,6 +64,7 @@ pub fn handler() -> impl Fn(Invoke<tauri::Wry>) -> bool + Send + Sync + 'static 
         set_hidden_dashboard_controls,
         get_usbpcap_status,
         close_gpu_apps,
+        get_app_theme,
         hide_window,
         restart_app,
         quit_app
@@ -346,6 +347,13 @@ async fn get_usbpcap_status() -> CommandResult<UsbpcapInfo> {
 #[tauri::command]
 async fn close_gpu_apps() -> CommandResult<()> {
     blocking(crate::win::system::cli_utils::cycle_gpu).await
+}
+
+/// The Windows app mode, for the window's first paint. Changes after that
+/// arrive as the `app-theme` event.
+#[tauri::command]
+fn get_app_theme() -> crate::win::system::app_theme::AppTheme {
+    super::app_theme::current()
 }
 
 #[tauri::command]

@@ -1,4 +1,5 @@
 pub mod app_index;
+pub mod app_theme;
 pub mod cli_utils;
 pub mod display_gpu;
 pub mod elevation;

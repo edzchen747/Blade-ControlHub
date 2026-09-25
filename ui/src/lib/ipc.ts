@@ -7,6 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import type {
+  AppTheme,
   BatteryLimit,
   CapturedCommand,
   CommandLabRecordingState,
@@ -104,12 +105,16 @@ export const setHiddenDashboardControls = (hidden: HiddenDashboardControls) =>
 export const getUsbpcapStatus = () => invoke<UsbpcapInfo>("get_usbpcap_status");
 
 export const closeGpuApps = () => invoke<void>("close_gpu_apps");
+export const getAppTheme = () => invoke<AppTheme>("get_app_theme");
 export const hideWindow = () => invoke<void>("hide_window");
 export const restartApp = () => invoke<void>("restart_app");
 export const quitApp = () => invoke<void>("quit_app");
 
 export const onState = (handler: (state: UiState) => void): Promise<UnlistenFn> =>
   listen<UiState>("state", (event) => handler(event.payload));
+
+export const onAppTheme = (handler: (theme: AppTheme) => void): Promise<UnlistenFn> =>
+  listen<AppTheme>("app-theme", (event) => handler(event.payload));
 
 export const onFnState = (handler: (pressed: boolean) => void): Promise<UnlistenFn> =>
   listen<boolean>("fn-state", (event) => handler(event.payload));

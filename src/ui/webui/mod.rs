@@ -9,6 +9,7 @@
 //! The OSD is deliberately not part of this module. It keeps its own Win32
 //! thread and message pump so overlay latency never depends on the webview.
 
+mod app_theme;
 mod command_lab;
 mod commands;
 mod key_capture;
@@ -63,6 +64,7 @@ pub fn run() {
                     "Settings window is missing from the Tauri config"
                 );
             }
+            app_theme::start();
 
             info!("Tauri runtime ready");
             Ok(())

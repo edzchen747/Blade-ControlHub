@@ -4,6 +4,9 @@
 
 export type PowerProfile = "Ac" | "Battery";
 
+/** The Windows app mode, as `app_theme::AppTheme` serialises it. */
+export type AppTheme = "light" | "dark";
+
 export type PerfMode =
   | "BatterySaver"
   | "Silent"

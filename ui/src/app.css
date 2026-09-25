@@ -4,10 +4,15 @@
  * OSD) sits on top of a neutral ramp, so any hue the user picks stays legible.
  * `--accent` and `--accent-fg` are written from JS whenever the runtime pushes
  * a new theme colour; everything else is fixed per theme.
+ *
+ * The light/dark choice is `data-theme` on the root, set from the Windows app
+ * mode by `lib/appTheme.ts` and changed live when the user switches it. It is
+ * not a `prefers-color-scheme` query, because WebView2 did not re-evaluate that
+ * for a change made while the app was running.
  */
 
 :root {
-  color-scheme: dark light;
+  color-scheme: dark;
 
   --accent: #ffd700;
   --accent-fg: #000000;
@@ -44,24 +49,24 @@
   --ease: cubic-bezier(0.2, 0, 0.1, 1);
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f4f5f7;
-    --bg-raised: #ffffff;
-    --bg-sunken: #e9eaee;
-    --bg-hover: #e4e6ea;
-    --line: #dcdee3;
-    --line-strong: #c3c7cf;
+:root[data-theme="light"] {
+  color-scheme: light;
 
-    --fg: #1a1c1f;
-    --fg-muted: #5a6068;
-    --fg-faint: #868c95;
+  --bg: #f4f5f7;
+  --bg-raised: #ffffff;
+  --bg-sunken: #e9eaee;
+  --bg-hover: #e4e6ea;
+  --line: #dcdee3;
+  --line-strong: #c3c7cf;
 
-    --danger: #c92a2a;
-    --warn: #b35309;
+  --fg: #1a1c1f;
+  --fg-muted: #5a6068;
+  --fg-faint: #868c95;
 
-    --shadow: 0 1px 2px rgb(0 0 0 / 0.08);
-  }
+  --danger: #c92a2a;
+  --warn: #b35309;
+
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.08);
 }
 
 @media (prefers-reduced-motion: reduce) {
