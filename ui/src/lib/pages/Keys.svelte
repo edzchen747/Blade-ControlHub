@@ -270,6 +270,8 @@
     text-transform: uppercase;
     color: var(--fg-faint);
     align-items: center;
+    /* Lined up with the cells inside the highlighted strip. */
+    padding: 0 var(--gap-xs) 0 calc(var(--gap-xs) + 3px);
   }
 
   .line {
@@ -283,6 +285,15 @@
   .line + .line {
     border-top: 1px solid var(--line);
     padding-top: var(--gap-sm);
+  }
+
+  /* The label (or, for Hypershift, the key) is how a row is found among dozens,
+     so the strip it sits on stands out and the detail beneath it recedes. */
+  .cells {
+    padding: var(--gap-xs);
+    background: var(--bg-sunken);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-sm);
   }
 
   .key-cell {
