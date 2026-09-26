@@ -32,7 +32,8 @@ mod tests {
         );
     }
 
-    /// Replaying a capture has never raised an overlay, from either surface.
+    /// A key replaying a capture raises its overlay, so the command it sends
+    /// must not be mistaken for a window setting and suppressed.
     #[test]
     fn replaying_a_capture_is_not_treated_as_a_window_setting() {
         assert!(!window_originated(&DeviceCmd::ReplaySavedCapture(

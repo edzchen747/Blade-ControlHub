@@ -121,8 +121,16 @@ impl<'a> Executer<'a> {
                 // The device thread owns the config, so a binding names the
                 // capture and the lookup happens here rather than in the
                 // caller, which would need its own copy.
-                if !self.replay_saved_capture(&name) {
+                //
+                // Only a key sends this — the window replays through
+                // `PlayCommandLabCommands` — so the overlay is a key's, which
+                // has no other way to say it did anything. A capture that has
+                // gone says so rather than failing silently.
+                if self.replay_saved_capture(&name) {
+                    app(OsdEvent::ReplayCapture(name).into());
+                } else {
                     warn!(name, "A key binding names a capture that no longer exists");
+                    app(OsdEvent::CustomAction(format!("{name} failed")).into());
                 }
             }
             DeviceCmd::SetCustomToggles(toggles) => {

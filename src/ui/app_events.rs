@@ -28,12 +28,19 @@ pub enum OsdEvent {
     /// A custom control built on the Command Lab page, and the side it was just
     /// switched to.
     CustomControl(String, bool),
+    /// A key replayed a Command Lab capture. A capture has no state to show,
+    /// so the card only names it.
+    ReplayCapture(String),
 }
 
 /// How much of a custom control's name the overlay card can hold beside its
 /// state. The name is the user's, so it is trimmed rather than left to run off
 /// the edge of the card.
 const CUSTOM_CONTROL_NAME_LIMIT: usize = 18;
+
+/// A capture's name has the card to itself, so it can run to what a custom
+/// control's name and state take up together.
+const CAPTURE_NAME_LIMIT: usize = 24;
 
 impl OsdEvent {
     pub fn as_params(&self) -> Option<OsdParams> {
@@ -156,6 +163,14 @@ impl OsdEvent {
                 total_steps: 1,
                 active_steps: *enabled as usize,
             }),
+            // The same icon as a custom control, so everything a key does
+            // through Command Lab reads as coming from one place.
+            OsdEvent::ReplayCapture(name) => Some(OsdParams {
+                label: truncate(name, CAPTURE_NAME_LIMIT),
+                icon: Some(OsdIcon::CommandLab),
+                total_steps: 0,
+                active_steps: 0,
+            }),
         }
     }
 }
@@ -265,6 +280,29 @@ mod tests {
             .expect("a custom control has an OSD");
 
         assert_eq!(params.label, "Performance boost… · On");
+    }
+
+    /// The reported bug: a key bound to a capture replayed it with nothing on
+    /// screen, unlike every other action a key can run.
+    #[test]
+    fn a_replayed_capture_names_itself_on_the_command_lab_card() {
+        let params = OsdEvent::ReplayCapture("snap tap on".to_owned())
+            .as_params()
+            .expect("a replayed capture has an OSD");
+
+        assert_eq!(params.label, "snap tap on");
+        assert_eq!(params.icon, Some(OsdIcon::CommandLab));
+        assert_eq!(params.total_steps, 0, "a capture has no state to show");
+    }
+
+    #[test]
+    fn a_long_capture_name_is_trimmed_to_fit_the_card() {
+        let params = OsdEvent::ReplayCapture("a capture name that keeps on going".to_owned())
+            .as_params()
+            .expect("a replayed capture has an OSD");
+
+        assert_eq!(params.label, "a capture name that kee…");
+        assert_eq!(params.label.chars().count(), CAPTURE_NAME_LIMIT);
     }
 
     #[test]
