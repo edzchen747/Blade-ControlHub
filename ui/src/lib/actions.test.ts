@@ -6,6 +6,8 @@ import {
   actionSummary,
   availableActionKinds,
   isCommandLabAction,
+  renamedTarget,
+  strayCommandLabTarget,
   chordLabel,
   defaultActionFor,
   hasActionDetail,
@@ -424,5 +426,103 @@ describe("the action vocabulary", () => {
     expect(hasActionDetail(key)).toBe(true);
     expect(hasActionDetail(macro)).toBe(true);
     expect(key.kind).not.toBe(macro.kind);
+  });
+});
+
+describe("a key binding following its Command Lab target", () => {
+  const capture: KeyAction = { kind: "replay_capture", name: "snap tap on" };
+  const control: KeyAction = { kind: "toggle_custom_control", name: "Snap Tap" };
+
+  // The reported bug: renaming in Command Lab left the key bound to nothing.
+  it("follows a renamed capture", () => {
+    expect(renamedTarget(capture, "replay_capture", "snap tap on", "snap tap engaged")).toEqual({
+      kind: "replay_capture",
+      name: "snap tap engaged",
+    });
+  });
+
+  it("follows a renamed control", () => {
+    expect(renamedTarget(control, "toggle_custom_control", "Snap Tap", "Snap Tap Pro")).toEqual({
+      kind: "toggle_custom_control",
+      name: "Snap Tap Pro",
+    });
+  });
+
+  // Cleared rather than removed: the row keeps its key and label, and shows as
+  // unfinished so the user repoints it.
+  it("clears the target when it was deleted, leaving the row unfinished", () => {
+    const cleared = renamedTarget(capture, "replay_capture", "snap tap on", "");
+
+    expect(cleared).toEqual({ kind: "replay_capture", name: "" });
+    expect(isActionComplete(cleared!)).toBe(false);
+  });
+
+  // A capture and a control may share a name without being the same thing.
+  it("leaves a control alone when a capture of the same name is renamed", () => {
+    const sameName: KeyAction = { kind: "toggle_custom_control", name: "snap tap on" };
+
+    expect(renamedTarget(sameName, "replay_capture", "snap tap on", "renamed")).toBeNull();
+    expect(renamedTarget(capture, "toggle_custom_control", "snap tap on", "renamed")).toBeNull();
+  });
+
+  it("leaves a binding to something else alone", () => {
+    expect(renamedTarget(capture, "replay_capture", "game mode on", "renamed")).toBeNull();
+  });
+
+  it("leaves every other kind of action alone", () => {
+    const others: KeyAction[] = [
+      { kind: "none" },
+      { kind: "toggle_ui" },
+      { kind: "run_command", command: "snap tap on" },
+      { kind: "launch_app", path: "a.exe", args: "", name: "snap tap on" },
+    ];
+
+    for (const action of others) {
+      expect(renamedTarget(action, "replay_capture", "snap tap on", "renamed")).toBeNull();
+    }
+  });
+});
+
+describe("what a Command Lab row's dropdown shows", () => {
+  const captures = ["snap tap off", "snap tap on"];
+  const controls = ["Snap Tap"];
+
+  it("shows nothing extra when the target is on offer", () => {
+    expect(
+      strayCommandLabTarget({ kind: "replay_capture", name: "snap tap on" }, captures, controls),
+    ).toBeNull();
+    expect(
+      strayCommandLabTarget({ kind: "toggle_custom_control", name: "Snap Tap" }, captures, controls),
+    ).toBeNull();
+  });
+
+  // A binding cleared by a delete must read as unchosen, not as bound to
+  // whichever entry the browser happens to show first.
+  it("asks for a choice when the target was cleared", () => {
+    expect(strayCommandLabTarget({ kind: "replay_capture", name: "" }, captures, controls)).toBe(
+      "Choose a capture or control…",
+    );
+  });
+
+  it("names a target that is no longer there", () => {
+    expect(
+      strayCommandLabTarget({ kind: "replay_capture", name: "renamed away" }, captures, controls),
+    ).toBe("renamed away (missing)");
+  });
+
+  // A control and a capture may share a name; a control is looked for among
+  // the controls, so a same-named capture does not make it look present.
+  it("looks for the target among its own kind only", () => {
+    expect(
+      strayCommandLabTarget(
+        { kind: "toggle_custom_control", name: "snap tap on" },
+        captures,
+        controls,
+      ),
+    ).toBe("snap tap on (missing)");
+  });
+
+  it("has nothing to say about other kinds of action", () => {
+    expect(strayCommandLabTarget({ kind: "toggle_ui" }, captures, controls)).toBeNull();
   });
 });

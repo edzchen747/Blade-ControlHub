@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { isActionComplete, isCommandLabAction } from "../actions";
+  import { isActionComplete, isCommandLabAction, strayCommandLabTarget } from "../actions";
   import { store } from "../store.svelte";
   import type { DeviceAction, KeyAction } from "../types";
   import AppPicker from "./AppPicker.svelte";
@@ -42,6 +42,13 @@
     if (action.kind === "replay_capture") return `capture:${action.name}`;
     return "";
   });
+
+  /**
+   * The row's own target when no option matches it: not chosen yet, or gone.
+   * Without an option of its own the browser would show the first entry as if
+   * it were selected, so the row would read as bound to something it is not.
+   */
+  const strayTarget = $derived(strayCommandLabTarget(action, captures, controls));
 
   function chooseCommandLabTarget(value: string): KeyAction {
     const name = value.slice(value.indexOf(":") + 1);
@@ -116,6 +123,9 @@
       aria-label="Command Lab capture or control"
       onchange={(event) => onchange(chooseCommandLabTarget(event.currentTarget.value))}
     >
+      {#if strayTarget}
+        <option value={commandLabValue} disabled>{strayTarget}</option>
+      {/if}
       {#if controls.length > 0}
         <!-- Controls first: a control is the thing a key is usually bound to,
              and a capture is the raw material it is built from. -->

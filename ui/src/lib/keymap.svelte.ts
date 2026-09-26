@@ -7,7 +7,7 @@
 // runtime drops them when it installs the table — so a half-written row is
 // still there after closing the window.
 
-import { NO_ACTION, isActionComplete, normalKeyCode } from "./actions";
+import { NO_ACTION, isActionComplete, normalKeyCode, renamedTarget } from "./actions";
 import * as ipc from "./ipc";
 import type { KeyAction, KeyBinding, KeyBindings } from "./types";
 
@@ -255,6 +255,33 @@ class KeyMap {
   setAction(row: Row, action: KeyAction) {
     row.action = action;
     this.save();
+  }
+
+  /**
+   * Follows a Command Lab capture or control through a rename, or clears the
+   * rows bound to it when it was deleted.
+   *
+   * These rows are the page's working copy and are seeded only once, so this
+   * has to go through them: a write to the config that went around them would
+   * be saved over by the next edit on the Keys page. A cleared row keeps its
+   * key and label and shows as unfinished, so the user decides what it becomes
+   * rather than losing the mapping outright.
+   *
+   * Written at once rather than on the typing debounce: this follows an edit on
+   * another page, and nothing here is being typed.
+   */
+  followCommandLab(kind: "replay_capture" | "toggle_custom_control", from: string, to: string) {
+    let touched = false;
+    for (const row of [...this.razer, ...this.hypershift]) {
+      const next = renamedTarget(row.action, kind, from, to);
+      if (!next) continue;
+      row.action = next;
+      touched = true;
+    }
+    if (!touched) return;
+
+    this.save();
+    this.#flush();
   }
 
   /**

@@ -48,6 +48,45 @@ export function isCommandLabAction(kind: ActionKind): boolean {
 }
 
 /**
+ * The action with a renamed Command Lab target followed through, or its target
+ * cleared when `to` is empty because it was deleted. Returns `null` when the
+ * action does not point at it, so nothing unrelated is rewritten.
+ *
+ * A binding names its capture or control rather than copying it, so without
+ * this a rename in Command Lab would leave the key bound to nothing. A capture
+ * and a control may share a name, so only the kind that was renamed follows.
+ */
+export function renamedTarget(
+  action: KeyAction,
+  kind: "replay_capture" | "toggle_custom_control",
+  from: string,
+  to: string,
+): KeyAction | null {
+  if (action.kind !== "replay_capture" && action.kind !== "toggle_custom_control") return null;
+  if (action.kind !== kind || action.name !== from) return null;
+  return { ...action, name: to };
+}
+
+/**
+ * What a Command Lab row's dropdown shows when none of its options is the row's
+ * own target — not chosen yet, or since deleted or renamed away — or `null`
+ * when the target is on offer.
+ *
+ * Without an option of its own the browser shows the first entry as if it were
+ * selected, so the row would read as bound to something it is not.
+ */
+export function strayCommandLabTarget(
+  action: KeyAction,
+  captures: readonly string[],
+  controls: readonly string[],
+): string | null {
+  if (action.kind !== "replay_capture" && action.kind !== "toggle_custom_control") return null;
+  if (action.name === "") return "Choose a capture or control…";
+  const offered = action.kind === "toggle_custom_control" ? controls : captures;
+  return offered.includes(action.name) ? null : `${action.name} (missing)`;
+}
+
+/**
  * The option a row's action is shown under. A custom control has no option of
  * its own — it is one of the things Command Lab offers — so it reads back as
  * that option rather than leaving the dropdown blank.

@@ -4,6 +4,7 @@
 
   import Section from "../components/Section.svelte";
   import Toggle from "../components/Toggle.svelte";
+  import { keyMap } from "../keymap.svelte";
   import {
     captureToSync,
     followRename,
@@ -225,10 +226,11 @@
 
     if (row.savedAs && row.savedAs !== name) {
       await ipc.removeCommandLabCommand(row.savedAs);
-      // A toggle points at a capture by name, and so does the Dashboard's
-      // hidden list, so a rename has to follow it into both.
+      // A toggle points at a capture by name, and so do the Dashboard's hidden
+      // list and any key bound to it, so a rename has to follow it into each.
       await repointToggles(row.savedAs, name);
       await followHidden("capture", row.savedAs, name);
+      keyMap.followCommandLab("replay_capture", row.savedAs, name);
     }
     await ipc.saveCommandLabCommands(name, $state.snapshot(row.commands));
     row.savedAs = name;
@@ -238,6 +240,7 @@
     if (row.savedAs) {
       await ipc.removeCommandLabCommand(row.savedAs);
       await followHidden("capture", row.savedAs, "");
+      keyMap.followCommandLab("replay_capture", row.savedAs, "");
       await repointToggles(row.savedAs, "");
     }
     rows = rows.filter((candidate) => candidate.id !== row.id);
@@ -354,7 +357,10 @@
   async function removeToggle(toggle: ToggleRow) {
     toggles = toggles.filter((candidate) => candidate.id !== toggle.id);
     await saveToggles();
-    if (toggle.savedName !== "") await followHidden("control", toggle.savedName, "");
+    if (toggle.savedName !== "") {
+      await followHidden("control", toggle.savedName, "");
+      keyMap.followCommandLab("toggle_custom_control", toggle.savedName, "");
+    }
   }
 
   /**
@@ -370,7 +376,11 @@
     const clashes = duplicateToggleNames.has(toggle.name.trim().toLowerCase());
     const followed = followRename(toggle.savedName, toggle.name, clashes);
     toggle.savedName = followed.savedName;
-    if (followed.rename) await followHidden("control", followed.rename.from, followed.rename.to);
+    if (followed.rename) {
+      const { from, to } = followed.rename;
+      await followHidden("control", from, to);
+      keyMap.followCommandLab("toggle_custom_control", from, to);
+    }
   }
 
   /** Carries a line's hidden state on the Dashboard through a rename or delete. */
