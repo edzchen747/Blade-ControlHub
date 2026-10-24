@@ -215,13 +215,131 @@ fn retarget_promotion_y_offset(card: &mut OsdCard, target: f32, now: Instant) {
     card.promotion_y_offset_started_at = Some(now);
 }
 
+/// What `held_keys` says about the key behind an update, as the card it lands
+/// on should remember it: how many presses of that key there have been.
+fn presses_of(identity: Option<u8>) -> u32 {
+    identity.map_or(0, held_keys::press_count)
+}
+
+/// Updates a card where it sits, without bringing it forward.
+///
+/// This is for a key that is merely still held. With two keys held, their
+/// updates alternate; promoting on each would swap the cards back and forth for
+/// as long as both stayed down. Instead each card follows its own key and the
+/// order stays as the last fresh press left it.
+fn refresh_card_in_place(card: &mut OsdCard, params: OsdParams, now: Instant) {
+    card.params = params;
+    card.dirty = true;
+    match card.lifecycle {
+        CardLifecycle::Holding => card.lifecycle_started_at = Some(now),
+        CardLifecycle::FadingOut => {
+            card.lifecycle = CardLifecycle::Holding;
+            card.lifecycle_started_at = Some(now);
+            card.lifecycle_alpha = card.fade_out_start_alpha;
+        }
+        // Mid fade-in or mid swap the card is already heading for Holding,
+        // which starts its hold timer fresh.
+        CardLifecycle::FadingIn | CardLifecycle::Swapping | CardLifecycle::Expired => {}
+    }
+    update_card_window(card.hwnd, card);
+}
+
+/// Brings the card at `index` (not the front) forward, sending the current
+/// front back: the swap animation, shared by a fresh press and by a release
+/// that hands the front to a key still held.
+fn promote_card_to_front(
+    hwnd: HWND,
+    stack: &mut OsdStackState,
+    matching_card_index: usize,
+    params: OsdParams,
+    presses: u32,
+    now: Instant,
+) {
+    let front_final_stack_depth = stack.cards[0].final_stack_depth();
+    let rear_final_stack_depth = stack.cards[1].final_stack_depth();
+    let midpoint_stack_depth = (front_final_stack_depth + rear_final_stack_depth) / 2.0;
+
+    if matching_card_index == 1 {
+        let receding_front_card = &mut stack.cards[0];
+        receding_front_card.lifecycle = CardLifecycle::Swapping;
+        receding_front_card.lifecycle_started_at = Some(now);
+        receding_front_card.is_promoted_during_swap = false;
+        receding_front_card.lifecycle_alpha = TARGET_ALPHA;
+        receding_front_card.stack_depth_transition_duration = FRONT_CARD_MIDPOINT_DURATION;
+        retarget_stack_depth(receding_front_card, midpoint_stack_depth, now);
+        receding_front_card.swap_destination = Some(SwapDestination {
+            hidden_stack_depth: midpoint_stack_depth,
+            final_stack_depth: rear_final_stack_depth,
+        });
+    } else {
+        for card in stack.cards.iter_mut().take(matching_card_index) {
+            if let Some(destination) = card.swap_destination.as_mut() {
+                destination.final_stack_depth += 1.0;
+            } else {
+                retarget_stack_depth(card, card.target_stack_depth + 1.0, now);
+            }
+        }
+    }
+
+    let mut promoted_card = stack.cards.remove(matching_card_index);
+    promoted_card.seen_presses = presses;
+    promoted_card.params = params;
+    promoted_card.dirty = true;
+    promoted_card.lifecycle = CardLifecycle::Swapping;
+    promoted_card.lifecycle_started_at = Some(now);
+    promoted_card.is_promoted_during_swap = true;
+    promoted_card.fade_out_start_alpha = promoted_card.lifecycle_alpha;
+    promoted_card.swap_destination = Some(SwapDestination {
+        hidden_stack_depth: 0.0,
+        final_stack_depth: front_final_stack_depth,
+    });
+    promoted_card.promotion_y_offset = PROMOTED_CARD_Y_OFFSET;
+    promoted_card.promotion_y_offset_target = PROMOTED_CARD_Y_OFFSET;
+    promoted_card.promotion_y_offset_start = PROMOTED_CARD_Y_OFFSET;
+    promoted_card.promotion_y_offset_started_at = None;
+    stack.cards.insert(0, promoted_card);
+
+    let front = &mut stack.cards[0];
+    update_card_window(front.hwnd, front);
+    show_card_window(front.hwnd);
+    ensure_animation_timer(hwnd, stack);
+}
+
+/// A held key was released. If the front card's key is no longer down but
+/// another card's still is, that card takes the front and the released one goes
+/// back, so the stack keeps showing what is still being held.
+fn rebalance_held_cards(hwnd: HWND, stack: &mut OsdStackState) {
+    let is_held = |card: &OsdCard| card.identity.is_some_and(held_keys::is_held);
+    let Some(front) = stack.cards.first() else {
+        return;
+    };
+    if is_held(front) {
+        return;
+    }
+    let Some(index) = stack.cards.iter().skip(1).position(is_held).map(|i| i + 1) else {
+        return;
+    };
+
+    let card = &stack.cards[index];
+    let params = OsdParams {
+        label: card.params.label.clone(),
+        total_steps: card.params.total_steps,
+        active_steps: card.params.active_steps,
+        icon: card.params.icon,
+    };
+    let presses = presses_of(card.identity);
+    promote_card_to_front(hwnd, stack, index, params, presses, Instant::now());
+}
+
 fn handle_osd_params(hwnd: HWND, stack: &mut OsdStackState, params: OsdParams) {
     let requested_kind = params.identity();
+    let presses = presses_of(requested_kind);
 
     if let Some(front) = stack.cards.first_mut()
         && front.identity == requested_kind
     {
         let now = Instant::now();
+        front.seen_presses = presses;
         front.params = params;
         front.dirty = true;
         front.lifecycle = CardLifecycle::Holding;
@@ -248,53 +366,14 @@ fn handle_osd_params(hwnd: HWND, stack: &mut OsdStackState, params: OsdParams) {
     {
         let now = Instant::now();
 
-        let front_final_stack_depth = stack.cards[0].final_stack_depth();
-        let rear_final_stack_depth = stack.cards[1].final_stack_depth();
-        let midpoint_stack_depth = (front_final_stack_depth + rear_final_stack_depth) / 2.0;
-
-        if matching_card_index == 1 {
-            let receding_front_card = &mut stack.cards[0];
-            receding_front_card.lifecycle = CardLifecycle::Swapping;
-            receding_front_card.lifecycle_started_at = Some(now);
-            receding_front_card.is_promoted_during_swap = false;
-            receding_front_card.lifecycle_alpha = TARGET_ALPHA;
-            receding_front_card.stack_depth_transition_duration = FRONT_CARD_MIDPOINT_DURATION;
-            retarget_stack_depth(receding_front_card, midpoint_stack_depth, now);
-            receding_front_card.swap_destination = Some(SwapDestination {
-                hidden_stack_depth: midpoint_stack_depth,
-                final_stack_depth: rear_final_stack_depth,
-            });
-        } else {
-            for card in stack.cards.iter_mut().take(matching_card_index) {
-                if let Some(destination) = card.swap_destination.as_mut() {
-                    destination.final_stack_depth += 1.0;
-                } else {
-                    retarget_stack_depth(card, card.target_stack_depth + 1.0, now);
-                }
-            }
+        let card = &mut stack.cards[matching_card_index];
+        if requested_kind.is_some_and(|kind| held_keys::is_repeat(kind, card.seen_presses)) {
+            refresh_card_in_place(card, params, now);
+            ensure_animation_timer(hwnd, stack);
+            return;
         }
 
-        let mut promoted_card = stack.cards.remove(matching_card_index);
-        promoted_card.params = params;
-        promoted_card.dirty = true;
-        promoted_card.lifecycle = CardLifecycle::Swapping;
-        promoted_card.lifecycle_started_at = Some(now);
-        promoted_card.is_promoted_during_swap = true;
-        promoted_card.fade_out_start_alpha = promoted_card.lifecycle_alpha;
-        promoted_card.swap_destination = Some(SwapDestination {
-            hidden_stack_depth: 0.0,
-            final_stack_depth: front_final_stack_depth,
-        });
-        promoted_card.promotion_y_offset = PROMOTED_CARD_Y_OFFSET;
-        promoted_card.promotion_y_offset_target = PROMOTED_CARD_Y_OFFSET;
-        promoted_card.promotion_y_offset_start = PROMOTED_CARD_Y_OFFSET;
-        promoted_card.promotion_y_offset_started_at = None;
-        stack.cards.insert(0, promoted_card);
-
-        let front = &mut stack.cards[0];
-        update_card_window(front.hwnd, front);
-        show_card_window(front.hwnd);
-        ensure_animation_timer(hwnd, stack);
+        promote_card_to_front(hwnd, stack, matching_card_index, params, presses, now);
         return;
     }
 
@@ -307,10 +386,11 @@ fn handle_osd_params(hwnd: HWND, stack: &mut OsdStackState, params: OsdParams) {
         }
     }
 
-    let Some(card) = create_front_card(params) else {
+    let Some(mut card) = create_front_card(params) else {
         warn!("Failed to create OSD card window; dropping OSD update");
         return;
     };
+    card.seen_presses = presses;
     stack.cards.insert(0, card);
     let front = &mut stack.cards[0];
     update_card_window(front.hwnd, front);
@@ -323,6 +403,7 @@ fn create_front_card(params: OsdParams) -> Option<OsdCard> {
     Some(OsdCard {
         hwnd,
         identity: params.identity(),
+        seen_presses: 0,
         params,
         lifecycle: CardLifecycle::FadingIn,
         lifecycle_started_at: Some(Instant::now()),

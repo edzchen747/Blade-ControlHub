@@ -51,7 +51,15 @@ impl<'a> KeyboardHandler<'a> {
 
 
     pub fn adjust_keyboard_light(&mut self, up: bool) {
-        let level_new = next_keyboard_brightness(self.app_config.read().key_lvl, up);
+        let current = self.app_config.read().key_lvl;
+        let level_new = next_keyboard_brightness(current, up);
+        if level_new == current {
+            // Already at the end of the range. The key is still swallowed and
+            // the overlay still says so, but nothing goes to the EC: a held key
+            // would otherwise write the same level over the bus on every repeat.
+            app(OsdEvent::KeyboardBrightness(current).into());
+            return;
+        }
         self.set_keyboard_brightness(level_new);
     }
 

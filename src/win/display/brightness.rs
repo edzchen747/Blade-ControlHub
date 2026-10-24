@@ -54,10 +54,18 @@ impl BrightnessWorker {
         }
     }
 
-    pub fn adjust_screen_brightness(&self, change: i8) {
-        let current = { SCREEN_TARGET_LVL.load(Ordering::SeqCst) } as i8;
-        let new_val = (current + change).clamp(0, 100) as u8;
+    /// Steps the brightness by `change`. Returns whether the level moved: at
+    /// either end nothing is queued, so a held key does not keep rewriting the
+    /// level it already has. The overlay still reports it.
+    pub fn adjust_screen_brightness(&self, change: i8) -> bool {
+        let current = SCREEN_TARGET_LVL.load(Ordering::SeqCst);
+        let new_val = (current as i8 + change).clamp(0, 100) as u8;
+        if new_val == current {
+            app(OsdEvent::ScreenBrightness(current).into());
+            return false;
+        }
         self.set_screen_brightness(new_val);
+        true
     }
 
     fn worker_loop(rx: Receiver<()>) {

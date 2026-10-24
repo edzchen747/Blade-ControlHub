@@ -165,8 +165,9 @@ impl<'a> Executer<'a> {
                 let _ = tx.send(self.set_fan_speed_for_profile(profile, speed));
             }
             DeviceCmd::AdjustScreenBrightness(change) => {
-                self.brightness_worker.adjust_screen_brightness(change);
-                self.persist_config();
+                if self.brightness_worker.adjust_screen_brightness(change) {
+                    self.persist_config();
+                }
             }
             DeviceCmd::CycleRefreshRate => self.display().cycle_refresh_rate(),
             DeviceCmd::SetRefreshRate(profile, refresh_rate, tx) => {

@@ -25,11 +25,12 @@ use tracing::{debug, warn};
 use crate::razer::device_handle::device;
 use crate::ui::app::app;
 use crate::ui::app_events::{AppEvent, OsdEvent};
+use crate::ui::icons::OsdIcon;
 use crate::win::audio::{self, AudioType};
 use crate::win::input::binding::{
     Chord, DeviceAction, KeyAction, KeyBinding, KeyBindings, MOD_ALT, MOD_CTRL, MOD_SHIFT, MOD_WIN,
 };
-use crate::win::input::key_map::KeyCombo;
+use crate::win::input::key_map::{KeyCombo, Repeat};
 use crate::win::input::trackpad::toggle_trackpad;
 use crate::win::system::launch;
 
@@ -79,6 +80,28 @@ pub fn hypershift(virtual_key: u8) -> Option<KeyAction> {
         .hypershift
         .get(&u16::from(virtual_key))
         .cloned()
+}
+
+/// Whether a bound action should keep running while its key is held, even once
+/// another key has been pressed. Only the stepped controls do: repeating a
+/// toggle or a cycle would flicker it, not adjust it.
+pub fn repeat_of(action: &KeyAction) -> Option<Repeat> {
+    let KeyAction::Device { action } = action else {
+        return None;
+    };
+    let osd_kind = match action {
+        DeviceAction::ScreenBrightnessUp | DeviceAction::ScreenBrightnessDown => {
+            OsdIcon::Brightness
+        }
+        DeviceAction::KeyboardLightUp | DeviceAction::KeyboardLightDown => {
+            OsdIcon::KeyboardBrightness
+        }
+        _ => return None,
+    }
+    .kind_key();
+    Some(Repeat {
+        osd_kind: Some(osd_kind),
+    })
 }
 
 /// Whether input is currently being synthesized by a binding of our own.

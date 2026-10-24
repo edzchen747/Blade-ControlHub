@@ -12,7 +12,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::core::shared_state::{ALT_PRESSED, FN_PRESSED, SHIFT_PRESSED};
-use crate::win::input::{custom_bindings, key_map::KEY_MAP, vkey};
+use crate::win::input::{custom_bindings, key_map::KEY_MAP, key_repeat, vkey};
 
 const VK_SHIFT: u8 = 0x10;
 const VK_LSHIFT: u8 = 0xA0;
@@ -38,6 +38,8 @@ impl KeyHook {
             return;
         }
 
+        key_repeat::start(handle_key_press);
+
         match thread::Builder::new()
             .name("blade-keyboard-hook".to_string())
             .spawn(run_keyboard_hook)
@@ -45,6 +47,7 @@ impl KeyHook {
             Ok(handle) => *key_hook_thread() = Some(handle),
             Err(error) => {
                 KEY_HOOK_RUNNING.store(false, Ordering::SeqCst);
+                key_repeat::stop();
                 error!(%error, "Failed to start keyboard hook thread");
             }
         }
@@ -61,6 +64,7 @@ impl KeyHook {
             let _ = unsafe { PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0)) };
         }
         join_key_hook_thread();
+        key_repeat::stop();
     }
 }
 
@@ -181,12 +185,18 @@ fn handle_key_event(key_code: u8, pressed: bool) -> bool {
     }
 
     if !pressed {
+        key_repeat::release(key_code);
         return false;
     }
 
     handle_key_press(key_code)
 }
 
+/// Runs what a key press means, and says whether the key was consumed.
+///
+/// Also the entry point for `key_repeat`, which calls it again for a key that
+/// is still held but that Windows has stopped repeating, so a held key goes
+/// through exactly the checks a new press does.
 fn handle_key_press(key_code: u8) -> bool {
     // Hypershift: a key held with Fn. The lookup is by raw virtual-key code,
     // so any key can be bound without `vkey::Key` having to name it. A bound
@@ -199,13 +209,30 @@ fn handle_key_press(key_code: u8) -> bool {
         && !custom_bindings::is_synthesizing()
         && let Some(action) = custom_bindings::hypershift(key_code)
     {
+        if let Some(repeat) = custom_bindings::repeat_of(&action) {
+            key_repeat::press(key_code, repeat);
+        }
         custom_bindings::run(action);
         return true;
     }
 
-    KEY_MAP
-        .get(&vkey::Key::from(key_code))
-        .is_some_and(|event_action| event_action.execute())
+    let Some(event_action) = KEY_MAP.get(&vkey::Key::from(key_code)) else {
+        // Not ours any more: a key that was being repeated and no longer
+        // resolves to anything must stop, not carry on.
+        key_repeat::release(key_code);
+        return false;
+    };
+
+    // Registered before the action runs so the overlay it raises already sees
+    // this as a new press rather than a held key.
+    if let Some(repeat) = event_action.repeat() {
+        key_repeat::press(key_code, repeat);
+    }
+    let consumed = event_action.execute();
+    if !consumed {
+        key_repeat::release(key_code);
+    }
+    consumed
 }
 
 fn update_shift_state(mask: u8, pressed: bool) {

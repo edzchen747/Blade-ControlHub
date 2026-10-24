@@ -4,6 +4,7 @@ pub mod custom_bindings;
 pub mod hidapi;
 pub mod key_hook;
 pub mod key_map;
+pub mod key_repeat;
 pub mod trackpad;
 pub mod vkey;
 

@@ -14,6 +14,7 @@ use windows::{
     core::PCWSTR,
 };
 
+use crate::core::held_keys;
 use crate::ui::icons::OsdIcon;
 
 static OSD_INSTANCE: OnceLock<Option<OsdController>> = OnceLock::new();
@@ -22,6 +23,7 @@ static OSD_THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
 const WM_TRIGGER_OSD: u32 = WM_USER + 1;
 const WM_STOP_OSD: u32 = WM_USER + 2;
+const WM_REBALANCE_OSD: u32 = WM_USER + 3;
 const OSD_EX_STYLE: WINDOW_EX_STYLE = WINDOW_EX_STYLE(
     WS_EX_TOPMOST.0
         | WS_EX_TOOLWINDOW.0
@@ -73,6 +75,10 @@ struct SwapDestination {
 struct OsdCard {
     hwnd: HWND,
     identity: Option<u8>,
+    /// How many presses of this card's key there had been when it last took the
+    /// front. A later count means the key was pressed again; the same count with
+    /// the key still down means it is only being held.
+    seen_presses: u32,
     params: OsdParams,
     lifecycle: CardLifecycle,
     lifecycle_started_at: Option<Instant>,
@@ -175,6 +181,17 @@ impl OsdController {
         post_osd_update(controller.hwnd, params);
     }
 
+    /// Tells the stack a held key was released, so it can hand the front card to
+    /// a key that is still down. Does nothing if no overlay was ever shown.
+    pub fn held_keys_changed() {
+        if !OSD_RUNNING.load(Ordering::SeqCst) {
+            return;
+        }
+        if let Some(Some(controller)) = OSD_INSTANCE.get() {
+            let _ = unsafe { PostMessageW(controller.hwnd, WM_REBALANCE_OSD, WPARAM(0), LPARAM(0)) };
+        }
+    }
+
     pub fn stop() {
         OSD_RUNNING.store(false, Ordering::SeqCst);
 
@@ -252,6 +269,11 @@ impl OsdController {
                             }
                         });
                     }
+                    return LRESULT(0);
+                }
+
+                WM_REBALANCE_OSD => {
+                    with_osd_stack(|stack| rebalance_held_cards(hwnd, stack));
                     return LRESULT(0);
                 }
 

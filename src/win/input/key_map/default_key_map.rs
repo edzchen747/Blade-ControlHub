@@ -73,7 +73,8 @@ pub static KEY_MAP: Lazy<HashMap<vkey::Key, KeyEventAction>> = Lazy::new(|| {
                     Source::IsXOR(&PRIMARY_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
-            ),
+            )
+            .repeating(None),
         ),
         (
             vkey::Key::F3,
@@ -85,7 +86,8 @@ pub static KEY_MAP: Lazy<HashMap<vkey::Key, KeyEventAction>> = Lazy::new(|| {
                     Source::IsXOR(&PRIMARY_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
-            ),
+            )
+            .repeating(None),
         ),
         (
             vkey::Key::F4,
@@ -145,7 +147,8 @@ pub static KEY_MAP: Lazy<HashMap<vkey::Key, KeyEventAction>> = Lazy::new(|| {
                     Source::IsXOR(&PRIMARY_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
-            ),
+            )
+            .repeating(Some(OsdIcon::Brightness.kind_key())),
         ),
         (
             vkey::Key::F9,
@@ -157,7 +160,8 @@ pub static KEY_MAP: Lazy<HashMap<vkey::Key, KeyEventAction>> = Lazy::new(|| {
                     Source::IsXOR(&PRIMARY_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
-            ),
+            )
+            .repeating(Some(OsdIcon::Brightness.kind_key())),
         ),
         (
             vkey::Key::F10,
@@ -169,7 +173,8 @@ pub static KEY_MAP: Lazy<HashMap<vkey::Key, KeyEventAction>> = Lazy::new(|| {
                     Source::IsXOR(&PRIMARY_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
-            ),
+            )
+            .repeating(Some(OsdIcon::KeyboardBrightness.kind_key())),
         ),
         (
             vkey::Key::F11,
@@ -181,7 +186,8 @@ pub static KEY_MAP: Lazy<HashMap<vkey::Key, KeyEventAction>> = Lazy::new(|| {
                     Source::IsXOR(&PRIMARY_MULTIMEDIA_KEYS, &FN_PRESSED),
                     Source::IsFalse(&ALT_PRESSED),
                 ],
-            ),
+            )
+            .repeating(Some(OsdIcon::KeyboardBrightness.kind_key())),
         ),
         (
             vkey::Key::F12,
