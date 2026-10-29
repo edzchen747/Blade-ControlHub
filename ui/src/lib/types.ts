@@ -138,6 +138,8 @@ export interface UiMeta {
    * of them: what one does is whatever the user bound it to.
    */
   built_in_hypershift: Record<number, string>;
+  /** Whether the keyboard firmware reports a special key held that is not. */
+  razer_keys_stuck: boolean;
 }
 
 export interface UiState {

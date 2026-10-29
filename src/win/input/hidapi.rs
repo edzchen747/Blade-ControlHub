@@ -6,7 +6,10 @@ use crate::{
     config,
     core::shared_state::FN_PRESSED,
     error::{AppError, AppResult},
-    win::input::custom_bindings,
+    win::input::{
+        custom_bindings,
+        stuck_keys::{self, StuckKeyDetector},
+    },
 };
 use hidapi::{HidApi, HidDevice};
 use tracing::{debug, info, warn};
@@ -93,6 +96,9 @@ impl HidApiListener {
         HID_LISTENERS_RUNNING.store(false, Ordering::SeqCst);
         FN_PRESSED.store(false, Ordering::SeqCst);
         join_hid_listener_threads();
+        // After the join, so a listener still finishing a report cannot set it
+        // again behind the reset.
+        stuck_keys::reset();
     }
 
     fn spawn_special_key_listener_thread(
@@ -143,11 +149,15 @@ fn interface_is_readable_or_not_denied(read_result: hidapi::HidResult<usize>) ->
 
 fn run_special_key_listener(device_api: HidDevice, iface_num: i32, path: String) {
     let mut buf = [0u8; HID_READ_BUFFER_LEN];
+    let mut stuck_keys = StuckKeyDetector::default();
     while HID_LISTENERS_RUNNING.load(Ordering::SeqCst) {
         match device_api.read_timeout(&mut buf, HID_READ_TIMEOUT_MS) {
             Ok(0) => continue,
             Ok(len) => match parse_special_key_report(&buf[..len]) {
-                SpecialKeyReport::KeyCode(key_code) => handle_razer_special_key(key_code),
+                SpecialKeyReport::KeyCode(key_code) => {
+                    stuck_keys.observe(&buf[..len]);
+                    handle_razer_special_key(key_code);
+                }
                 SpecialKeyReport::TooShort { len } => {
                     warn!(
                         interface = iface_num,

@@ -16,7 +16,7 @@ use crate::razer::enums::{BATTERY_LIMITS, BatteryLimit, PERF_MODES, PerfMode, RG
 use crate::runtime::settings_state::SettingsState;
 use crate::ui::theme::perf_mode_hex_color;
 use crate::win::input::binding::available_device_actions;
-use crate::win::input::builtin_meta;
+use crate::win::input::{builtin_meta, stuck_keys};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct UiState {
@@ -48,6 +48,10 @@ pub struct UiMeta {
     /// override hint. Razer's special keys have no built-in action to
     /// override, so there is nothing to describe for them.
     pub built_in_hypershift: BTreeMap<u16, String>,
+    /// Whether the keyboard firmware is reporting a special key as held that
+    /// is not. Until the laptop restarts, the special keys and Fn misbehave,
+    /// and the Keys page says so.
+    pub razer_keys_stuck: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -110,6 +114,7 @@ impl UiMeta {
                 .map(|action| (variant_key(action), action.label().to_owned()))
                 .collect(),
             built_in_hypershift: builtin_meta::hypershift_labels(),
+            razer_keys_stuck: stuck_keys::is_stuck(),
         }
     }
 }

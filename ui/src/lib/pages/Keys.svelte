@@ -12,6 +12,7 @@
 
   const deviceLabels = $derived(store.state?.meta.device_action_labels ?? {});
   const builtInHypershift = $derived(store.state?.meta.built_in_hypershift ?? {});
+  const razerKeysStuck = $derived(store.state?.meta.razer_keys_stuck ?? false);
 
   /** Cleared once the Hypershift section has scrolled out of view. */
   let hypershiftVisible = $state(true);
@@ -70,6 +71,16 @@
   title="Razer special keys"
   hint="Every special key on the laptop — M1–M4, Copilot, mic, trackpad, performance, and whatever else this model has — does what you map it to here, and nothing until then. Press a key on the laptop while a row is listening; Esc cancels."
 >
+  {#if razerKeysStuck}
+    <!-- Nothing on this page can fix it, and every symptom it causes looks
+         like a broken mapping, so it is said before the table. -->
+    <p class="field-error" role="alert">
+      The keyboard is reporting a special key as held down when it is not. Until the
+      laptop is restarted, special keys may run the wrong action or run twice, a key
+      being captured may be taken as that one, and Fn may not register.
+    </p>
+  {/if}
+
   <div class="table" role="table" aria-label="Razer special key mappings">
     <div class="head" role="row">
       <span role="columnheader">Label</span>
